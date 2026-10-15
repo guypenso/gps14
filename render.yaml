@@ -1,0 +1,53 @@
+# REVIEW ONLY: applying this Blueprint creates PAID resources.
+services:
+  - type: cron
+    name: rentalsourcing-daily
+    runtime: python
+    plan: starter
+    region: virginia
+    schedule: "0 12,13 * * *"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m rentalsourcing.cloud --scheduled"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: APP_ENV
+        value: "production"
+      - key: MAX_API_REQUESTS_TOTAL
+        value: "40"
+      - key: ENABLE_RENTCAST
+        value: "false"
+      - key: ENABLE_EMAIL
+        value: "false"
+      - key: RENTCAST_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rentalsourcing-db
+          property: connectionString
+      - key: CITY_BOUNDARY_FILE
+        value: data/pittsburgh.geojson
+      - key: CITY_BOUNDARY_SOURCE
+        value: https://data.wprdc.org/dataset/pittsburgh-city-boundary
+      - key: MAX_API_REQUESTS_PER_RUN
+        value: "4"
+      - key: MAX_API_REQUESTS_PER_DAY
+        value: "4"
+      - key: MAX_API_REQUESTS_PER_MONTH
+        value: "40"
+      - key: LISTING_LIMIT
+        value: "20"
+      - key: MAX_LISTING_PAGES
+        value: "1"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_TO
+        sync: false
+databases:
+  - name: rentalsourcing-db
+    plan: 0.1c-256mb
+    region: virginia
+    diskSizeGB: 5
+    ipAllowList: []
