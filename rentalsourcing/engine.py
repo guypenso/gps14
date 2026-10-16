@@ -138,6 +138,11 @@ class Engine:
                     if tax_verification(record,self.clock().date())[0]=='Pending Verification':
                         expires=min(expires,self.clock()+dt.timedelta(hours=6))
                     store.save_tax(identity,record,source,fetched,expires.isoformat())
+                # Cached records need the same identity/demo checks as transport
+                # records; a mismatched cache must never approve a property.
+                if not isinstance(record,dict) or record.get('id')!=identity or demo_marked(record):
+                    store.set_verification(identity,'Pending Verification',['tax_identity_or_source_mismatch'])
+                    continue
                 state,tax,reason=tax_verification(record,self.clock().date())
                 if source!=LIVE:state,tax,reason='Pending Verification',None,'non_live_tax_source'
                 with store.transaction():

@@ -1,6 +1,6 @@
 # Final launch validation — 2026-10-16
 
-188 passed, 3 skipped against Python 3.12 + actual local PostgreSQL 17.11 and SQLite.
+190 passed, 3 skipped against Python 3.12 + actual local PostgreSQL 17.11 and SQLite.
 The three skips are SQLite variants of PostgreSQL-only lock/concurrency checks;
 the PostgreSQL variants passed. Provider requests are blocked/mocked throughout tests.
 No additional live RentCast request or real email was sent in this launch cycle.

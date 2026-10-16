@@ -64,3 +64,13 @@ def test_unseen_stale_backlog_remains_pending_and_never_qualifies(store,boundary
     assert store.execute('SELECT done FROM scan_tasks WHERE job_id=?',('daily:second',)).fetchone()[0]==0
     # A tax-only backlog must not prevent tomorrow's fresh listing collection.
     assert scheduled_job(store,'2026-10-19')=='daily:2026-10-19'
+
+
+def test_cached_tax_identity_is_verified_before_approval(store,boundary,settings,clock):
+    import datetime as dt
+    store.save_tax('expected',taxes('different'),'rentcast-live',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
+    provider=Provider([listing('expected')])
+    result=run(store,boundary,settings,clock,provider,'daily:identity')
+    assert result['partial'] and provider.tax_calls==0
+    assert store.get_property('expected')['state']=='Pending Verification'
+    assert store.get_property('expected')['reasons']==['tax_identity_or_source_mismatch']
