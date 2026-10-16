@@ -34,6 +34,8 @@ def main(argv=None):
     group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
     group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
     group.add_argument('--prepare-test-email',action='store_true',help='Prepare a delivery test without sending or consuming property events')
+    group.add_argument('--inspect-email',metavar='OUTBOX_ID',help='Inspect sanitized stored request and rejection; no send')
+    group.add_argument('--replace-rejected-test',metavar='OUTBOX_ID',help='Prepare replacement only for confirmed rejected delivery test')
     group.add_argument('--email-status',metavar='OUTBOX_ID',help='Read Resend delivery status; no send')
     parser.add_argument('--email-day',help='Preparation target Israeli date YYYY-MM-DD')
     group.add_argument('--resume',metavar='JOB_ID',help='Resume persisted scan with the same cursor/tasks')
@@ -57,7 +59,7 @@ def main(argv=None):
     if args.scheduled or args.scheduled_email:
         day=scheduled_day()
         if day is None:event('outside_israel_schedule');return
-    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email
+    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
     validate_postgres_url(url)
@@ -79,6 +81,8 @@ def main(argv=None):
               outbox=store.execute('SELECT id,state,provider_id FROM outbox ORDER BY updated_at DESC LIMIT 10').fetchall(),
               operations=store.operations());return
         digest=Digest(store,boundary,settings)
+        if args.inspect_email:event('email_request_inspected',**digest.inspect_request(args.inspect_email));return
+        if args.replace_rejected_test:event('test_email_replaced',outbox_id=digest.replace_rejected_test(args.replace_rejected_test));return
         if args.prepare_test_email:event('test_email_prepared',outbox_id=digest.prepare_test());return
         if args.email_status:event('email_delivery',**digest.delivery_status(args.email_status));return
         if args.prepare_email or args.scheduled_email:
