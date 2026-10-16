@@ -101,6 +101,8 @@ def main(argv=None):
         stats=PocEngine(store,boundary,client,s).run(args.job_id,dt.date.today().isoformat(),candidate_limit=3,first_page_only=True)
         result=report(store,boundary,args.job_id,stats)
         result['attempts_this_run']=client.count;result['cache_hits_this_run']=client.cache_hits
+        result['attempts_under_approval']=store.count_usage('approval:'+s.approval_id)
+        result['approved_attempts']=s.approved_requests
         print(json.dumps(result,ensure_ascii=False,indent=2))
     finally:store.close()
 

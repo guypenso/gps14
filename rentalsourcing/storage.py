@@ -9,7 +9,7 @@ class Store:
         self.pg = url.startswith(('postgres://', 'postgresql://'))
         if self.pg:
             import psycopg
-            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15)
+            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15, client_encoding='utf8')
         elif url.startswith('sqlite:///'):
             self.db = sqlite3.connect(url[len('sqlite:///'):], isolation_level=None)
         else: raise ValueError('DATABASE_URL must be PostgreSQL or local sqlite:/// path')

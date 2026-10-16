@@ -7,5 +7,3 @@ __pycache__/
 *.db
 *.sqlite*
 .venv/
-data/pittsburgh.geojson
-data/pittsburgh.source.json
