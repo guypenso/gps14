@@ -41,7 +41,8 @@ def diagnose(error):
         stage = 'unknown'
     return dict(errorType=type(error).__module__ + '.' + type(error).__name__,
                 reasonType=type(reason).__module__ + '.' + type(reason).__name__,
-                reason=message, stage=stage, errno=getattr(reason, 'errno', None))
+                reason=message, stage=stage, errno=getattr(reason, 'errno', None),
+                http_status=error.code if isinstance(error,urllib.error.HTTPError) else None)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

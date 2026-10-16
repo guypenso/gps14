@@ -21,7 +21,7 @@ class Client:
         self.store=store;self.settings=settings or Settings.from_env()
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
-        self.sleep=sleep;self.count=0;self.cache_hits=0;self.last_fetched_at=None
+        self.sleep=sleep;self.count=0;self.cache_hits=0;self.last_fetched_at=None;self.last_error=None
 
     def get(self,path,params=None,cache=True):
         if path!='/listings/sale' and not path.startswith('/properties/'):
@@ -56,7 +56,18 @@ class Client:
                 event('rentcast_success',endpoint=path.split('/')[1],attempts=self.count)
                 return self.wrap(data),total
             except Exception as exc:
-                event('rentcast_failure',**diagnose(exc))
+                self.last_error=diagnose(exc)
+                if isinstance(exc,urllib.error.HTTPError):
+                    # Do not log raw bodies: an upstream proxy can echo credentials.
+                    try:
+                        body=exc.read(4096).decode('utf-8',errors='replace').lower()
+                        self.last_error['body_category']=('billing' if 'billing/subscription' in body else
+                            'proxy_policy' if any(word in body for word in ('egress','proxy policy','destination is not allowed')) else
+                            'authentication' if any(word in body for word in ('invalid api key','unauthorized api key')) else 'unclassified')
+                    except Exception:self.last_error['body_category']='unavailable'
+                    finally:exc.close()
+                self.store.operation('provider-error:'+self.clock().isoformat(),'RentCast request failed: '+str(self.last_error.get('http_status') or self.last_error['stage'])+'. No credentials recorded.')
+                event('rentcast_failure',**self.last_error)
                 retryable=(isinstance(exc,urllib.error.HTTPError) and exc.code in {429,500,502,503,504}) or \
                     (isinstance(exc,(urllib.error.URLError,TimeoutError)) and not isinstance(exc,urllib.error.HTTPError))
                 if not retryable or attempt==self.settings.retries:raise

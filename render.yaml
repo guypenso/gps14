@@ -1,34 +1,20 @@
-# Creating this Blueprint provisions PAID resources; user approval is required first.
-services:
-  - type: cron
-    name: rentalsourcing-daily
-    runtime: python
-    plan: starter
-    region: virginia
-    schedule: "0 12,13 * * *"
-    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
-    startCommand: "python -m rentalsourcing.cloud --scheduled"
+# REVIEW BEFORE APPLY: Web + Cron + PostgreSQL are PAID resources.
+# No resources are created by committing this file. Provider calls default to disabled.
+envVarGroups:
+  - name: rentalsourcing-runtime
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.10"
       - key: APP_ENV
         value: production
-      - key: ENABLE_RENTCAST
-        value: "false"
-      - key: ENABLE_EMAIL
-        value: "false"
+      - key: CITY_BOUNDARY_FILE
+        value: data/pittsburgh.geojson
+      - key: API_APPROVAL_MODE
+        value: one_time
       - key: API_APPROVAL_ID
         value: ""
       - key: APPROVED_API_REQUESTS
         value: "0"
-      - key: RENTCAST_API_KEY
-        sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: rentalsourcing-db
-          property: connectionString
-      - key: CITY_BOUNDARY_FILE
-        value: data/pittsburgh.geojson
       - key: MAX_API_REQUESTS_PER_RUN
         value: "4"
       - key: MAX_API_REQUESTS_PER_DAY
@@ -38,7 +24,7 @@ services:
       - key: BILLING_DAY
         value: "1"
       - key: LISTING_LIMIT
-        value: "500"
+        value: "100"
       - key: MAX_LISTING_PAGES
         value: "20"
       - key: TAX_CACHE_HOURS
@@ -49,12 +35,51 @@ services:
         value: "30"
       - key: NETWORK_RETRIES
         value: "0"
+services:
+  - type: web
+    name: rentalsourcing-dashboard
+    runtime: python
+    plan: starter
+    region: virginia
+    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
+    startCommand: "sh scripts/start_web.sh"
+    healthCheckPath: /healthz
+    envVars:
+      - fromGroup: rentalsourcing-runtime
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rentalsourcing-db
+          property: connectionString
+      - key: DASHBOARD_USERNAME
+        value: owner
+      - key: DASHBOARD_PASSWORD
+        generateValue: true
+  - type: cron
+    name: rentalsourcing-daily
+    runtime: python
+    plan: starter
+    region: virginia
+    schedule: "0 12,13 * * *"
+    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
+    startCommand: "python -m rentalsourcing.cloud --scheduled"
+    envVars:
+      - fromGroup: rentalsourcing-runtime
+      - key: ENABLE_RENTCAST
+        value: "false"
+      - key: ENABLE_EMAIL
+        value: "false"
+      - key: RENTCAST_API_KEY
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
         sync: false
       - key: EMAIL_TO
         sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rentalsourcing-db
+          property: connectionString
 databases:
   - name: rentalsourcing-db
     plan: 0.1c-256mb

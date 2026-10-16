@@ -23,3 +23,18 @@ The POC extension was validated with **105 passed, 1 skipped** against SQLite an
 The added tests verify exact URL decoding, plan-only execution, one listing page, a maximum of three
 unique tax candidates across resumes, complete initial counts, source/year/amount report fields,
 unknown coverage and absent listing links. No real RentCast/Resend requests were made.
+
+## Production dashboard and launch acceptance
+
+- Full suite with local PostgreSQL: **137 passed, 1 skipped** (SQLite variant of the PostgreSQL-only lock test).
+- Gunicorn with two workers was exercised over real loopback HTTP against the persisted PostgreSQL volume.
+  Dashboard, JSON API, email-preview and health routes returned 200. Readiness correctly returned 503
+  when official city geometry was unavailable. The database contained one genuine failed acceptance scan,
+  one counted RentCast attempt and zero received properties; no test properties were put in this database.
+- Authentication, escaped output, security headers, no-provider-on-refresh, stale-data downgrades,
+  recurring allowance across billing boundaries and a 95-day daily allocation were verified locally.
+- Actual RentCast acceptance: one authorized attempt returned HTTPError / Forbidden, with no listing body.
+  No automatic retry and no tax requests were made. No claim of successful live collection is made.
+- Actual public GIS download: denied at proxy CONNECT (403), without a fake boundary fallback.
+- Resend is tested with controlled responses only; no real message was sent and no Resend key was available.
+- No Render resource was created. The new Web + Cron + PostgreSQL Blueprint requires payment approval.
