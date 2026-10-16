@@ -116,3 +116,14 @@ def test_preview_is_read_only_and_never_sends(web,store):
 def test_weak_dashboard_password_prevents_start(monkeypatch,store):
     monkeypatch.setenv('DASHBOARD_PASSWORD','weak')
     with pytest.raises(ValueError,match='20'):create_app(store.test_url,testing=True)
+
+
+def test_missing_price_after_historical_reduction_stays_pending_not_server_error(web,store,boundary,clock,settings):
+    provider=ingest(store,boundary,clock,settings,[listing(history={'2026-10-01':{'price':190000}})])
+    prior=store.get_property('fixture-property')
+    row=dict(prior['payload'],price=None)
+    store.save_property(row['id'],row,'Pending Verification',['price'],'rentcast-live',prior['revision'],clock().isoformat())
+    response=web.get('/api/dashboard',headers=HEADERS)
+    assert response.status_code==200
+    item=response.get_json()['properties'][0]
+    assert item['state']=='Pending Verification' and item['price_reduction'] is False

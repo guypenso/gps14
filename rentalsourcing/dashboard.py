@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from flask import Flask,jsonify,render_template,request,Response
 from .collector import LIVE
-from .core import verification,tax_verification,demo_marked
+from .core import verification,tax_verification,demo_marked,number
 from .digest import render as render_digest
 from .geography import load_boundary
 from .poc import safe_listing_link
@@ -68,9 +68,9 @@ def snapshot(store,boundary,now):
         if state!='Qualified':
             for reason in reasons:failures[reason]=failures.get(reason,0)+1
         history=histories.get(identity,[])
-        reduced=bool(history and history[0]['reduced']);previous=history[0]['previous_price'] if history else None
+        reduced=bool(history and history[0]['reduced'] and number(p.get('price')) and history[0]['price']==p['price']);previous=history[0]['previous_price'] if history else None
         ev=reductions.get(identity)
-        if not reduced and ev and ev[0]==revision and ev[1] and ev[1]>p.get('price',0):
+        if not reduced and ev and ev[0]==revision and number(ev[1]) and number(p.get('price')) and ev[1]>p['price']:
             reduced=True;previous=ev[1]
         items.append(dict(id=identity,address=p.get('formattedAddress') or 'כתובת חסרה',price=p.get('price'),bedrooms=p.get('bedrooms'),
           bathrooms=p.get('bathrooms'),squareFootage=p.get('squareFootage'),zipCode=p.get('zipCode'),state=state,label=LABELS[state],
