@@ -2,7 +2,10 @@
 .env.*
 !.env.example
 __pycache__/
+.pytest_cache/
 *.pyc
 *.db
 *.sqlite*
 .venv/
+data/pittsburgh.geojson
+data/pittsburgh.source.json

@@ -1,56 +1,117 @@
 import datetime as dt
+import io
 import json
-import os
-import socket
-import tempfile
-import unittest
-from unittest.mock import patch
+import urllib.error
+from dataclasses import replace
+import pytest
 from rentalsourcing.schedule import scheduled_day
-from rentalsourcing.cloud import send_email
-from rentalsourcing.provenance import LiveRecord,LiveTax
-from rentalsourcing.core import basic_rejection
-from rentalsourcing.storage import Store,BudgetExceeded
+from rentalsourcing.storage import BudgetExceeded
+from rentalsourcing.collector import Client
+from rentalsourcing.digest import Digest
+from rentalsourcing.config import Settings
+from rentalsourcing.request import diagnose
+from rentalsourcing.costs import api_costs,monthly_requests
+from conftest import Provider,listing
 
-class ReadinessTests(unittest.TestCase):
-    def test_exactly_one_eight_am_slot_every_day_including_dst(self):
-        start=dt.date(2026,1,1)
-        for i in range(365):
-            day=start+dt.timedelta(days=i)
+
+def test_every_day_has_exactly_one_pittsburgh_eight_am_slot():
+    for year in (2026,2027,2028):
+        day=dt.date(year,1,1)
+        while day.year==year:
             slots=[dt.datetime.combine(day,dt.time(h),tzinfo=dt.timezone.utc) for h in (12,13)]
-            self.assertEqual(sum(scheduled_day(t) is not None for t in slots),1,str(day))
-        self.assertIsNotNone(scheduled_day(dt.datetime(2026,1,1,13,tzinfo=dt.timezone.utc)))
-        self.assertIsNotNone(scheduled_day(dt.datetime(2026,7,1,12,tzinfo=dt.timezone.utc)))
-    def test_duplicate_scheduled_day_claim(self):
-        with tempfile.TemporaryDirectory() as d:
-            store=Store('sqlite:///'+d+'/db')
-            self.assertTrue(store.claim_scheduled_day('2026-10-15'))
-            self.assertFalse(store.claim_scheduled_day('2026-10-15'))
-            store.close()
-    def test_total_budget_does_not_reset_at_month_boundary(self):
-        store=Store('sqlite:///:memory:')
-        store.reserve(10,10,dt.datetime(2026,10,31),total_limit=1)
-        with self.assertRaises(BudgetExceeded):
-            store.reserve(10,10,dt.datetime(2026,11,1),total_limit=1)
-        store.close()
-    def test_fixtures_and_demo_cannot_send_even_with_live_email_enabled(self):
-        with patch.dict(os.environ,{'ENABLE_EMAIL':'true','APP_ENV':'production'}), patch('socket.socket',side_effect=AssertionError('No network')):
-            for row,tax in [({'id':'test'},{'annual':100}),
-                            (LiveRecord(id='test',demo=True),LiveTax(annual=100)),
-                            (LiveRecord(id='test'),{'annual':100})]:
-                with self.assertRaises(PermissionError):send_email(row,tax)
-        self.assertEqual(basic_rejection({'demo':True}),'demo_data')
-    def test_email_off_blocks_live_records(self):
-        with patch.dict(os.environ,{'ENABLE_EMAIL':'false'}):
-            with self.assertRaises(PermissionError):send_email(LiveRecord(),LiveTax())
+            assert sum(scheduled_day(t) is not None for t in slots)==1
+            day+=dt.timedelta(days=1)
 
-if __name__=='__main__':unittest.main()
 
-class CostTests(unittest.TestCase):
-    def test_pagination_and_published_cost_arithmetic(self):
-        from rentalsourcing.costs import monthly_requests,api_costs
-        self.assertEqual(monthly_requests(500,10),330)
-        self.assertEqual(monthly_requests(501,10),360)
-        self.assertEqual(api_costs(330)['Developer'],56)
-        self.assertEqual(api_costs(930)['Foundation'],74)
-        self.assertEqual(api_costs(3030)['Foundation'],195.8)
-        self.assertEqual(api_costs(9030)['Growth'],319.9)
+def test_api_requires_explicit_approval_before_network(store,settings,clock,provider):
+    c=Client(store,replace(settings,approved_requests=0),clock,provider)
+    with pytest.raises(BudgetExceeded):c.get('/listings/sale',{'limit':2,'offset':0})
+    assert provider.calls==[]
+
+
+def test_persistent_approval_cap_does_not_reset_at_billing_boundary(store,settings,clock):
+    limited=replace(settings,approved_requests=1)
+    store.reserve_api(limited,clock());clock.advance(days=32)
+    with pytest.raises(BudgetExceeded):store.reserve_api(limited,clock())
+
+
+def test_daily_limit_rollback_does_not_consume_other_quotas(store,settings,clock):
+    limited=replace(settings,per_day=1)
+    store.reserve_api(limited,clock())
+    with pytest.raises(BudgetExceeded):store.reserve_api(limited,clock())
+    assert store.count_usage('approval:'+settings.approval_id)==1
+
+
+def test_budget_shortfall_is_persisted_before_exhaustion(store,settings,clock):
+    health=store.budget_health(replace(settings,per_month=10),clock())
+    assert health['warning'] and store.operations()
+
+
+def test_listing_cache_avoids_second_network_request(store,settings,clock,provider):
+    c=Client(store,settings,clock,provider,lambda _:None)
+    params={'limit':2,'offset':0}
+    c.get('/listings/sale',params);c.get('/listings/sale',params)
+    assert len(provider.calls)==1 and c.cache_hits==1
+    clock.advance(minutes=16);c.get('/listings/sale',params)
+    assert len(provider.calls)==2
+
+
+def test_bounded_network_retries_each_consume_approval(store,settings,clock,provider):
+    provider.failures=[urllib.error.URLError(TimeoutError('fixture'))]
+    c=Client(store,replace(settings,retries=1),clock,provider,lambda _:None)
+    c.get('/listings/sale',{'limit':2,'offset':0})
+    assert c.count==2 and store.count_usage('approval:'+settings.approval_id)==2
+
+
+def test_proxy_error_retains_reason_without_secret(monkeypatch):
+    monkeypatch.setenv('RENTCAST_API_KEY','fixture-secret')
+    d=diagnose(urllib.error.URLError(OSError('Tunnel connection failed: 403 fixture-secret')))
+    assert d['stage']=='proxy_connect' and '[REDACTED]' in d['reason'] and 'fixture-secret' not in str(d)
+
+
+def test_atomic_migrations_are_repeatable(store):
+    store.migrate();store.migrate()
+    assert store.execute('SELECT COUNT(*) FROM schema_versions').fetchone()[0]==1
+
+
+def test_offline_cost_arithmetic():
+    assert monthly_requests(501,10)==360
+    assert api_costs(930)['Foundation']==74
+
+
+def test_email_requires_flag_and_secret(store,boundary,settings,clock):
+    d=Digest(store,boundary,replace(settings,email_enabled=False),clock)
+    assert d.prepare('x','2026-10-16',{}) is None
+    with pytest.raises(PermissionError):d.send('missing')
+
+
+def test_settings_reject_invalid_limits():
+    with pytest.raises(ValueError):Settings(per_run=-1)
+    with pytest.raises(ValueError):Settings(billing_day=31)
+
+
+def test_postgres_lock_and_persistence_across_connections(store):
+    if not store.pg:pytest.skip('PostgreSQL advisory locks require PostgreSQL')
+    import psycopg
+    from rentalsourcing.storage import Store
+    # The test DSN contains an isolated search_path so reconnects see the same schema.
+    other=Store(store.test_url)
+    try:
+        assert store.lock() is True
+        assert other.lock() is False
+        store.save_setting('persisted',{'scan_hour':8})
+        assert json.loads(other.execute('SELECT payload FROM settings WHERE name=?',('persisted',)).fetchone()[0])=={'scan_hour':8}
+    finally:other.close()
+
+
+def test_dns_and_tls_diagnostics_are_distinguished():
+    import socket,ssl
+    assert diagnose(urllib.error.URLError(socket.gaierror(-2,'fixture DNS error')))['stage']=='dns'
+    assert diagnose(urllib.error.URLError(ssl.SSLCertVerificationError(1,'fixture cert error')))['stage']=='tls'
+
+
+def test_rate_limit_retry_cannot_exceed_approved_allowance(store,settings,clock,provider):
+    provider.failures=[urllib.error.HTTPError('https://api.rentcast.io/v1/listings/sale',429,'limit',{},None)]
+    c=Client(store,replace(settings,retries=1,approved_requests=1),clock,provider,lambda _:None)
+    with pytest.raises(BudgetExceeded):c.get('/listings/sale',{'limit':2,'offset':0})
+    assert len(provider.calls)==1

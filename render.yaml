@@ -1,4 +1,4 @@
-# REVIEW ONLY: applying this Blueprint creates PAID resources.
+# Creating this Blueprint provisions PAID resources; user approval is required first.
 services:
   - type: cron
     name: rentalsourcing-daily
@@ -6,19 +6,21 @@ services:
     plan: starter
     region: virginia
     schedule: "0 12,13 * * *"
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
     startCommand: "python -m rentalsourcing.cloud --scheduled"
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.10"
       - key: APP_ENV
-        value: "production"
-      - key: MAX_API_REQUESTS_TOTAL
-        value: "40"
+        value: production
       - key: ENABLE_RENTCAST
         value: "false"
       - key: ENABLE_EMAIL
         value: "false"
+      - key: API_APPROVAL_ID
+        value: ""
+      - key: APPROVED_API_REQUESTS
+        value: "0"
       - key: RENTCAST_API_KEY
         sync: false
       - key: DATABASE_URL
@@ -27,18 +29,26 @@ services:
           property: connectionString
       - key: CITY_BOUNDARY_FILE
         value: data/pittsburgh.geojson
-      - key: CITY_BOUNDARY_SOURCE
-        value: https://data.wprdc.org/dataset/pittsburgh-city-boundary
       - key: MAX_API_REQUESTS_PER_RUN
         value: "4"
       - key: MAX_API_REQUESTS_PER_DAY
         value: "4"
       - key: MAX_API_REQUESTS_PER_MONTH
         value: "40"
-      - key: LISTING_LIMIT
-        value: "20"
-      - key: MAX_LISTING_PAGES
+      - key: BILLING_DAY
         value: "1"
+      - key: LISTING_LIMIT
+        value: "500"
+      - key: MAX_LISTING_PAGES
+        value: "20"
+      - key: TAX_CACHE_HOURS
+        value: "168"
+      - key: LISTING_CACHE_MINUTES
+        value: "15"
+      - key: HTTP_TIMEOUT_SECONDS
+        value: "30"
+      - key: NETWORK_RETRIES
+        value: "0"
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM

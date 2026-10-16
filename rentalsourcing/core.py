@@ -64,6 +64,10 @@ class Boundary:
                         raise ValueError('Boundary coordinates outside Pittsburgh region')
                 self.polygons.append(polygon)
         if not self.polygons: raise ValueError('Empty boundary')
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+        self.geometry=unary_union([Polygon(p[0],p[1:]) for p in self.polygons])
+        if not self.geometry.is_valid: raise ValueError('Invalid city boundary geometry')
 
     @staticmethod
     def ring(x, y, ring):
@@ -80,7 +84,63 @@ class Boundary:
     def contains(self, row):
         x, y = row.get('longitude'), row.get('latitude')
         if not number(x) or not number(y): return False
-        for poly in self.polygons:
-            if self.ring(x,y,poly[0]) is True and all(self.ring(x,y,h) is False for h in poly[1:]):
-                return True
-        return False
+        from shapely.geometry import Point
+        return bool(self.geometry.contains(Point(x,y)))
+
+
+def verification(row, boundary):
+    """Distinguish known failures from evidence that still requires verification."""
+    if demo_marked(row): return 'Rejected', ['demo_data']
+    missing=[]; failed=[]
+    for field,expected in [('status','Active'),('state','PA')]:
+        value=row.get(field)
+        if value is None or value=='': missing.append(field)
+        elif value!=expected: failed.append(field)
+    zipcode=str(row.get('zipCode') or '').split('-')[0]
+    if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
+    elif zipcode in {'15210','15203'}: failed.append('excluded_zip')
+    for field,lo,hi in [('bedrooms',3,math.inf),('bathrooms',1,math.inf),('squareFootage',1000,math.inf),('price',0.01,200000)]:
+        value=row.get(field)
+        if not number(value): missing.append(field)
+        elif not lo<=value<=hi: failed.append(field)
+    if not isinstance(row.get('formattedAddress'),str) or not row['formattedAddress'].strip(): missing.append('address')
+    if not isinstance(row.get('id'),str) or not row['id'].strip(): missing.append('property_id')
+    x,y=row.get('longitude'),row.get('latitude')
+    if not number(x) or not number(y) or not -180<=x<=180 or not -90<=y<=90:
+        missing.append('coordinates')
+    elif not boundary.contains(row): failed.append('outside_city_or_boundary')
+    if failed: return 'Rejected',failed+missing
+    if missing: return 'Pending Verification',missing
+    return 'Candidate',[]
+
+
+def tax_verification(record, today=None):
+    from decimal import Decimal, InvalidOperation
+    today=today or dt.date.today()
+    taxes=record.get('propertyTaxes')
+    if not isinstance(taxes,dict) or not taxes:
+        return 'Pending Verification',None,'missing_tax_history'
+    years=[int(k) for k in taxes if str(k).isdigit() and 1900<=int(k)<=today.year]
+    if not years: return 'Pending Verification',None,'missing_tax_year'
+    year=max(years);entry=taxes.get(str(year))
+    if not isinstance(entry,dict) or entry.get('year')!=year or not number(entry.get('total')) or entry['total']<0:
+        return 'Pending Verification',None,'invalid_latest_tax_amount'
+    amount=Decimal(str(entry['total']));adjusted=amount+Decimal('100')
+    tax={'year':year,'annual':float(amount),'adjusted':float(adjusted)}
+    return ('Qualified',tax,None) if adjusted<Decimal('2000') else ('Rejected',tax,'annual_tax_too_high')
+
+
+def historical_reduction(row):
+    """Only compare dated price observations within the current listing period."""
+    current=row.get('price')
+    if not number(current): return None
+    listed=str(row.get('listedDate') or '')[:10]
+    history=row.get('history')
+    if not listed or not isinstance(history,dict): return None
+    earlier=[]
+    for date,entry in history.items():
+        if isinstance(entry,dict) and listed<=str(date)[:10] and number(entry.get('price')):
+            earlier.append((str(date),entry['price']))
+    earlier.sort()
+    if earlier and earlier[-1][1]>current: return earlier[-1][1]
+    return None

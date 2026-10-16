@@ -1,0 +1,136 @@
+"""Resumable daily pipeline, durable price events and verified tax enrichment."""
+import datetime as dt
+import hashlib
+import json
+import urllib.parse
+import uuid
+from .core import verification,tax_verification,historical_reduction,number
+from .collector import LIVE
+from .provenance import demo_marked
+from .request import PARAMS
+from .storage import BudgetExceeded
+from .telemetry import event
+
+class Engine:
+    def __init__(self,store,boundary,client,settings,clock=None):
+        self.store=store;self.boundary=boundary;self.client=client;self.settings=settings
+        self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
+
+    def ingest(self,job_id,row):
+        if not isinstance(row,dict):return
+        source=getattr(self.client,'source','fixture')
+        state,reasons=verification(row,self.boundary)
+        if source!=LIVE and state!='Rejected':state,reasons='Pending Verification',['non_live_source']
+        identity=row.get('id')
+        if not isinstance(identity,str) or not identity:
+            identity='unidentified:'+hashlib.sha256(json.dumps(row,sort_keys=True).encode()).hexdigest()
+        old=self.store.get_property(identity);revision=old['revision'] if old else 0
+        previous=old['payload'].get('price') if old else None
+        price=row.get('price');changed=number(price) and price!=previous
+        if changed:revision+=1
+        reduced=changed and number(previous) and price<previous
+        historical=historical_reduction(row) if not old else None
+        when=getattr(self.client,'last_fetched_at',None) or self.clock().isoformat()
+        self.store.save_property(identity,row,'Pending Verification' if state=='Candidate' else state,['tax_not_verified'] if state=='Candidate' else reasons,source,revision,when)
+        if changed:
+            self.store.execute('INSERT INTO price_history VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+               (f'{identity}:{revision}',identity,price,previous,int(reduced),when))
+            # A queued event is frozen in its outbox. New prices create separate events.
+            self.store.execute("UPDATE deal_events SET state='superseded' WHERE property_id=? AND state='ready'",(identity,))
+        current_event=self.store.execute('SELECT kind,previous_price,state FROM deal_events WHERE id=?',(f'{identity}:price:{revision}',)).fetchone()
+        kind=current_event[0] if current_event and current_event[2]=='ready' else ('price_reduction' if reduced or historical else 'new')
+        if state=='Candidate':
+            # An unsent property may become verifiable at any later observed price.
+            prior_sent=self.store.execute("SELECT 1 FROM deal_events WHERE property_id=? AND state IN ('sent','queued') LIMIT 1",(identity,)).fetchone()
+            legacy_sent=self.store.claimed(identity)
+            eligible=reduced or bool(current_event and current_event[2]=='ready') or (not prior_sent and not legacy_sent)
+            event_id=f'{identity}:price:{revision}' if eligible else None
+            if eligible:
+                self.store.execute('INSERT INTO deal_events VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+                    (event_id,identity,kind,price,previous if reduced else historical,revision,'ready','{}',when))
+            self.store.execute('INSERT INTO scan_tasks VALUES (?,?,0,?,?) ON CONFLICT(job_id,property_id) DO UPDATE SET priority=excluded.priority,event_id=excluded.event_id',
+                (job_id,identity,0 if kind=='price_reduction' else 1,event_id))
+
+    def run(self,job_id,day):
+        store=self.store;job=store.job(job_id,day);stats=job['stats']
+        if job['state']=='complete':return dict(stats,already_complete=True)
+        stats.pop('stop_reason',None)
+        stats.setdefault('received',0);stats.setdefault('tax_checked',0);stats.setdefault('tax_cache_hits',0)
+        offset=job['offset'];collection_done=job['collection_done'];attempt=str(uuid.uuid4())
+        store.run(attempt,dict(job_id=job_id,status='running',started_at=self.clock().isoformat()))
+        try:
+            pages=0
+            while not collection_done and pages<self.settings.max_pages:
+                rows,total=self.client.get('/listings/sale',dict(PARAMS,limit=self.settings.page_size,offset=offset))
+                if not isinstance(rows,list):raise ValueError('Listings response must be a list')
+                total_count=int(total) if total is not None else None
+                if len(rows)>self.settings.page_size:raise ValueError('Oversized listings response')
+                if total_count is not None:stats['total']=total_count
+                new_offset=offset+len(rows)
+                collection_done=len(rows)<self.settings.page_size or (total_count is not None and new_offset>=total_count)
+                with store.transaction():
+                    for row in rows:self.ingest(job_id,row)
+                    stats['received']+=len(rows)
+                    store.checkpoint(job_id,new_offset,collection_done,stats)
+                offset=new_offset;pages+=1
+            if not collection_done:
+                stats['partial']=True;store.operation('pagination:'+job_id,'Listing page limit reached; resume this scan to continue.')
+            tasks=store.execute('SELECT property_id,event_id FROM scan_tasks WHERE job_id=? AND done=0 ORDER BY priority,property_id',(job_id,)).fetchall()
+            needed=sum(1 for identity,event_id in tasks if event_id and not store.get_tax(identity,self.clock().isoformat()))
+            health=store.budget_health(self.settings,self.clock())
+            if needed+health['days_remaining']>health['remaining']:
+                store.operation('forecast:'+job_id,'Current tax-verification backlog may exceed the allowance after reserving one listing request per remaining day.')
+                event('budget_forecast',uncached_tax_checks=needed,**health)
+            for identity,event_id in tasks:
+                p=store.get_property(identity)
+                # Older scan resumes must never overwrite a newer observation.
+                state,reasons=verification(p['payload'],self.boundary)
+                if state!='Candidate' or p['source']!=LIVE:
+                    store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
+                if self.clock()-dt.datetime.fromisoformat(p['observed_at'])>dt.timedelta(hours=24):
+                    store.set_verification(identity,'Pending Verification',['stale_listing']);
+                    store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
+                saved=store.get_tax(identity,self.clock().isoformat())
+                if saved and saved[1]==LIVE:
+                    record,source,fetched=saved;stats['tax_cache_hits']+=1
+                elif not event_id:
+                    store.set_verification(identity,'Pending Verification',['tax_refresh_not_needed_no_new_event'])
+                    store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
+                else:
+                    record,_=self.client.get('/properties/'+urllib.parse.quote(identity,safe=''),cache=False)
+                    stats['tax_checked']+=1;source=getattr(self.client,'source','fixture');fetched=self.clock().isoformat()
+                    if not isinstance(record,dict) or record.get('id')!=identity or demo_marked(record):
+                        store.set_verification(identity,'Pending Verification',['tax_identity_or_source_mismatch'])
+                        store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
+                    expires=self.clock()+dt.timedelta(hours=self.settings.tax_cache_hours)
+                    # Refresh on entering a new calendar tax year even if the TTL spans New Year.
+                    expires=min(expires,dt.datetime(self.clock().year+1,1,1,tzinfo=dt.timezone.utc))
+                    if tax_verification(record,self.clock().date())[0]=='Pending Verification':
+                        expires=min(expires,self.clock()+dt.timedelta(hours=6))
+                    store.save_tax(identity,record,source,fetched,expires.isoformat())
+                state,tax,reason=tax_verification(record,self.clock().date())
+                if source!=LIVE:state,tax,reason='Pending Verification',None,'non_live_tax_source'
+                with store.transaction():
+                    store.set_verification(identity,state,[reason] if reason else [])
+                    if state=='Qualified' and event_id:
+                        payload=dict(listing=p['payload'],tax=tax,source=LIVE,tax_source=source,verified_at=self.clock().isoformat(),tax_fetched_at=fetched)
+                        store.execute("UPDATE deal_events SET payload=? WHERE id=? AND state='ready' AND revision=? AND price=?",(json.dumps(payload),event_id,p['revision'],p['payload']['price']))
+                    store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity))
+                    store.checkpoint(job_id,offset,collection_done,stats)
+            pending=store.execute('SELECT COUNT(*) FROM scan_tasks WHERE job_id=? AND done=0',(job_id,)).fetchone()[0]
+            stats['partial']=not collection_done or pending>0
+            status='partial' if stats['partial'] else 'complete'
+            store.checkpoint(job_id,offset,collection_done,stats,status)
+            store.run(attempt,dict(job_id=job_id,status=status,**stats))
+            return stats
+        except BudgetExceeded as exc:
+            stats['partial']=True;stats['stop_reason']=str(exc)
+            store.operation('budget-stop:'+job_id,'Scan paused by API budget; pending properties have not been approved. '+str(exc))
+            store.checkpoint(job_id,offset,collection_done,stats,'partial')
+            store.run(attempt,dict(job_id=job_id,status='partial',**stats));event('scan_paused',**stats)
+            return stats
+        except Exception as exc:
+            store.checkpoint(job_id,offset,collection_done,stats,'failed')
+            store.run(attempt,dict(job_id=job_id,status='failed',error_type=type(exc).__name__))
+            store.operation('failure:'+job_id,'Scan failed; use --resume '+job_id+' after fixing the connection.')
+            raise

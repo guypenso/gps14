@@ -1,83 +1,107 @@
 # RentalSourcing
 
-An automated real estate deal finder for investment properties in Pittsburgh, Pennsylvania.
-Built with OpenAI Codex.
+Pittsburgh investment-property collector, built on the existing RentalSourcing repository and RentCast integration.
 
-הפרויקט הקיים הורחב: קוד בקשת RentCast והאבחון מהשלב הקודם נשמר ב־`rentalsourcing/request.py`.
-לפני ההרחבה המאגר הכיל README בלבד; לא הייתה מערכת סריקה קיימת שאפשר היה להעביר כפי שהיא.
+The production entry point is `python -m rentalsourcing.cloud`. Provider traffic is disabled by default.
+No RentCast call is possible on a cache miss until both the enable flag and a persistent user-approved
+request allowance are configured. No paid services are provisioned by installing or testing this repository.
 
-## מצב
+## What runs
 
-לא נפרס דבר. אין שירות בתשלום. לא בוצעו קריאות RentCast או שליחות מייל במהלך ההכנה.
-הפעלה חיה ושליחת מייל כבויות כברירת מחדל. קובץ גבולות עיר אמיתי עדיין נדרש.
+1. Fetch Active Sale Listings using early server-side filters and pages of up to 500 records.
+2. Persist every observed record, including missing-field records as **Pending Verification**.
+3. Verify the actual city polygon, excluded ZIPs, attributes and price. Known failures are Rejected.
+4. Prioritize price reductions, reuse durable tax cache, and fetch property tax history only when needed.
+5. Require `Latest Available Annual Tax + $100 < $2,000`. Missing latest-year amount stays Pending Verification.
+6. Persist one daily Resend digest containing new verified properties or newly observed price reductions.
+7. Save cursors, tasks, observations, price revisions, tax history, configuration, quota usage and delivery state in PostgreSQL.
 
-## בדיקה מקומית ללא רשת
+All criteria remain fixed: inside Pittsburgh PA, Active/For Sale, bedrooms >=3, bathrooms >=1,
+living area >=1,000 sqft, price <=$200,000, ZIP 15210 and 15203 excluded. There is no demo fallback.
+
+## Quick local validation
+
+Python 3.12 is the production version. Use an isolated virtual environment:
 
 ```sh
-python -m unittest discover -s tests -v
-python -m rentalsourcing.cloud --check
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
 ```
 
-הבדיקות משתמשות ב־SQLite מקומי ובתשובות מדומות. PostgreSQL בענן, התקנת התלות
-וחיבורי HTTPS אמיתיים לא אומתו כאן. יש לבצע בדיקת קבלה לאחר אישור הפעלה.
+Without `TEST_DATABASE_URL`, PostgreSQL tests are explicitly skipped. To run them, provide a local disposable
+PostgreSQL database; tests create and drop isolated schemas. **Never point TEST_DATABASE_URL at production.**
+No real RentCast or Resend requests occur in the tests: the default HTTP opener is blocked and transports
+are controlled test doubles. PostgreSQL 16 integration was also exercised in the development environment.
 
-## כללי הסינון
+```sh
+TEST_DATABASE_URL=postgresql://postgres:local-tests-only@127.0.0.1:55432/rentalsourcing .venv/bin/python -m pytest -q
+```
 
-- מקור המועמדים: `/v1/listings/sale`, סטטוס Active.
-- Pittsburgh, PA; לפחות 3 חדרי שינה, לפחות אמבטיה אחת, לפחות 1,000 sqft, מחיר עד $200,000.
-- ZIP 15210 ו־15203 מוחרגים בקוד. נתונים חיוניים חסרים נפסלים.
-- קואורדינטות חייבות להיות בתוך פוליגון העיר הרשמי, כולל טיפול בחורים. נקודות על הגבול נפסלות בזהירות.
-- מס מושלם באמצעות `/v1/properties/{id}` רק לאחר הסינון הבסיסי והגאוגרפי.
-- משתמשים ב־`propertyTaxes` של השנה המאוחרת ביותר שדווחה ואינה בעתיד.
-  סכום חסר בשנה האחרונה פוסל; אין מעבר לשנה ישנה יותר כדי להשיג מס נמוך.
-- נדרש `Latest Annual Tax + $100 < $2,000`; מס של $1,900 נפסל.
-  שנת המס מוצגת במייל. אין כאן הבטחה שהמידע העדכני ביותר במקור הוא משנת המס הקלנדרית האחרונה.
+## Production geometry
 
-## רשת, נתונים ומניעת כפילות
+`python scripts/fetch_boundary.py` downloads the City of Pittsburgh's official CityBoundary layer linked
+from WPRDC. It requests WGS84, checks polygon topology and representative inside/outside points, and records
+the source, retrieval time and SHA256. The production loader validates the manifest and checksum.
+The build stops if this source cannot be fetched. Test polygons never substitute for production geography.
 
-HTTPS מאומת, מפתח בסביבת הריצה בלבד בכותרת X-Api-Key. הגדרות Proxy ו־CA של סביבת הריצה
-נשמרות; אין להעתיק לענן החיצוני משתני Proxy או CA מסביבת Codex.
-אין ניסיונות חוזרים אוטומטיים ואין מעקב אחר הפניות. שגיאות נשמרות עם סיבה פנימית והשחרת סודות.
-ניסיונות כושלים צורכים מכסה פנימית; זהו מונה ניסיונות שלנו ולא חשבון הספק.
+## Render deployment
 
-PostgreSQL שומר תצפיות נכסים, תקציב יומי וחודשי, מצב ריצות והודעות.
-נעילה מונעת שתי סריקות במקביל. מונה המכסה מתעדכן אטומית לפני בקשת הרשת.
-מסד הנתונים נדרש לצורך שמירה בין הרצות; קבצים זמניים ב־Cron אינם תחליף.
+`render.yaml` provisions one paid Cron job and one paid PostgreSQL instance **only when the user approves and
+applies the Blueprint**. Its build installs pinned dependencies, downloads/verifies the boundary and runs
+an offline preflight. Runtime migrations are additive and keep initial-release tables intact.
+Do not copy Codex proxy/CA settings to Render. Normal verified HTTPS uses the runtime's own proxy/CA configuration.
 
-לכל RentCast property id ניתן לשלוח הודעה אחת בלבד גם אם המחיר משתנה.
-רישום ייחודי נשמר לפני השליחה. אם התהליך נקטע או התשובה מהמייל אינה ודאית,
-ההודעה נשארת reserved/unknown ולא נשלחת שוב אוטומטית. כך נמנעות כפילויות,
-אך הודעה עלולה להצריך בדיקה ידנית אם לא הגיעה. Resend מקבל גם Idempotency-Key קבוע.
-המשמעות היא קבלת ההודעה אצל ספק המייל, לא הוכחה שהגיעה לתיבת הדואר.
+Read [the Hebrew activation guide](CLOUD_GUIDE_HE.md) and [the current readiness report](READINESS_HE.md).
+The configured UTC schedule is `0 12,13 * * *`; `--scheduled` only executes the slot corresponding to 08:00
+America/New_York. A complete scheduled job is skipped on repeat; a failed/partial job can be resumed.
+Render scheduling can be delayed; this is an intended start time, not a second-level timing guarantee.
 
-הלוגים המובנים נכתבים ל־stdout ונאספים ב־Render/Railway; סיכומי ריצות נשמרים גם ב־DB.
-משך שמירת לוגים מפורטים תלוי בחבילת האירוח. יש להשתמש בגיבויי PostgreSQL ולבדוק שחזור.
+## Commands
 
-## מכסות התחלתיות
+```sh
+python -m rentalsourcing.cloud --check            # Offline config/geometry preflight, no DB/provider requests
+python -m rentalsourcing.cloud --migrate          # PostgreSQL migrations only
+python -m rentalsourcing.cloud --status           # DB status, budgets, pending verification and outbox
+python -m rentalsourcing.cloud                   # Manual scan; prints its resumable job ID
+python -m rentalsourcing.cloud --scheduled       # 08:00 Pittsburgh guard
+python -m rentalsourcing.cloud --resume JOB_ID   # Resume cursor/tasks; no successful pages repeated
+python -m rentalsourcing.cloud --retry-email ID  # Same frozen body/key, within 23h safety window
+python -m rentalsourcing.cloud --reconcile-email ID --provider-message-id ACTUAL_RESEND_ID
+```
 
-`MAX_API_REQUESTS_PER_RUN=4`, `MAX_API_REQUESTS_PER_DAY=4`, `MAX_API_REQUESTS_PER_MONTH=40`, `MAX_API_REQUESTS_TOTAL=40`.
-המכסה הכוללת אינה מתאפסת; זהו מעצור נוסף עד להגדלה מפורשת של התקציב.
-היום והחודש מחושבים ב־UTC, לפי חודש קלנדרי ולא בהכרח מחזור החיוב של RentCast.
-עמוד מודעות אחד ועד שלוש בדיקות מס בכל הרצה. כל הקריאות משותפות לאותה מכסה.
-`LISTING_LIMIT=20`, `MAX_LISTING_PAGES=1`: בדיקה חלקית בלבד, לא סריקה מלאה של העיר.
-לאחר הגעה ל־40 ניסיונות אין קריאות נוספות באותו חודש. סריקה יומית מלאה דורשת בחירת
-תקציב התואם למנוי RentCast והגדלת המכסות והדפדוף במפורש. 4 ניסיונות ביום במשך
-31 יום עשויים לצרוך 124 ניסיונות; ברירת המחדל 40 מכוונת לניסוי מוגבל.
-שימוש באותו מפתח מחוץ למערכת אינו נספר במכסה המקומית ויש להשאיר לו מרווח במנוי.
+Reconciliation is a manual record of acceptance verified in Resend; it does not send another message.
+Only one digest is prepared per local day, including for manual runs. Events arriving after that day's
+message remain eligible for the next day's digest after a fresh listing verification.
 
-## הפעלה בענן — רק אחרי אישור
+## Allowances, cache and billing
 
-מדריך למשתמש נמצא בקובץ `CLOUD_GUIDE_HE.md`.
-`render.yaml` הוא תכנון משאבים בתשלום, לא אישור ליצור אותם.
-`railway.json` מספק חלופה. אין צורך באתר, דומיין לאפליקציה או שרת שפועל כל היום.
+Copy `.env.example` into private runtime settings, never commit actual values. `API_APPROVAL_ID` identifies
+an explicit approval; `APPROVED_API_REQUESTS` is the cumulative cap for that approval and does not reset.
+There are also per-run, UTC-day and billing-cycle caps. Set BILLING_DAY to the account's cycle day (1–28;
+for a later date use 28 conservatively and retain the cumulative cap). All attempts consume the app allowance,
+including failures and optional retries. Other applications using the same provider key are outside this counter.
 
-## בדיקת מוכנות אחרונה
+Defaults: approved allowance **0**, 4 attempts/run, 4/day, 40/billing cycle, no automatic network retries.
+Scheduled runs limit themselves to a fair share of the remaining allowance so early tax checks do not
+consume the entire month. Forecast shortfalls and 85% usage are saved to operations and structured logs,
+and appear in the daily email when email is enabled. Exhaustion pauses the job safely; it never raises
+spending limits automatically. The default trial budget does not guarantee full daily city coverage.
 
-ראה `READINESS_HE.md` לדוח המלא. Render ו־Railway מפעילים שתי בדיקות שעה ב־12:00
-ו־13:00 UTC; `--scheduled` מאפשר סריקה רק כשב־America/New_York השעה 08:00.
-מסד הנתונים מונע שתי ריצות מתוזמנות באותו יום מקומי. אין הבטחת התחלה מדויקת
-לשנייה מצד שירות התזמון. ריצה שנכשלה אינה מנסה שוב אוטומטית באותו יום.
+Listing-page cache: 15 minutes. Verified annual tax cache: 7 days, refreshed on entering a new year.
+Missing/invalid tax amounts have a shorter 6-hour cache so pending properties can become verifiable.
+Listings older than 24h are not sent. Tax refresh can be skipped for an already-notified property with no
+new price reduction; it is retained as Pending Verification if its old tax cache expired.
 
-התראות אמיתיות מחייבות APP_ENV=production ומתג מייל פעיל. מילוני בדיקה רגילים
-או רשומות שמסומנות Demo נפסלים; רק נתוני מודעות ומס שהועברו ממסלול התעבורה החי
-יכולים להגיע למסלול ההתראות. אין קובצי Demo או מעבר אוטומטי לנתוני דמה בעת תקלה.
+A single digest uses a durable outbox and Resend's idempotency key. Acceptance updates outbox and event
+states atomically. A timeout remains `uncertain`; resuming within 23h uses the identical key/body.
+After that window, the system requires reconciliation instead of risking a duplicate send. A stale
+never-attempted digest is cancelled. Provider acceptance is not proof of inbox delivery.
+
+## Operational limitations
+
+A full query is not proof of every listing in the city: RentCast coverage and postal-city classification
+still apply. Tax year means latest available reported annual year, not a prediction of the next tax bill.
+Offset pagination can shift while provider listings change. No MLS/Zillow/Redfin connector is implemented.
+The pipeline uses the current RentCast-only strategy. Credentials, live provider acceptance and Render
+billing approval remain deployment prerequisites; no live-provider success is claimed by offline tests.
