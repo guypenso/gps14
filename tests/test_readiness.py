@@ -14,11 +14,11 @@ from rentalsourcing.costs import api_costs,monthly_requests
 from conftest import Provider,listing
 
 
-def test_every_day_has_exactly_one_pittsburgh_eight_am_slot():
+def test_every_day_has_exactly_one_israel_eight_am_slot():
     for year in (2026,2027,2028):
         day=dt.date(year,1,1)
         while day.year==year:
-            slots=[dt.datetime.combine(day,dt.time(h),tzinfo=dt.timezone.utc) for h in (12,13)]
+            slots=[dt.datetime.combine(day,dt.time(h),tzinfo=dt.timezone.utc) for h in (5,6)]
             assert sum(scheduled_day(t) is not None for t in slots)==1
             day+=dt.timedelta(days=1)
 

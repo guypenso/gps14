@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 from .provenance import demo_marked
 
+EXCLUDED_ZIPS=frozenset({'15210','15203','15204'})
+
 
 def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -15,7 +17,7 @@ def basic_rejection(row):
     if row.get('state') != 'PA': return 'state'
     zipcode = str(row.get('zipCode', '')).split('-')[0]
     if len(zipcode) != 5 or not zipcode.isdigit(): return 'missing_zip'
-    if zipcode in {'15210', '15203'}: return 'excluded_zip'
+    if zipcode in EXCLUDED_ZIPS: return 'excluded_zip'
     for field, low, high in [('bedrooms', 3, math.inf), ('bathrooms', 1, math.inf),
                               ('squareFootage', 1000, math.inf), ('price', 0.01, 200000)]:
         value = row.get(field)
@@ -98,7 +100,7 @@ def verification(row, boundary):
         elif value!=expected: failed.append(field)
     zipcode=str(row.get('zipCode') or '').split('-')[0]
     if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
-    elif zipcode in {'15210','15203'}: failed.append('excluded_zip')
+    elif zipcode in EXCLUDED_ZIPS: failed.append('excluded_zip')
     for field,lo,hi in [('bedrooms',3,math.inf),('bathrooms',1,math.inf),('squareFootage',1000,math.inf),('price',0.01,200000)]:
         value=row.get(field)
         if not number(value): missing.append(field)

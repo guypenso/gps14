@@ -8,7 +8,8 @@ def test_render_has_web_cron_postgres_and_safe_defaults():
     services={s['type']:s for s in config['services']}
     assert set(services)=={'web','cron'}
     assert services['web']['healthCheckPath']=='/healthz'
-    assert services['cron']['schedule']=='0 12,13 * * *'
+    assert services['cron']['schedule']=='0 5,6 * * *'
+    assert services['cron']['startCommand']=='python -m rentalsourcing.cloud --scheduled-email'
     assert config['databases'][0]['ipAllowList']==[]
     common={v['key']:v.get('value') for v in config['envVarGroups'][0]['envVars']}
     assert common['APPROVED_API_REQUESTS']=='0' and not common.get('API_APPROVAL_ID')
