@@ -78,7 +78,8 @@ class Digest:
         self.opener=opener or urllib.request.build_opener(NoRedirect)
 
     def prepare(self,job_id,day,stats):
-        if not self.settings.email_enabled:return None
+        if not self.settings.email_enabled or not self.settings.email_approval_id or not os.getenv('RESEND_API_KEY'):
+            return None
         digest_day='daily:'+day
         old=self.store.execute('SELECT id FROM outbox WHERE job_id=?',(digest_day,)).fetchone()
         if old:return old[0]
@@ -112,7 +113,7 @@ class Digest:
         return outbox_id
 
     def send(self,identity):
-        if not self.settings.email_enabled or self.settings.environment!='production':raise PermissionError('Production email disabled')
+        if not self.settings.email_enabled or not self.settings.email_approval_id or self.settings.environment!='production':raise PermissionError('Production email disabled or not approved')
         if not os.getenv('RESEND_API_KEY'):raise ValueError('RESEND_API_KEY missing')
         row=self.store.execute('SELECT state,payload,event_ids,first_attempt_at FROM outbox WHERE id=?',(identity,)).fetchone()
         if not row:raise ValueError('Unknown outbox message')

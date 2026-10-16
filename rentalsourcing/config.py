@@ -20,17 +20,26 @@ class Settings:
     timeout: int = 30
     retries: int = 0
     billing_day: int = 1
+    billing_anchor: str = ''
+    billing_baseline: int = -1
+    listing_requests_per_day: int = 1
+    negative_tax_cache_hours: int = 6
+    email_approval_id: str = ''
     email_to: str = ''
     email_from: str = ''
     boundary_file: str = 'data/pittsburgh.geojson'
 
     def __post_init__(self):
-        for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout'):
+        for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout','listing_requests_per_day','negative_tax_cache_hours'):
             if getattr(self,name) <= 0: raise ValueError(f'{name} must be positive')
-        if self.approval_mode not in {'one_time','rolling_32_days'}:raise ValueError('Invalid API approval mode')
+        if self.approval_mode not in {'one_time','rolling_32_days','billing_cycle'}:raise ValueError('Invalid API approval mode')
         if self.approved_requests < 0 or self.page_size > 500 or self.retries not in range(3):
             raise ValueError('Invalid request limits')
         if not 1 <= self.billing_day <= 28: raise ValueError('BILLING_DAY must be 1..28 (use 28 for later billing dates conservatively)')
+        if self.approval_mode=='billing_cycle':
+            from .billing import billing_window
+            billing_window(self)
+            if self.billing_baseline < 0:raise ValueError('BILLING_USAGE_BASELINE must include current account usage before activation')
         if self.email_enabled and (self.environment != 'production' or not self.email_to or not self.email_from):
             raise ValueError('Email requires production environment and sender/recipient')
 
@@ -41,7 +50,9 @@ class Settings:
           'per_month':'MAX_API_REQUESTS_PER_MONTH','page_size':'LISTING_LIMIT',
           'max_pages':'MAX_LISTING_PAGES','tax_cache_hours':'TAX_CACHE_HOURS',
           'listing_cache_minutes':'LISTING_CACHE_MINUTES','timeout':'HTTP_TIMEOUT_SECONDS',
-          'retries':'NETWORK_RETRIES','billing_day':'BILLING_DAY','environment':'APP_ENV',
+          'retries':'NETWORK_RETRIES','billing_day':'BILLING_DAY','billing_anchor':'BILLING_CYCLE_ANCHOR',
+          'billing_baseline':'BILLING_USAGE_BASELINE','listing_requests_per_day':'LISTING_REQUESTS_PER_DAY',
+          'negative_tax_cache_hours':'NEGATIVE_TAX_CACHE_HOURS','email_approval_id':'EMAIL_APPROVAL_ID','environment':'APP_ENV',
           'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE'}
         defaults=cls(); values={}
         for field,env in mapping.items():

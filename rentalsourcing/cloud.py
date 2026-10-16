@@ -85,7 +85,8 @@ def main(argv=None):
         if args.scheduled:
             # Keep allowance available for later days instead of exhausting it early.
             allowance=store.scheduled_allowance(settings)
-            settings=replace(settings,per_run=max(1,allowance))
+            if allowance<=0:event('scheduled_budget_exhausted');return
+            settings=replace(settings,per_run=allowance)
         stats={};failure=None
         try:stats=Engine(store,boundary,Client(store,settings),settings).run(job_id,day)
         except Exception as exc:

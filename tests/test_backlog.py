@@ -41,16 +41,17 @@ def test_missing_tax_is_not_completed_and_retries_after_negative_cache(store,bou
     assert store.get_property('pending')['state']=='Qualified'
 
 
-def test_new_day_prioritizes_unprocessed_old_property_over_new_ids(store,boundary,settings,clock):
+def test_new_day_prioritizes_new_listing_over_old_backlog(store,boundary,settings,clock):
     provider=Provider([listing('z-old')])
     run(store,boundary,replace(settings,per_run=1),clock,provider,'daily:first')
     clock.advance(days=1)
     provider.rows=[listing('a-new'),listing('z-old')]
+    provider.records['a-new']=taxes('a-new')
     run(store,boundary,replace(settings,per_run=2),clock,provider,'daily:second')
     assert provider.tax_calls==1
-    assert store.get_property('z-old')['state']=='Qualified'
-    assert store.get_property('a-new')['state']=='Pending Verification'
-    assert store.execute('SELECT done FROM scan_tasks WHERE job_id=? AND property_id=?',('daily:first','z-old')).fetchone()[0]==1
+    assert store.get_property('a-new')['state']=='Qualified'
+    assert store.get_property('z-old')['state']=='Pending Verification'
+    assert store.execute('SELECT done FROM scan_tasks WHERE job_id=? AND property_id=?',('daily:first','z-old')).fetchone()[0]==0
 
 
 def test_unseen_stale_backlog_remains_pending_and_never_qualifies(store,boundary,settings,clock):

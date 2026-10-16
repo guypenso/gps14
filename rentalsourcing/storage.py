@@ -85,6 +85,7 @@ class Store:
           'CREATE TABLE IF NOT EXISTS scan_tasks (job_id TEXT NOT NULL, property_id TEXT NOT NULL, done INTEGER NOT NULL, priority INTEGER NOT NULL, event_id TEXT, PRIMARY KEY(job_id,property_id))',
           'CREATE TABLE IF NOT EXISTS deal_events (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, kind TEXT NOT NULL, price DOUBLE PRECISION NOT NULL, previous_price DOUBLE PRECISION, revision INTEGER NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL)',
           'CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, payload TEXT NOT NULL, event_ids TEXT NOT NULL, provider_id TEXT, first_attempt_at TEXT, updated_at TEXT NOT NULL)',
+          'CREATE TABLE IF NOT EXISTS api_attempts (request_key TEXT PRIMARY KEY, state TEXT NOT NULL, attempted_at TEXT NOT NULL, retry_after TEXT NOT NULL)',
           'CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, message TEXT NOT NULL, created_at TEXT NOT NULL)',
           'CREATE INDEX IF NOT EXISTS scan_tasks_pending ON scan_tasks(job_id,done,priority)',
           'CREATE INDEX IF NOT EXISTS deal_events_property ON deal_events(property_id,state)']
@@ -117,20 +118,31 @@ class Store:
         row=self.execute('SELECT used FROM usage WHERE period=?',(period,)).fetchone()
         return row[0] if row else 0
 
-    def reserve_api(self,settings,now=None):
-        import calendar
+    def reserve_api(self,settings,now=None,*,tax_request=False):
+        from .billing import cycle_key, billing_window, future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
         if not settings.approval_id or settings.approved_requests<=0:raise BudgetExceeded('No approved live API allowance')
-        cycle=now.date().replace(day=settings.billing_day)
-        if now.date()<cycle:
-            year,month=(cycle.year-1,12) if cycle.month==1 else (cycle.year,cycle.month-1)
-            cycle=cycle.replace(year=year,month=month)
+        start,end,anchor=billing_window(settings,now)
+        if settings.approval_mode=='billing_cycle' and now<anchor:
+            raise BudgetExceeded('Approved subscription cycle has not started')
         periods=[(now.strftime('day:%Y-%m-%d'),settings.per_day),
-                 ('cycle:'+cycle.isoformat(),settings.per_month),
+                 (cycle_key(settings,now),settings.per_month),
                  ('approval:'+settings.approval_id,settings.approved_requests)]
         with self.transaction():
             if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
-            if settings.approval_mode=='rolling_32_days':
+            if settings.approval_mode=='billing_cycle':
+                # Seed the already consumed account usage once, without resetting
+                # persisted app usage when an approval ID or process changes.
+                baseline=settings.billing_baseline if start==anchor else 0
+                self.execute('INSERT INTO usage VALUES (?,?) ON CONFLICT(period) DO UPDATE SET used=CASE WHEN usage.used<excluded.used THEN excluded.used ELSE usage.used END',
+                             (cycle_key(settings,now),baseline))
+                # The cycle is incremented once; changing an approval cannot reset it.
+                periods=[periods[0],(cycle_key(settings,now),min(settings.per_month,settings.approved_requests))]
+                if tax_request:
+                    future_days=future_listing_days(now,end)
+                    if min(settings.per_month,settings.approved_requests)-self.count_usage(cycle_key(settings,now))<=future_days*settings.listing_requests_per_day:
+                        raise BudgetExceeded('Remaining API allowance reserved for future daily listing scans')
+            elif settings.approval_mode=='rolling_32_days':
                 periods=periods[:2]
                 if self.rolling_usage(now)>=settings.approved_requests:
                     raise BudgetExceeded('Rolling 32-day approved API allowance reached')
@@ -145,24 +157,24 @@ class Store:
         end=now.strftime('day:%Y-%m-%d')
         return self.execute('SELECT COALESCE(SUM(used),0) FROM usage WHERE period>=? AND period<=?',(start,end)).fetchone()[0]
 
-    def budget_health(self,settings,now=None):
-        import calendar
+    def budget_health(self,settings,now=None,*,record_warning=True):
+        from .billing import cycle_key,billing_window,future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
-        cycle=now.date().replace(day=settings.billing_day)
-        if now.date()<cycle:
-            y,m=(cycle.year-1,12) if cycle.month==1 else (cycle.year,cycle.month-1)
-            cycle=cycle.replace(year=y,month=m)
-        y,m=(cycle.year+1,1) if cycle.month==12 else (cycle.year,cycle.month+1)
-        end=cycle.replace(year=y,month=m)
-        used=self.count_usage('cycle:'+cycle.isoformat())
-        approval_used=self.rolling_usage(now) if settings.approval_mode=='rolling_32_days' else self.count_usage('approval:'+settings.approval_id)
+        cycle,end,anchor=billing_window(settings,now)
+        used=self.count_usage(cycle_key(settings,now))
+        if settings.approval_mode=='billing_cycle':
+            if cycle==anchor:used=max(used,settings.billing_baseline)
+            approval_used=used
+        else:
+            approval_used=self.rolling_usage(now) if settings.approval_mode=='rolling_32_days' else self.count_usage('approval:'+settings.approval_id)
         remaining=max(0,min(settings.per_month-used,settings.approved_requests-approval_used))
-        days=max(1,(end-now.date()).days)
+        if settings.approval_mode=='billing_cycle' and now<anchor:remaining=0
+        days=1+future_listing_days(now,end)
         warning=None
-        if remaining<days:warning='API allowance cannot cover even one listing request per remaining day; increase only after approval.'
+        if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
-        if warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
-        return dict(cycle_start=cycle.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning)
+        if warning and record_warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
+        return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning)
 
     def scheduled_allowance(self,settings,now=None):
         now=now or dt.datetime.now(dt.timezone.utc)
@@ -174,8 +186,6 @@ class Store:
             prior_active=self.execute('SELECT COUNT(*) FROM usage WHERE period>=? AND period<? AND used>0',(start,today)).fetchone()[0]
             fair=max(1,health['remaining']-max(0,31-prior_active))
         else:
-            # Spread the allowance across the remaining dates without rounding every
-            # day down to a listing-only run that can never verify a pending tax.
             fair=max(1,(health['remaining']+health['days_remaining']-1)//health['days_remaining'])
         today_remaining=max(0,settings.per_day-self.count_usage(now.strftime('day:%Y-%m-%d')))
         return min(settings.per_run,today_remaining,health['remaining'],fair)
