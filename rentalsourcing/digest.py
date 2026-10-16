@@ -164,6 +164,41 @@ class Digest:
             (identity,'test:'+token,'pending',json.dumps(body),'[]',None,None,self.clock().isoformat()))
         return identity
 
+    def inspect_request(self,identity):
+        """Inspect the persisted request without a network call or secret output."""
+        from .resend_api import request as resend_request
+        row=self.store.execute('SELECT state,payload,first_attempt_at,provider_id FROM outbox WHERE id=?',(identity,)).fetchone()
+        if not row:raise ValueError('Unknown outbox message')
+        state,body,first,provider=row;envelope=json.loads(body)
+        req=resend_request(body,'[REDACTED]',identity)
+        evidence=self.store.execute('SELECT payload FROM email_errors WHERE outbox_id=?',(identity,)).fetchone()
+        from email.utils import parseaddr
+        sender=parseaddr(envelope.get('from',''))[1]
+        return dict(outbox_id=identity,state=state,attempted=bool(first),provider_id_present=bool(provider),
+            endpoint=req.full_url,method=req.get_method(),headers=dict(req.header_items()),
+            payload_fields=sorted(envelope),recipient_count=len(envelope.get('to',[])),
+            onboarding_sender=sender.lower()=='onboarding@resend.dev',
+            envelope_matches_config=envelope.get('from')==self.settings.email_from and envelope.get('to')==[self.settings.email_to],
+            last_error=json.loads(evidence[0]) if evidence else None)
+
+    def replace_rejected_test(self,identity):
+        """Prepare only; retain the failed record and never rearm uncertain sends."""
+        if not identity.startswith('test-'):raise ValueError('Only delivery-test messages may be replaced')
+        row=self.store.execute('SELECT state,payload,event_ids,provider_id,updated_at FROM outbox WHERE id=?',(identity,)).fetchone()
+        evidence=self.store.execute('SELECT payload FROM email_errors WHERE outbox_id=?',(identity,)).fetchone()
+        if (not row or row[0]!='failed' or row[3] or json.loads(row[2]) or not evidence
+                or not json.loads(evidence[0]).get('confirmed_rejection')):
+            raise ReconciliationRequired('No confirmed rejection evidence; inspect Resend request logs before replacing this message')
+        body=json.loads(row[1])
+        if body.get('from')!=self.settings.email_from or body.get('to')!=[self.settings.email_to]:
+            raise PermissionError('Replacement must keep the approved frozen sender and recipient')
+        token=hashlib.sha256((identity+':'+row[4]).encode()).hexdigest()
+        replacement='test-retry-'+token
+        self.store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING',
+            (replacement,'test-retry:'+token,'pending',row[1],'[]',None,None,self.clock().isoformat()))
+        self.store.operation('email-replacement:'+identity,'Confirmed rejected test replaced by '+replacement+'; preparation only, no email sent.')
+        return replacement
+
     def delivery_status(self,identity):
         row=self.store.execute('SELECT provider_id,state FROM outbox WHERE id=?',(identity,)).fetchone()
         if not row:raise ValueError('Unknown outbox message')
@@ -214,8 +249,8 @@ class Digest:
                 return 'cancelled_stale'
         # Freeze the exact payload and idempotency key before any network attempt.
         self.store.execute("UPDATE outbox SET state='sending',first_attempt_at=COALESCE(first_attempt_at,?),updated_at=? WHERE id=?",(now.isoformat(),now.isoformat(),identity))
-        request=urllib.request.Request('https://api.resend.com/emails',method='POST',data=body.encode(),headers={
-           'Authorization':'Bearer '+os.environ['RESEND_API_KEY'],'Content-Type':'application/json','Idempotency-Key':identity})
+        from .resend_api import request as resend_request
+        request=resend_request(body,os.environ['RESEND_API_KEY'],identity)
         try:
             with self.opener.open(request,timeout=self.settings.timeout) as response:
                 result=json.load(response)
@@ -227,7 +262,15 @@ class Digest:
             event('digest_accepted',outbox_id=identity,properties=len(json.loads(event_ids)))
             return 'sent'
         except Exception as exc:
-            if isinstance(exc,urllib.error.HTTPError) and exc.code in {400,401,403,404,405,413,422}:
+            evidence=None
+            if isinstance(exc,urllib.error.HTTPError):
+                from .resend_api import failure
+                evidence=failure(exc)
+                self.store.execute('INSERT INTO email_errors VALUES (?,?) ON CONFLICT(outbox_id) DO UPDATE SET payload=excluded.payload',(identity,json.dumps(evidence)))
+                event('resend_request_rejected',outbox_id=identity,**evidence)
+            definite=bool(isinstance(exc,urllib.error.HTTPError) and exc.code in {400,401,403,404,405,413,422}
+                and not first and (exc.code!=403 or evidence['confirmed_rejection']))
+            if definite:
                 with self.store.transaction():
                     self.store.execute("UPDATE outbox SET state='failed',updated_at=? WHERE id=?",(self.clock().isoformat(),identity))
                     for e in json.loads(event_ids):self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(e,))
