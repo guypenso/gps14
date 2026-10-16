@@ -16,3 +16,10 @@ new and missing-field properties, strict tax thresholds, price-reduction events,
 request approval caps across billing boundaries, DNS/proxy/TLS/timeout/rate-limit handling,
 daily-digest de-duplication, same-key retries and manual reconciliation after the safety window,
 permanent mail rejection, stale snapshot cancellation, output escaping and 2026–2028 DST schedules.
+
+## Controlled 100-listing POC update
+
+The POC extension was validated with **105 passed, 1 skipped** against SQLite and local PostgreSQL.
+The added tests verify exact URL decoding, plan-only execution, one listing page, a maximum of three
+unique tax candidates across resumes, complete initial counts, source/year/amount report fields,
+unknown coverage and absent listing links. No real RentCast/Resend requests were made.

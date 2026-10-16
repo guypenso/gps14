@@ -105,3 +105,10 @@ still apply. Tax year means latest available reported annual year, not a predict
 Offset pagination can shift while provider listings change. No MLS/Zillow/Redfin connector is implemented.
 The pipeline uses the current RentCast-only strategy. Credentials, live provider acceptance and Render
 billing approval remain deployment prerequisites; no live-provider success is claimed by offline tests.
+
+## Controlled proof of concept
+
+`python -m rentalsourcing.poc` prints the exact URL-encoded 100-listing request plan without any network
+or DB connection. After separate allowance approval, `--execute` reuses the existing collector/engine
+for one page and at most three unique tax candidates. It never sends emails or fetches a second page.
+See [the Hebrew POC notes](docs/POC_HE.md) for County-data limitations and the unmeasured coverage policy.

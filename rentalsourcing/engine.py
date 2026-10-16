@@ -51,7 +51,7 @@ class Engine:
             self.store.execute('INSERT INTO scan_tasks VALUES (?,?,0,?,?) ON CONFLICT(job_id,property_id) DO UPDATE SET priority=excluded.priority,event_id=excluded.event_id',
                 (job_id,identity,0 if kind=='price_reduction' else 1,event_id))
 
-    def run(self,job_id,day):
+    def run(self,job_id,day,*,candidate_limit=None,first_page_only=False):
         store=self.store;job=store.job(job_id,day);stats=job['stats']
         if job['state']=='complete':return dict(stats,already_complete=True)
         stats.pop('stop_reason',None)
@@ -68,6 +68,10 @@ class Engine:
                 if total_count is not None:stats['total']=total_count
                 new_offset=offset+len(rows)
                 collection_done=len(rows)<self.settings.page_size or (total_count is not None and new_offset>=total_count)
+                if first_page_only:
+                    stats['sample_only']=True
+                    stats['sample_truncated']=not collection_done
+                    collection_done=True
                 with store.transaction():
                     for row in rows:self.ingest(job_id,row)
                     stats['received']+=len(rows)
@@ -76,6 +80,13 @@ class Engine:
             if not collection_done:
                 stats['partial']=True;store.operation('pagination:'+job_id,'Listing page limit reached; resume this scan to continue.')
             tasks=store.execute('SELECT property_id,event_id FROM scan_tasks WHERE job_id=? AND done=0 ORDER BY priority,property_id',(job_id,)).fetchall()
+            if candidate_limit is not None:
+                if not 0<=candidate_limit<=3:raise ValueError('POC supports at most three tax candidates')
+                key='poc_selection:'+job_id
+                selected=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
+                identities=json.loads(selected[0]) if selected else [r[0] for r in tasks[:candidate_limit]]
+                if not selected:store.save_setting(key,identities)
+                tasks=[r for r in tasks if r[0] in identities]
             needed=sum(1 for identity,event_id in tasks if event_id and not store.get_tax(identity,self.clock().isoformat()))
             health=store.budget_health(self.settings,self.clock())
             if needed+health['days_remaining']>health['remaining']:
