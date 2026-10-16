@@ -91,6 +91,7 @@ def test_network_failure_then_manual_resume(store,boundary,settings,clock,provid
     provider.failures=[urllib.error.URLError(TimeoutError('simulated timeout'))]
     with pytest.raises(urllib.error.URLError):execute(store,boundary,settings,clock,provider)
     assert store.job('daily:test','x')['state']=='failed'
+    clock.advance(minutes=16)
     stats,c=execute(store,boundary,settings,clock,provider)
     assert not stats['partial'] and store.job('daily:test','x')['state']=='complete'
     assert store.execute('SELECT COUNT(*) FROM runs').fetchone()[0]==2

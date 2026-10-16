@@ -55,7 +55,7 @@ def clock():return Clock()
 
 @pytest.fixture
 def settings():
-    return Settings(enabled=True,email_enabled=True,email_to='investor@example.test',email_from='fixture@example.test',
+    return Settings(enabled=True,email_enabled=True,email_approval_id='fixture-email-approval',email_to='investor@example.test',email_from='fixture@example.test',
                     approval_id='local-test-only',approved_requests=10000,per_run=100,per_day=1000,per_month=10000,page_size=2)
 
 

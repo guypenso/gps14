@@ -57,6 +57,7 @@ def test_recovered_scan_clears_previous_error_and_records_run_times(store,bounda
     engine=Engine(store,boundary,Client(store,settings,clock,provider,lambda _:None),settings,clock)
     with pytest.raises(urllib.error.URLError):engine.run('recovered',clock().date().isoformat())
     assert store.job('recovered','ignored')['stats']['error_type']=='URLError'
+    clock.advance(minutes=16)
     result=engine.run('recovered',clock().date().isoformat())
     assert 'error_type' not in result and not result['partial']
     for (payload,) in store.execute('SELECT payload FROM runs').fetchall():
