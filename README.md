@@ -1,5 +1,12 @@
 # RentalSourcing
 
+Current launch instructions: [מדריך הפעלה מעודכן](docs/LAUNCH_HE.md).
+Live acceptance status: [בדיקת החיבור האמיתית](docs/LIVE_ACCEPTANCE_HE.md).
+
+The existing pipeline now includes a private, read-only Flask/Gunicorn dashboard.
+It never starts scans or sends messages from HTTP routes. Render provisions Web + Cron + PostgreSQL
+only after approval. Estimated baseline hosting is $15.50/month, excluding provider overages/taxes.
+
 Pittsburgh investment-property collector, built on the existing RentalSourcing repository and RentCast integration.
 
 The production entry point is `python -m rentalsourcing.cloud`. Provider traffic is disabled by default.
@@ -47,7 +54,7 @@ The build stops if this source cannot be fetched. Test polygons never substitute
 
 ## Render deployment
 
-`render.yaml` provisions one paid Cron job and one paid PostgreSQL instance **only when the user approves and
+`render.yaml` provisions one paid Web service, one paid Cron job and one paid PostgreSQL instance **only when the user approves and
 applies the Blueprint**. Its build installs pinned dependencies, downloads/verifies the boundary and runs
 an offline preflight. Runtime migrations are additive and keep initial-release tables intact.
 Do not copy Codex proxy/CA settings to Render. Normal verified HTTPS uses the runtime's own proxy/CA configuration.
@@ -112,3 +119,17 @@ billing approval remain deployment prerequisites; no live-provider success is cl
 or DB connection. After separate allowance approval, `--execute` reuses the existing collector/engine
 for one page and at most three unique tax candidates. It never sends emails or fetches a second page.
 See [the Hebrew POC notes](docs/POC_HE.md) for County-data limitations and the unmeasured coverage policy.
+
+## Dashboard
+
+Set DATABASE_URL and a private DASHBOARD_PASSWORD of at least 20 characters.
+Run `sh scripts/start_web.sh`; Render supplies PORT. Username defaults to owner.
+GET /healthz is a database health probe; /readyz and all data require HTTP Basic authentication
+over the platform HTTPS URL. /api/dashboard exposes only stored live-source observations;
+stale/missing mandatory data cannot be displayed as qualified. /api/email-preview never sends.
+Do not expose a localhost test server as a public production service.
+
+API_APPROVAL_MODE defaults to one_time. Optional rolling_32_days requires an explicit recurring
+allowance approval and counts all app attempts across the preceding 32 UTC dates, preventing a
+calendar reset from creating a new spending allowance. No mode monitors other applications using
+the provider account. Existing four-call approval remains a one-time allowance.

@@ -74,8 +74,8 @@ def main(argv=None):
         health=store.budget_health(settings)
         if args.scheduled:
             # Keep allowance available for later days instead of exhausting it early.
-            fair_share=max(1,health['remaining']//health['days_remaining']) if health['remaining'] else 0
-            settings=replace(settings,per_run=max(1,min(settings.per_run,fair_share or 1)))
+            allowance=store.scheduled_allowance(settings)
+            settings=replace(settings,per_run=max(1,allowance))
         stats={};failure=None
         try:stats=Engine(store,boundary,Client(store,settings),settings).run(job_id,day)
         except Exception as exc:
