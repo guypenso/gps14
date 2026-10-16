@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from .collector import LIVE
-from .core import demo_marked,verification,tax_verification
+from .core import demo_marked,verification,tax_verification,historical_reduction,number
 from .request import NoRedirect
 from .telemetry import event
 
@@ -41,12 +41,13 @@ def render(day,items,stats,health,operations):
     failed=bool(stats.get('error_type'))
     incomplete=failed or stats.get('partial')
     status='נכשלה / נדרשת בדיקה' if failed else ('חלקית / נדרשת השלמה' if incomplete else 'הושלמה')
-    lines=[f'RentalSourcing — {day}',f'מצב הסריקה: {status}']
+    lines=[f'RentalSourcing — {day}',('מבוסס על נתונים שמורים בלבד; לא בוצעה סריקה חדשה.' if stats.get('saved_data_only') else f'מצב הסריקה: {status}')]
     items=sorted(items,key=lambda item:item['kind']!='price_reduction')
     cards=[]
     for item in items:
         p=item['listing'];t=item['tax'];previous=item.get('previous_price')
         label='הורדת מחיר חדשה' if item['kind']=='price_reduction' else 'נכס חדש שאומת'
+        if stats.get('saved_data_only'):label='הורדת מחיר מתועדת' if item['kind']=='price_reduction' else 'נכס מאומת מנתונים שמורים'
         map_url='https://www.google.com/maps/search/?'+urllib.parse.urlencode({'api':1,'query':p['formattedAddress']})
         text=f"{label}: {p['formattedAddress']}\nמחיר: {money(p['price'])}"
         if previous is not None and previous>p['price']:
@@ -54,6 +55,7 @@ def render(day,items,stats,health,operations):
         text+=f"\nחדרי שינה: {p['bedrooms']} | אמבטיות: {p['bathrooms']} | שטח: {p['squareFootage']} sqft | ZIP: {p['zipCode']}"
         text+=f"\nמס שנתי לשנת {t['year']}: {money(t['annual'])} + $100 = {money(t['adjusted'])}"
         text+=f"\nמקור: RentCast Sale Listings | מזהה: {p['id']}\nאימות: {item['verified_at']} | נתוני מס נשלפו: {item['tax_fetched_at']}\nמפה: {map_url}"
+        if item.get('listing_observed_at'):text+='\nהמודעה נצפתה לאחרונה: '+item['listing_observed_at']
         link=listing_link(p)
         text+='\nמודעה: '+(link or 'קישור מודעה לא הוחזר על ידי הספק')
         lines.append(text)
@@ -112,7 +114,74 @@ class Digest:
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
         return outbox_id
 
+    def prepare_stored(self,day):
+        """Bootstrap unsent approved records; no scanner or API client is invoked."""
+        from .criteria import reevaluate
+        now=self.clock();reevaluate(self.store,self.boundary,now)
+        digest_day='daily:'+day
+        old=self.store.execute('SELECT id,state,first_attempt_at FROM outbox WHERE job_id=?',(digest_day,)).fetchone()
+        if old and (old[2] or old[1]=='sent'):return old[0]
+        items=[];ids=[]
+        with self.store.transaction():
+            for identity,payload,revision,observed in self.store.execute("SELECT id,payload,revision,observed_at FROM properties WHERE state='Qualified' AND source=? ORDER BY id",(LIVE,)).fetchall():
+                row=json.loads(payload);cached=self.store.get_tax(identity,now.isoformat())
+                if not cached or cached[1]!=LIVE or cached[0].get('id')!=identity or demo_marked(cached[0]):continue
+                if verification(row,self.boundary)[0]!='Candidate' or not recent_timestamp(observed,now):continue
+                state,tax,_=tax_verification(cached[0],now.date())
+                if state!='Qualified':continue
+                event_id=f'{identity}:price:{revision}'
+                existing=self.store.execute('SELECT state FROM deal_events WHERE id=?',(event_id,)).fetchone()
+                if existing and existing[0] in {'sent','superseded'}:continue
+                price_row=self.store.execute('SELECT previous_price,reduced FROM price_history WHERE property_id=? ORDER BY observed_at DESC,id DESC LIMIT 1',(identity,)).fetchone()
+                previous=price_row[0] if price_row and price_row[1] else historical_reduction(row)
+                reduced=number(previous) and previous>row['price']
+                kind='price_reduction' if reduced else 'new'
+                data=dict(listing=row,tax=tax,source=LIVE,tax_source=LIVE,verified_at=now.isoformat(),tax_fetched_at=cached[2],listing_observed_at=observed)
+                self.store.execute('INSERT INTO deal_events VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+                    (event_id,identity,kind,row['price'],previous,revision,'ready',json.dumps(data),now.isoformat()))
+                items.append(dict(data,kind=kind,previous_price=previous));ids.append(event_id)
+            text,markup=render(day,items,{'saved_data_only':True},self.store.budget_health(self.settings,now),self.store.operations())
+            body={'from':self.settings.email_from,'to':[self.settings.email_to],
+                'subject':f'RentalSourcing | {day} | '+(f'{len(items)} נכסים מאומתים מנתונים שמורים' if items else 'עדכון נתונים שמורים — אין הזדמנויות חדשות מאומתות'),
+                'text':text,'html':markup}
+            outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
+            if old:
+                previous_ids=json.loads(self.store.execute('SELECT event_ids FROM outbox WHERE id=?',(old[0],)).fetchone()[0])
+                for prior in previous_ids:self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(prior,))
+            self.store.execute("INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state='pending',payload=excluded.payload,event_ids=excluded.event_ids,updated_at=excluded.updated_at WHERE outbox.first_attempt_at IS NULL AND outbox.state IN ('pending','cancelled')",
+                (outbox_id,digest_day,'pending',json.dumps(body),json.dumps(ids),None,None,now.isoformat()))
+            for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
+        return outbox_id
+
+    def prepare_test(self):
+        if not self.settings.email_from or not self.settings.email_to:
+            raise ValueError('Configure EMAIL_FROM and EMAIL_TO privately before preparing test')
+        token=hashlib.sha256(json.dumps([self.settings.email_approval_id,self.settings.email_from,self.settings.email_to]).encode()).hexdigest()
+        identity='test-'+token
+        text='RentalSourcing — בדיקת מסירה מאושרת. לא בוצעה סריקת RentCast. מייל זה אינו התראת נכס ואינו מסמן הזדמנויות כנשלחות.'
+        body={'from':self.settings.email_from,'to':[self.settings.email_to],'subject':'RentalSourcing — בדיקת מסירה','text':text}
+        self.store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING',
+            (identity,'test:'+token,'pending',json.dumps(body),'[]',None,None,self.clock().isoformat()))
+        return identity
+
+    def delivery_status(self,identity):
+        row=self.store.execute('SELECT provider_id,state FROM outbox WHERE id=?',(identity,)).fetchone()
+        if not row:raise ValueError('Unknown outbox message')
+        if not row[0]:return dict(outbox_id=identity,state=row[1],delivered=False)
+        if not os.getenv('RESEND_API_KEY'):raise ValueError('RESEND_API_KEY missing')
+        request=urllib.request.Request('https://api.resend.com/emails/'+urllib.parse.quote(row[0],safe=''),headers={'Authorization':'Bearer '+os.environ['RESEND_API_KEY']})
+        with self.opener.open(request,timeout=self.settings.timeout) as response:
+            data=json.load(response)
+            if response.status!=200 or data.get('id')!=row[0]:raise RuntimeError('Resend delivery lookup not confirmed')
+        return dict(outbox_id=identity,state=data.get('last_event','unknown'),delivered=data.get('last_event')=='delivered')
+
     def send(self,identity):
+        if self.store.pg:self.store.execute('SELECT pg_advisory_lock(73541211)')
+        try:return self._send(identity)
+        finally:
+            if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(73541211)')
+
+    def _send(self,identity):
         if not self.settings.email_enabled or not self.settings.email_approval_id or self.settings.environment!='production':raise PermissionError('Production email disabled or not approved')
         if not os.getenv('RESEND_API_KEY'):raise ValueError('RESEND_API_KEY missing')
         row=self.store.execute('SELECT state,payload,event_ids,first_attempt_at FROM outbox WHERE id=?',(identity,)).fetchone()
@@ -125,20 +194,24 @@ class Digest:
         if first and now-dt.datetime.fromisoformat(first)>=dt.timedelta(hours=23):
             self.store.operation('reconcile:'+identity,'Resend result needs manual reconciliation; no automatic retry after idempotency safety window.')
             raise ReconciliationRequired('Check this message in Resend before retrying')
-        if not first:
-            for event_id in json.loads(event_ids):
-                ev=self.store.execute('SELECT property_id,revision,price FROM deal_events WHERE id=?',(event_id,)).fetchone()
-                p=self.store.get_property(ev[0]) if ev else None
-                cached=self.store.get_tax(ev[0],now.isoformat()) if ev else None
-                valid=bool(p and p['state']=='Qualified' and p['source']==LIVE and p['revision']==ev[1] and p['payload'].get('price')==ev[2] and
-                    recent_timestamp(p['observed_at'],now) and cached and cached[1]==LIVE and cached[0].get('id')==ev[0] and not demo_marked(cached[0]) and
-                    verification(p['payload'],self.boundary)[0]=='Candidate' and tax_verification(cached[0],now.date())[0]=='Qualified')
-                if not valid:
-                    with self.store.transaction():
-                        self.store.execute("UPDATE outbox SET state='cancelled' WHERE id=?",(identity,))
-                        for e in json.loads(event_ids):self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(e,))
-                    self.store.operation('stale-email:'+identity,'Prepared digest became stale and was cancelled before sending.')
-                    return 'cancelled_stale'
+        envelope=json.loads(body)
+        if envelope.get('from')!=self.settings.email_from or envelope.get('to')!=[self.settings.email_to]:
+            raise PermissionError('Frozen email sender/recipient differ from approved configuration; prepare again before sending')
+        # Criteria apply on every attempt, including uncertain-delivery retries.
+        for event_id in json.loads(event_ids):
+            ev=self.store.execute('SELECT property_id,revision,price FROM deal_events WHERE id=?',(event_id,)).fetchone()
+            p=self.store.get_property(ev[0]) if ev else None
+            cached=self.store.get_tax(ev[0],now.isoformat()) if ev else None
+            valid=bool(p and p['state']=='Qualified' and p['source']==LIVE and p['revision']==ev[1] and p['payload'].get('price')==ev[2] and
+                recent_timestamp(p['observed_at'],now) and cached and cached[1]==LIVE and cached[0].get('id')==ev[0] and not demo_marked(cached[0]) and
+                verification(p['payload'],self.boundary)[0]=='Candidate' and tax_verification(cached[0],now.date())[0]=='Qualified')
+            if not valid:
+                if first:raise ReconciliationRequired('Saved email no longer meets current criteria; check previous delivery before proceeding')
+                with self.store.transaction():
+                    self.store.execute("UPDATE outbox SET state='cancelled' WHERE id=?",(identity,))
+                    for e in json.loads(event_ids):self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(e,))
+                self.store.operation('stale-email:'+identity,'Prepared digest became stale and was cancelled before sending.')
+                return 'cancelled_stale'
         # Freeze the exact payload and idempotency key before any network attempt.
         self.store.execute("UPDATE outbox SET state='sending',first_attempt_at=COALESCE(first_attempt_at,?),updated_at=? WHERE id=?",(now.isoformat(),now.isoformat(),identity))
         request=urllib.request.Request('https://api.resend.com/emails',method='POST',data=body.encode(),headers={

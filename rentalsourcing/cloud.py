@@ -13,7 +13,7 @@ from .geography import load_boundary
 from .digest import Digest
 from .engine import Engine
 from .request import diagnose
-from .schedule import scheduled_day,PITTSBURGH
+from .schedule import scheduled_day,ISRAEL
 from .storage import Store
 from .database import validate_postgres_url
 from .telemetry import event
@@ -30,7 +30,12 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description='RentalSourcing daily production collector')
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--check',action='store_true',help='Check config and boundary offline; no provider calls')
-    group.add_argument('--scheduled',action='store_true',help='Run at 08:00 Pittsburgh; resume a failed day safely')
+    group.add_argument('--scheduled',action='store_true',help='Explicit collector run in the Israel 08:00 window; requires API approval')
+    group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
+    group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
+    group.add_argument('--prepare-test-email',action='store_true',help='Prepare a delivery test without sending or consuming property events')
+    group.add_argument('--email-status',metavar='OUTBOX_ID',help='Read Resend delivery status; no send')
+    parser.add_argument('--email-day',help='Preparation target Israeli date YYYY-MM-DD')
     group.add_argument('--resume',metavar='JOB_ID',help='Resume persisted scan with the same cursor/tasks')
     group.add_argument('--status',action='store_true',help='Show persisted scans, pending verification and budget')
     group.add_argument('--migrate',action='store_true',help='Apply additive database migrations only')
@@ -48,11 +53,11 @@ def main(argv=None):
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
         if not exists:raise ValueError('Official city boundary missing; run scripts/fetch_boundary.py in the deployment environment')
         return
-    day=dt.datetime.now(dt.timezone.utc).astimezone(PITTSBURGH).date().isoformat()
-    if args.scheduled:
+    day=dt.datetime.now(dt.timezone.utc).astimezone(ISRAEL).date().isoformat()
+    if args.scheduled or args.scheduled_email:
         day=scheduled_day()
-        if day is None:event('outside_pittsburgh_schedule');return
-    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email
+        if day is None:event('outside_israel_schedule');return
+    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
     validate_postgres_url(url)
@@ -62,6 +67,10 @@ def main(argv=None):
             if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
             event('scan_already_running');return
         store.migrate()
+        boundary=load_boundary(settings.boundary_file)
+        from .criteria import reevaluate
+        changed=reevaluate(store,boundary,dt.datetime.now(dt.timezone.utc))
+        event('stored_criteria_rechecked',changed=changed)
         if args.migrate:event('migrations_complete');return
         if args.status:
             event('status',budget=store.budget_health(settings),
@@ -69,13 +78,24 @@ def main(argv=None):
               states=store.execute('SELECT state,COUNT(*) FROM properties GROUP BY state').fetchall(),
               outbox=store.execute('SELECT id,state,provider_id FROM outbox ORDER BY updated_at DESC LIMIT 10').fetchall(),
               operations=store.operations());return
-        boundary=load_boundary(settings.boundary_file)
         digest=Digest(store,boundary,settings)
+        if args.prepare_test_email:event('test_email_prepared',outbox_id=digest.prepare_test());return
+        if args.email_status:event('email_delivery',**digest.delivery_status(args.email_status));return
+        if args.prepare_email or args.scheduled_email:
+            target=dt.date.fromisoformat(args.email_day).isoformat() if args.email_day else day
+            if args.scheduled_email and args.email_day:raise ValueError('Scheduled email date must be the current Israeli date')
+            message=digest.prepare_stored(target)
+            event('stored_email_prepared',outbox_id=message,day=target,source='saved_data_only')
+            if args.scheduled_email:
+                result=digest.send(message)
+                if result in {'sent','already_sent'}:store.claim_scheduled_day('israel:'+target)
+                event('stored_email_result',result=result,outbox_id=message)
+            return
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203'],tax_add=100,tax_strict_max=2000))
+        store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203','15204'],tax_add=100,tax_strict_max=2000))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()

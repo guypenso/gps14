@@ -66,9 +66,9 @@ services:
     autoDeployTrigger: checksPass
     plan: starter
     region: virginia
-    schedule: "0 12,13 * * *"
+    schedule: "0 5,6 * * *"
     buildCommand: "pip install -r requirements.txt && python -m rentalsourcing.cloud --check"
-    startCommand: "python -m rentalsourcing.cloud --scheduled"
+    startCommand: "python -m rentalsourcing.cloud --scheduled-email"
     envVars:
       - fromGroup: rentalsourcing-runtime
       - key: ENABLE_RENTCAST
