@@ -1,155 +1,171 @@
-"""Read-only dashboard. Run: python -m rentalsourcing.dashboard (PORT defaults to 8080).
-
-Use HTTPS at the hosting proxy. Enter DASHBOARD_TOKEN in the page; it is sent only
-as an Authorization header, held in page memory, and never saved in browser storage.
-"""
+"""Private read-only dashboard. HTTP routes never call RentCast or send email."""
 import datetime as dt
 import hmac
 import json
+import logging
 import os
-import sqlite3
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from pathlib import Path
+from urllib.parse import urlencode
+from flask import Flask,jsonify,render_template,request,Response
+from .collector import LIVE
+from .core import verification,tax_verification,demo_marked,number
+from .digest import render as render_digest
+from .geography import load_boundary
+from .poc import safe_listing_link
+from .storage import Store
+from .telemetry import event
+
+LABELS={'Qualified':'מאומת','Pending Verification':'ממתין לאימות','Rejected':'נפסל'}
+REASONS={'excluded_zip':'מיקוד מוחרג','price':'מחיר חסר או מחוץ לתקרה','bedrooms':'מספר חדרי שינה חסר או נמוך מ־3',
+ 'bathrooms':'מספר אמבטיות חסר או נמוך מ־1','squareFootage':'שטח חסר או נמוך מ־1,000 sqft',
+ 'outside_city_or_boundary':'מחוץ לגבול העיר או על הגבול','coordinates':'קואורדינטות חסרות או לא תקינות',
+ 'annual_tax_too_high':'המס השנתי בתוספת $100 אינו נמוך מ־$2,000','missing_tax_history':'היסטוריית מס חסרה',
+ 'invalid_latest_tax_amount':'סכום המס האחרון חסר או לא תקין','missing_tax_year':'שנת מס חסרה',
+ 'tax_not_verified':'נתוני המס טרם אומתו','stale_listing':'אימות המודעה ישן מ־24 שעות',
+ 'tax_cache_expired':'נדרש רענון נתוני המס','city_boundary_unavailable':'גבול העיר הרשמי אינו זמין לאימות',
+ 'tax_identity_or_source_mismatch':'נתוני המס אינם תואמים בוודאות לנכס',
+ 'tax_refresh_not_needed_no_new_event':'המס דורש רענון; לא נשלחה התראה חדשה',
+ 'non_live_source':'מקור הנתונים לא אומת','zipCode':'מיקוד חסר','address':'כתובת חסרה','property_id':'מזהה נכס חסר',
+ 'status':'המודעה אינה פעילה למכירה','state':'הנכס אינו בפנסילבניה'}
+
+class StructuralBoundary:
+    def contains(self,row):return True
 
 
-class Dashboard:
-    def __init__(self, database_url, token, production=True):
-        if not token or len(token) < 32:
-            raise ValueError('DASHBOARD_TOKEN must contain at least 32 characters')
-        self.url, self.token = database_url, token
-        self.pg = database_url.startswith(('postgres://', 'postgresql://'))
-        if not self.pg and (production or not database_url.startswith('sqlite:///')):
-            raise ValueError('Production dashboard requires PostgreSQL')
+def snapshot(store,boundary,now):
+    rows=store.execute('SELECT p.id,p.payload,p.state,p.reasons,p.source,p.observed_at,p.revision,t.payload,t.source,t.fetched_at,t.expires_at FROM properties p LEFT JOIN tax_history t ON p.id=t.property_id WHERE p.source=? ORDER BY p.observed_at DESC,p.id LIMIT 10001',(LIVE,)).fetchall()
+    truncated=len(rows)>10000;items=[];counts={s:0 for s in LABELS};failures={}
+    histories={}
+    for r in store.execute('SELECT property_id,price,previous_price,reduced,observed_at FROM (SELECT property_id,price,previous_price,reduced,observed_at,ROW_NUMBER() OVER (PARTITION BY property_id ORDER BY observed_at DESC,id DESC) AS rn FROM price_history) h WHERE rn<=20 ORDER BY observed_at DESC').fetchall():
+        histories.setdefault(r[0],[]).append(dict(price=r[1],previous_price=r[2],reduced=bool(r[3]),observed_at=r[4]))
+    reductions={r[0]:(r[1],r[2]) for r in store.execute("SELECT e.property_id,e.revision,e.previous_price FROM deal_events e JOIN properties p ON p.id=e.property_id AND p.revision=e.revision WHERE e.kind='price_reduction' AND p.source=?",(LIVE,)).fetchall()}
+    for identity,payload,state,reasons,source,observed,revision,tax_json,tax_source,tax_fetched,tax_expires in rows[:10000]:
+        p=json.loads(payload)
+        if demo_marked(p):continue
+        reasons=json.loads(reasons);tax=None
+        basic,problems=verification(p,boundary or StructuralBoundary())
+        if basic=='Rejected':state='Rejected';reasons=problems
+        elif basic=='Pending Verification':state=basic;reasons=problems
+        else:
+            missing=[]
+            if boundary is None:missing.append('city_boundary_unavailable')
+            try:
+                if now-dt.datetime.fromisoformat(observed)>dt.timedelta(hours=24):missing.append('stale_listing')
+            except (TypeError,ValueError):missing.append('stale_listing')
+            if tax_json and tax_source==LIVE:
+                record=json.loads(tax_json)
+                if record.get('id')==identity and not demo_marked(record):
+                    tax_state,tax,tax_reason=tax_verification(record,now.date())
+                    if tax_reason:missing.append(tax_reason)
+                    if tax_state=='Rejected':state='Rejected';reasons=[tax_reason]
+                else:missing.append('tax_identity_or_source_mismatch')
+            else:missing.append('missing_tax_history')
+            if not tax_expires or tax_expires<=now.isoformat():missing.append('tax_cache_expired')
+            if state!='Rejected' and missing:state='Pending Verification';reasons=list(dict.fromkeys(reasons+missing))
+            # HTTP reads can downgrade stale data; only the collection engine may approve a property.
+        if state not in counts:state='Pending Verification'
+        counts[state]+=1
+        if state!='Qualified':
+            for reason in reasons:failures[reason]=failures.get(reason,0)+1
+        history=histories.get(identity,[])
+        reduced=bool(history and history[0]['reduced'] and number(p.get('price')) and history[0]['price']==p['price']);previous=history[0]['previous_price'] if history else None
+        ev=reductions.get(identity)
+        if not reduced and ev and ev[0]==revision and number(ev[1]) and number(p.get('price')) and ev[1]>p['price']:
+            reduced=True;previous=ev[1]
+        items.append(dict(id=identity,address=p.get('formattedAddress') or 'כתובת חסרה',price=p.get('price'),bedrooms=p.get('bedrooms'),
+          bathrooms=p.get('bathrooms'),squareFootage=p.get('squareFootage'),zipCode=p.get('zipCode'),state=state,label=LABELS[state],
+          reasons=reasons,reason_text=[REASONS.get(x,x) for x in reasons],source='RentCast Sale Listings',
+          observed_at=observed,tax_year=tax['year'] if tax else None,annual_tax=tax['annual'] if tax else None,
+          adjusted_tax=tax['adjusted'] if tax else None,tax_fetched_at=tax_fetched,tax_source='RentCast Property Records' if tax else None,
+          price_reduction=reduced,previous_price=previous,price_history=history,listing_url=safe_listing_link(p),
+          map_url='https://www.google.com/maps/search/?'+urlencode({'api':1,'query':p.get('formattedAddress','')})))
+    items.sort(key=lambda p:(not p['price_reduction'],p['state']!='Qualified',p['address']))
+    jobs=[dict(id=r[0],day=r[1],state=r[2],stats=json.loads(r[3]),updated_at=r[4]) for r in store.execute('SELECT id,day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 10').fetchall()]
+    usage=[dict(period=r[0],attempts=r[1]) for r in store.execute('SELECT period,used FROM usage ORDER BY period LIMIT 100').fetchall()]
+    outbox=[dict(id=r[0],state=r[1],provider_id=r[2],updated_at=r[3]) for r in store.execute('SELECT id,state,provider_id,updated_at FROM outbox ORDER BY updated_at DESC LIMIT 10').fetchall()]
+    return dict(properties=items,counts=counts,total=len(items),truncated=truncated,rejection_reasons=failures,
+      boundary_verified=boundary is not None,jobs=jobs,usage=usage,outbox=outbox,operations=store.operations(),
+      coverage=dict(state='לא נמדד',percent=None,sample_size=0),generated_at=now.isoformat())
 
-    def connect(self):
-        if self.pg:
-            import psycopg
-            db = psycopg.connect(self.url, connect_timeout=10, client_encoding='utf8')
-            db.execute('SET TRANSACTION READ ONLY')
-            db.execute("SET LOCAL statement_timeout = '5000ms'")
-            return db
-        path = self.url[len('sqlite:///'):]
-        from pathlib import Path
-        return sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)
 
-    def healthy(self):
-        db = self.connect()
+def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
+    app=Flask(__name__);app.config.update(TESTING=testing,MAX_CONTENT_LENGTH=1024,PROPAGATE_EXCEPTIONS=False)
+    url=database_url or os.getenv('DATABASE_URL','')
+    if not testing and not url.startswith(('postgres://','postgresql://')):raise ValueError('Dashboard requires PostgreSQL')
+    username=os.getenv('DASHBOARD_USERNAME','owner');password=os.getenv('DASHBOARD_PASSWORD','')
+    if len(password)<20:raise ValueError('Set DASHBOARD_PASSWORD to at least 20 characters')
+    clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
+    if boundary is None:
+        try:boundary=load_boundary(os.getenv('CITY_BOUNDARY_FILE','data/pittsburgh.geojson'))
+        except (OSError,ValueError,KeyError):event('dashboard_boundary_unavailable')
+    if not testing:
+        s=Store(url)
         try:
-            # Health means the scanner schema is provisioned, not just a reachable DB.
-            for table in ('properties', 'scan_jobs', 'outbox', 'usage'):
-                db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone()
-        finally:
-            db.close()
+            if s.lock():s.migrate()
+        finally:s.close()
 
-    def snapshot(self):
-        now = dt.datetime.now(dt.timezone.utc)
-        db = self.connect()
+    @app.before_request
+    def authenticate():
+        if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
+        auth=request.authorization
+        valid=bool(auth and hmac.compare_digest((auth.username or '').encode(),username.encode()) & hmac.compare_digest((auth.password or '').encode(),password.encode()))
+        if not valid:return Response('נדרשת כניסה לדשבורד',401,{'WWW-Authenticate':'Basic realm="RentalSourcing", charset="UTF-8"'},content_type='text/plain; charset=utf-8')
+
+    @app.after_request
+    def secure_headers(response):
+        response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff';response.headers['X-Frame-Options']='DENY'
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['Content-Security-Policy']="default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        response.headers['Strict-Transport-Security']='max-age=31536000'
+        return response
+
+    def data():
+        s=Store(url,initialize=False)
+        try:return snapshot(s,boundary,clock())
+        finally:s.close()
+
+    @app.get('/healthz')
+    def health():
         try:
-            observations = []
-            for identity, payload, observed in db.execute('SELECT id,payload,observed_at FROM observations ORDER BY observed_at DESC LIMIT 200').fetchall():
-                row = json.loads(payload)
-                item = {key: row[key] for key in ('formattedAddress','price','bedrooms','bathrooms','squareFootage','latitude','longitude','_validation','validation','tax','qualification') if key in row}
-                observations.append(dict(id=identity, observed_at=observed, **item))
-            runs = [dict(id=i, **json.loads(p)) for i,p in db.execute('SELECT id,payload FROM runs LIMIT 100').fetchall()]
-            notifications = []
-            for identity,state,payload,updated in db.execute('SELECT id,state,payload,updated_at FROM notifications ORDER BY updated_at DESC LIMIT 200').fetchall():
-                row = json.loads(payload)
-                notifications.append(dict(id=identity,state=state,tax=row.get('tax'),updated_at=updated))
-            properties = []
-            from .core import tax_verification
-            for identity,payload,state,reasons,source,observed,tax_payload,tax_source,fetched,expires in db.execute(
-                'SELECT p.id,p.payload,p.state,p.reasons,p.source,p.observed_at,t.payload,t.source,t.fetched_at,t.expires_at FROM properties p LEFT JOIN tax_history t ON t.property_id=p.id ORDER BY p.observed_at DESC LIMIT 200').fetchall():
-                row=json.loads(payload)
-                item={key:row.get(key) for key in ('formattedAddress','price','bedrooms','bathrooms','squareFootage')}
-                stored_state = state
-                effective_reasons = json.loads(reasons)
-                def timestamp(value):
-                    try:
-                        parsed = dt.datetime.fromisoformat(value.replace('Z','+00:00'))
-                        return parsed if parsed.tzinfo is not None else None
-                    except (ValueError, TypeError, AttributeError):
-                        return None
-                observed_time, fetched_time, expiry = map(timestamp, (observed, fetched, expires))
-                freshness_reasons = []
-                if not observed_time or not dt.timedelta(0) <= now-observed_time <= dt.timedelta(hours=24):
-                    freshness_reasons.append('stale_or_invalid_listing_timestamp')
-                if source != 'rentcast-live': freshness_reasons.append('non_live_listing_source')
-                tax_state, tax, _ = tax_verification(json.loads(tax_payload), now.date()) if tax_payload else ('Pending Verification', None, None)
-                tax_current = bool(tax_payload and tax_source == 'rentcast-live' and fetched_time and fetched_time <= now and expiry and expiry > now)
-                if not tax_current:
-                    freshness_reasons.append('missing_expired_or_non_live_tax')
-                    tax = None
-                elif tax_state != 'Qualified' and stored_state == 'Qualified':
-                    freshness_reasons.append('tax_no_longer_qualified')
-                if stored_state == 'Qualified' and freshness_reasons:
-                    state = 'Pending Verification'
-                effective_reasons = list(dict.fromkeys(effective_reasons + freshness_reasons))
-                properties.append(dict(id=identity,**item,state=state,stored_state=stored_state,reasons=effective_reasons,source=source,observed_at=observed,tax=tax,tax_current=tax_current,tax_source=tax_source,tax_fetched_at=fetched,tax_expires_at=expires))
-            jobs=[dict(id=i,day=d,state=state,stats=json.loads(stats),updated_at=updated) for i,d,state,stats,updated in db.execute('SELECT id,day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 100').fetchall()]
-            outbox=[dict(id=i,state=state,updated_at=updated) for i,state,updated in db.execute('SELECT id,state,updated_at FROM outbox ORDER BY updated_at DESC LIMIT 100').fetchall()]
-            usage = dict(db.execute('SELECT period,used FROM usage').fetchall())
-            return dict(properties=properties,jobs=jobs,outbox=outbox,observations=observations,runs=runs,notifications=notifications,usage=usage,
-                        note='Stored observations are not necessarily qualified deals. Tax and city validation must be recorded explicitly. Displayed Qualified state requires live sources, a listing observed within 24 hours and unexpired verified tax. Stored state is retained separately; this page does not recheck city geometry or fetch new listings. Results are limited to 200 properties/observations and 100 jobs/runs.')
-        finally:
-            db.close()
+            s=Store(url,initialize=False)
+            try:
+                if s.execute('SELECT version FROM schema_versions WHERE version=2').fetchone() is None:
+                    raise ValueError('Database migrations are missing')
+            finally:s.close()
+            return jsonify(status='ok')
+        except Exception as exc:
+            event('dashboard_database_unavailable',error_type=type(exc).__name__)
+            return jsonify(status='unavailable'),503
 
+    @app.get('/readyz')
+    def ready():
+        h=health()
+        if isinstance(h,tuple):return h
+        return (jsonify(status='ready' if boundary else 'boundary_missing',boundary_verified=boundary is not None),200 if boundary else 503)
 
-PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>RentalSourcing</title>
-<style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;background:#f5f7fa;color:#172033}input,button{padding:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border-radius:8px}small{display:block;margin:15px 0}</style>
-<h1>RentalSourcing</h1><p>Live stored scanner results</p><form id="login"><label>Dashboard token <input id="token" type="password" required autocomplete="off"></label> <button>Connect</button></form>
-<small>Results refresh every 60 seconds while this page is open. Observations alone do not confirm qualification.</small><p id="status">Authentication required</p><main id="results"></main><script src="/app.js"></script></html>'''
-SCRIPT = b'''let secret='';let pending=false;
-async function refresh(){if(!secret||pending)return;pending=true;try{const r=await fetch('/api/status',{headers:{Authorization:'Bearer '+secret},cache:'no-store'});if(!r.ok)throw Error(r.status===401?'Invalid token':'Service unavailable');const data=await r.json();const root=document.getElementById('results');root.replaceChildren();const title=document.createElement('h2');title.textContent='Properties';root.append(title);const table=document.createElement('table');for(const values of [['Address','Price','State','Reasons','Annual tax + $100','Tax source','Listing observed','Tax expires'],...data.properties.map(p=>[p.formattedAddress,p.price,p.state,p.reasons.join(', '),p.tax?p.tax.adjusted:'Unverified',p.tax_source||'Unavailable',p.observed_at,p.tax_expires_at||'Unavailable'])]){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value===null?'Unknown':String(value);td.style.padding='10px';tr.append(td)}table.append(tr)}root.append(table);for(const key of ['note','jobs','runs','usage','outbox','observations','notifications']){const h=document.createElement('h2');h.textContent=key;const p=document.createElement('pre');p.textContent=JSON.stringify(data[key],null,2);root.append(h,p)}document.getElementById('status').textContent='Updated '+new Date().toLocaleString()}catch(e){document.getElementById('status').textContent=e.message}finally{pending=false}}
-document.getElementById('login').addEventListener('submit',e=>{e.preventDefault();secret=document.getElementById('token').value;document.getElementById('token').value='';refresh()});setInterval(refresh,60000);'''
+    @app.get('/')
+    def index():
+        d=data();state=request.args.get('state','all')
+        selected=[p for p in d['properties'] if state=='all' or p['state']==state]
+        try:page=max(1,int(request.args.get('page','1')))
+        except ValueError:page=1
+        return render_template('dashboard.html',data=d,properties=selected[(page-1)*100:page*100],state=state,page=page,has_next=len(selected)>page*100,testing=testing)
 
+    @app.get('/api/dashboard')
+    def api():return jsonify(data())
 
-def handler_for(app):
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, fmt, *args):
-            # Do not log request URLs or Authorization headers.
-            pass
+    @app.get('/api/email-preview')
+    def email_preview():
+        s=Store(url,initialize=False)
+        try:
+            record=s.execute('SELECT payload,state FROM outbox ORDER BY updated_at DESC LIMIT 1').fetchone()
+            if record:
+                body=json.loads(record[0]);return jsonify(mode='preview_only_no_send',state=record[1],subject=body.get('subject'),text=body.get('text'))
+            return jsonify(mode='preview_only_no_send',state='not_prepared',subject='RentalSourcing',text='טרם הוכן מייל יומי. אין שליחת מייל מתוך הדשבורד.')
+        finally:s.close()
 
-        def reply(self, code, payload, kind='application/json'):
-            if not isinstance(payload, bytes): payload = json.dumps(payload).encode()
-            self.send_response(code)
-            self.send_header('Content-Type', kind + '; charset=utf-8')
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'")
-            self.send_header('Content-Length', str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+    @app.errorhandler(500)
+    def unavailable(error):return jsonify(error='הנתונים אינם זמינים כרגע; בדוק את לוג השירות'),503
 
-        def do_GET(self):
-            route = urlsplit(self.path)
-            if route.query:
-                return self.reply(400, {'error':'Query parameters are not accepted'})
-            if route.path == '/': return self.reply(200, PAGE, 'text/html')
-            if route.path == '/app.js': return self.reply(200, SCRIPT, 'application/javascript')
-            if route.path == '/healthz':
-                try: app.healthy()
-                except Exception: return self.reply(503, {'status':'unavailable'})
-                return self.reply(200, {'status':'ok'})
-            if route.path != '/api/status': return self.reply(404, {'error':'Not found'})
-            auth = self.headers.get('Authorization', '')
-            if not hmac.compare_digest(auth.encode(), ('Bearer ' + app.token).encode()):
-                return self.reply(401, {'error':'Authentication required'})
-            try: snapshot = app.snapshot()
-            except Exception: return self.reply(503, {'error':'Database unavailable'})
-            return self.reply(200, snapshot)
-    return Handler
-
-
-def main():
-    app = Dashboard(os.environ['DATABASE_URL'], os.environ['DASHBOARD_TOKEN'], production=os.getenv('APP_ENV') != 'development')
-    from .storage import Store
-    store = Store(app.url)
-    try: store.migrate()
-    finally: store.close()
-    server = ThreadingHTTPServer(('0.0.0.0', int(os.getenv('PORT','8080'))), handler_for(app))
-    try: server.serve_forever()
-    finally: server.server_close()
-
-
-if __name__ == '__main__': main()
+    return app

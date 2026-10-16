@@ -1,83 +1,135 @@
 # RentalSourcing
 
-Pittsburgh investment-property sourcing with RentCast, official city-boundary
-validation, annual tax-history filtering, PostgreSQL, an authenticated dashboard,
-and a durable daily email digest.
+Current launch instructions: [מדריך הפעלה מעודכן](docs/LAUNCH_HE.md).
+Live acceptance status: [בדיקת החיבור האמיתית](docs/LIVE_ACCEPTANCE_HE.md).
 
-## Verified status — 2026-10-16
+The existing pipeline now includes a private, read-only Flask/Gunicorn dashboard.
+It never starts scans or sends messages from HTTP routes. Render provisions Web + Cron + PostgreSQL
+only after approval. Estimated baseline hosting is $15.50/month, excluding provider overages/taxes.
 
-Live acceptance used exactly four authorized RentCast attempts: 100 sale listings
-and three property-record lookups. The API reported 422 matching listings, of
-which only the first 100 were sampled. Fifty-eight were rejected (33 outside city
-limits, 25 excluded ZIPs), 42 passed initial verification, three passed the full
-tax check, and 39 remain Pending Verification. This is not a citywide scan.
+Pittsburgh investment-property collector, built on the existing RentalSourcing repository and RentCast integration.
 
-The official eight-feature city boundary and provenance checksum are bundled and
-verified offline; scans do not require ArcGIS network access. A real local
-PostgreSQL database persists the live sample, tax history and exhausted 4/4
-approval ledger. The dashboard was tested over real HTTP against this database.
+The production entry point is `python -m rentalsourcing.cloud`. Provider traffic is disabled by default.
+No RentCast call is possible on a cache miss until both the enable flag and a persistent user-approved
+request allowance are configured. No paid services are provisioned by installing or testing this repository.
 
-**Not deployed to Render. No real email sent. No paid resource created.**
-Render configuration is ready for review, with provider switches disabled and
-new API allowance zero. All four approved API attempts have been consumed;
-ongoing daily scans require a new explicit budget and cannot reuse this approval.
+## What runs
 
-See [readiness](READINESS_HE.md), [deployment](docs/RENDER_DEPLOYMENT.md), and
-[validation evidence](docs/VALIDATION.md).
+1. Fetch Active Sale Listings using early server-side filters and pages of up to 500 records.
+2. Persist every observed record, including missing-field records as **Pending Verification**.
+3. Verify the actual city polygon, excluded ZIPs, attributes and price. Known failures are Rejected.
+4. Prioritize price reductions, reuse durable tax cache, and fetch property tax history only when needed.
+5. Require `Latest Available Annual Tax + $100 < $2,000`. Missing latest-year amount stays Pending Verification.
+6. Persist one daily Resend digest containing new verified properties or newly observed price reductions.
+7. Save cursors, tasks, observations, price revisions, tax history, configuration, quota usage and delivery state in PostgreSQL.
 
-## Criteria
+All criteria remain fixed: inside Pittsburgh PA, Active/For Sale, bedrooms >=3, bathrooms >=1,
+living area >=1,000 sqft, price <=$200,000, ZIP 15210 and 15203 excluded. There is no demo fallback.
 
-Active PA listings inside the official Pittsburgh polygon; ZIP 15210 and 15203
-excluded; at least three bedrooms, one bathroom, 1,000 sqft; price at most
-$200,000. Missing evidence stays Pending Verification. Unverified locations
-cannot qualify. Latest reported non-future annual tax plus $100 must be strictly
-less than $2,000. A missing latest-year amount cannot fall back to an older year.
-Tax year is always displayed; latest available does not promise current-year tax.
+## Quick local validation
 
-## Run checks
+Python 3.12 is the production version. Use an isolated virtual environment:
 
 ```sh
-pip install -r requirements-dev.txt
-python -m pytest -q
-python -m rentalsourcing.cloud --check
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
 ```
 
-Set `TEST_DATABASE_URL` to an isolated local PostgreSQL test database to include
-integration checks. Never point tests at production. Tests mock provider calls.
+Without `TEST_DATABASE_URL`, PostgreSQL tests are explicitly skipped. To run them, provide a local disposable
+PostgreSQL database; tests create and drop isolated schemas. **Never point TEST_DATABASE_URL at production.**
+No real RentCast or Resend requests occur in the tests: the default HTTP opener is blocked and transports
+are controlled test doubles. PostgreSQL 16 integration was also exercised in the development environment.
+
+```sh
+TEST_DATABASE_URL=postgresql://postgres:local-tests-only@127.0.0.1:55432/rentalsourcing .venv/bin/python -m pytest -q
+```
+
+## Production geometry
+
+`python scripts/fetch_boundary.py` downloads the City of Pittsburgh's official CityBoundary layer linked
+from WPRDC. It requests WGS84, checks polygon topology and representative inside/outside points, and records
+the source, retrieval time and SHA256. The production loader validates the manifest and checksum.
+The build stops if this source cannot be fetched. Test polygons never substitute for production geography.
+
+## Render deployment
+
+`render.yaml` provisions one paid Web service, one paid Cron job and one paid PostgreSQL instance **only when the user approves and
+applies the Blueprint**. Its build installs pinned dependencies, downloads/verifies the boundary and runs
+an offline preflight. Runtime migrations are additive and keep initial-release tables intact.
+Do not copy Codex proxy/CA settings to Render. Normal verified HTTPS uses the runtime's own proxy/CA configuration.
+
+Read [the Hebrew activation guide](CLOUD_GUIDE_HE.md) and [the current readiness report](READINESS_HE.md).
+The configured UTC schedule is `0 12,13 * * *`; `--scheduled` only executes the slot corresponding to 08:00
+America/New_York. A complete scheduled job is skipped on repeat; a failed/partial job can be resumed.
+Render scheduling can be delayed; this is an intended start time, not a second-level timing guarantee.
+
+## Commands
+
+```sh
+python -m rentalsourcing.cloud --check            # Offline config/geometry preflight, no DB/provider requests
+python -m rentalsourcing.cloud --migrate          # PostgreSQL migrations only
+python -m rentalsourcing.cloud --status           # DB status, budgets, pending verification and outbox
+python -m rentalsourcing.cloud                   # Manual scan; prints its resumable job ID
+python -m rentalsourcing.cloud --scheduled       # 08:00 Pittsburgh guard
+python -m rentalsourcing.cloud --resume JOB_ID   # Resume cursor/tasks; no successful pages repeated
+python -m rentalsourcing.cloud --retry-email ID  # Same frozen body/key, within 23h safety window
+python -m rentalsourcing.cloud --reconcile-email ID --provider-message-id ACTUAL_RESEND_ID
+```
+
+Reconciliation is a manual record of acceptance verified in Resend; it does not send another message.
+Only one digest is prepared per local day, including for manual runs. Events arriving after that day's
+message remain eligible for the next day's digest after a fresh listing verification.
+
+## Allowances, cache and billing
+
+Copy `.env.example` into private runtime settings, never commit actual values. `API_APPROVAL_ID` identifies
+an explicit approval; `APPROVED_API_REQUESTS` is the cumulative cap for that approval and does not reset.
+There are also per-run, UTC-day and billing-cycle caps. Set BILLING_DAY to the account's cycle day (1–28;
+for a later date use 28 conservatively and retain the cumulative cap). All attempts consume the app allowance,
+including failures and optional retries. Other applications using the same provider key are outside this counter.
+
+Defaults: approved allowance **0**, 4 attempts/run, 4/day, 40/billing cycle, no automatic network retries.
+Scheduled runs limit themselves to a fair share of the remaining allowance so early tax checks do not
+consume the entire month. Forecast shortfalls and 85% usage are saved to operations and structured logs,
+and appear in the daily email when email is enabled. Exhaustion pauses the job safely; it never raises
+spending limits automatically. The default trial budget does not guarantee full daily city coverage.
+
+Listing-page cache: 15 minutes. Verified annual tax cache: 7 days, refreshed on entering a new year.
+Missing/invalid tax amounts have a shorter 6-hour cache so pending properties can become verifiable.
+Listings older than 24h are not sent. Tax refresh can be skipped for an already-notified property with no
+new price reduction; it is retained as Pending Verification if its old tax cache expired.
+
+A single digest uses a durable outbox and Resend's idempotency key. Acceptance updates outbox and event
+states atomically. A timeout remains `uncertain`; resuming within 23h uses the identical key/body.
+After that window, the system requires reconciliation instead of risking a duplicate send. A stale
+never-attempted digest is cancelled. Provider acceptance is not proof of inbox delivery.
+
+## Operational limitations
+
+A full query is not proof of every listing in the city: RentCast coverage and postal-city classification
+still apply. Tax year means latest available reported annual year, not a prediction of the next tax bill.
+Offset pagination can shift while provider listings change. No MLS/Zillow/Redfin connector is implemented.
+The pipeline uses the current RentCast-only strategy. Credentials, live provider acceptance and Render
+billing approval remain deployment prerequisites; no live-provider success is claimed by offline tests.
+
+## Controlled proof of concept
+
+`python -m rentalsourcing.poc` prints the exact URL-encoded 100-listing request plan without any network
+or DB connection. After separate allowance approval, `--execute` reuses the existing collector/engine
+for one page and at most three unique tax candidates. It never sends emails or fetches a second page.
+See [the Hebrew POC notes](docs/POC_HE.md) for County-data limitations and the unmeasured coverage policy.
 
 ## Dashboard
 
-```sh
-python -m rentalsourcing.dashboard
-```
+Set DATABASE_URL and a private DASHBOARD_PASSWORD of at least 20 characters.
+Run `sh scripts/start_web.sh`; Render supplies PORT. Username defaults to owner.
+GET /healthz is a database health probe; /readyz and all data require HTTP Basic authentication
+over the platform HTTPS URL. /api/dashboard exposes only stored live-source observations;
+stale/missing mandatory data cannot be displayed as qualified. /api/email-preview never sends.
+Do not expose a localhost test server as a public production service.
 
-Requires PostgreSQL `DATABASE_URL` and `DASHBOARD_TOKEN` with at least 32
-characters. `PORT` defaults to 8080. Production hosting must terminate HTTPS.
-Enter the token in the page; it is kept in memory and sent as an Authorization
-header. The dashboard displays actual persisted properties, tax verification,
-run status, request usage and email outbox. Stale qualification is downgraded in
-the display. `/healthz` checks the database/schema without exposing records.
-
-## Production scanner
-
-Start from `.env.example`; configure secrets only in the hosting environment.
-`python -m rentalsourcing.cloud --migrate` applies additive migrations without
-provider calls. `--status` shows DB state; `--resume JOB_ID` resumes stored work.
-`--scheduled` gates to 08:00 America/New_York with DST support. See deployment
-instructions before enabling providers or creating paid resources.
-
-The collector reserves each attempt atomically before transport. Daily, billing
-cycle and explicit approval limits are shared across processes. No automatic
-retries are enabled by default. Response/tax caches and durable cursors prevent
-unnecessary repeated calls. Keep usage accounting when migrating or restoring a
-DB; a fresh DB is not a fresh authorization. Provider usage elsewhere is outside
-the local ledger.
-
-Email requires explicit activation, production configuration, Resend secret,
-verified sender and recipient. A frozen outbox and provider idempotency protect
-against duplicate delivery attempts; uncertain outcomes require reconciliation
-when the safe retry window expires. No demo fallback exists in the live path.
-
-Render hosts one dashboard web service, one scheduled collector and one shared
-persistent PostgreSQL database. The Blueprint creates paid resources and must
-not be applied without cost approval. No MLS/Zillow/Redfin feed is connected.
+API_APPROVAL_MODE defaults to one_time. Optional rolling_32_days requires an explicit recurring
+allowance approval and counts all app attempts across the preceding 32 UTC dates, preventing a
+calendar reset from creating a new spending allowance. No mode monitors other applications using
+the provider account. Existing four-call approval remains a one-time allowance.

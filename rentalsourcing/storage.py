@@ -5,21 +5,27 @@ import sqlite3
 class BudgetExceeded(RuntimeError): pass
 
 class Store:
-    def __init__(self, url):
+    def __init__(self, url, *, initialize=True):
         self.pg = url.startswith(('postgres://', 'postgresql://'))
         if self.pg:
             import psycopg
-            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15, client_encoding='utf8')
+            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15)
+            self.db.execute('SET statement_timeout=30000')
+            self.db.execute('SET lock_timeout=5000')
         elif url.startswith('sqlite:///'):
             self.db = sqlite3.connect(url[len('sqlite:///'):], isolation_level=None)
         else: raise ValueError('DATABASE_URL must be PostgreSQL or local sqlite:/// path')
-        for statement in [
+        statements=[
             'CREATE TABLE IF NOT EXISTS usage (period TEXT PRIMARY KEY, used INTEGER NOT NULL)',
             'CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, payload TEXT NOT NULL, observed_at TEXT NOT NULL)',
             'CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL)',
             'CREATE TABLE IF NOT EXISTS scheduled_days (day TEXT PRIMARY KEY)',
-            'CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)']:
-            self.execute(statement)
+            'CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)'] if initialize else []
+        if self.pg and initialize:self.execute('SELECT pg_advisory_lock(73541208)')
+        try:
+            for statement in statements:self.execute(statement)
+        finally:
+            if self.pg and initialize:self.execute('SELECT pg_advisory_unlock(73541208)')
 
     def execute(self, sql, args=()):
         return self.db.execute(sql.replace('?', '%s') if self.pg else sql, args)
@@ -123,11 +129,21 @@ class Store:
                  ('cycle:'+cycle.isoformat(),settings.per_month),
                  ('approval:'+settings.approval_id,settings.approved_requests)]
         with self.transaction():
+            if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
+            if settings.approval_mode=='rolling_32_days':
+                periods=periods[:2]
+                if self.rolling_usage(now)>=settings.approved_requests:
+                    raise BudgetExceeded('Rolling 32-day approved API allowance reached')
             for key,limit in periods:
                 self.execute('INSERT INTO usage VALUES (?,0) ON CONFLICT(period) DO NOTHING',(key,))
                 if not self.execute('UPDATE usage SET used=used+1 WHERE period=? AND used<? RETURNING used',(key,limit)).fetchone():
                     raise BudgetExceeded('API allowance reached: '+key.split(':')[0])
         return self.budget_health(settings,now)
+
+    def rolling_usage(self,now):
+        start=(now-dt.timedelta(days=31)).strftime('day:%Y-%m-%d')
+        end=now.strftime('day:%Y-%m-%d')
+        return self.execute('SELECT COALESCE(SUM(used),0) FROM usage WHERE period>=? AND period<=?',(start,end)).fetchone()[0]
 
     def budget_health(self,settings,now=None):
         import calendar
@@ -139,13 +155,27 @@ class Store:
         y,m=(cycle.year+1,1) if cycle.month==12 else (cycle.year,cycle.month+1)
         end=cycle.replace(year=y,month=m)
         used=self.count_usage('cycle:'+cycle.isoformat())
-        remaining=max(0,min(settings.per_month-used,settings.approved_requests-self.count_usage('approval:'+settings.approval_id)))
+        approval_used=self.rolling_usage(now) if settings.approval_mode=='rolling_32_days' else self.count_usage('approval:'+settings.approval_id)
+        remaining=max(0,min(settings.per_month-used,settings.approved_requests-approval_used))
         days=max(1,(end-now.date()).days)
         warning=None
         if remaining<days:warning='API allowance cannot cover even one listing request per remaining day; increase only after approval.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
         if warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
         return dict(cycle_start=cycle.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning)
+
+    def scheduled_allowance(self,settings,now=None):
+        now=now or dt.datetime.now(dt.timezone.utc)
+        health=self.budget_health(settings,now)
+        if not health['remaining']:return 0
+        if settings.approval_mode=='rolling_32_days':
+            start=(now-dt.timedelta(days=31)).strftime('day:%Y-%m-%d')
+            today=now.strftime('day:%Y-%m-%d')
+            prior_active=self.execute('SELECT COUNT(*) FROM usage WHERE period>=? AND period<? AND used>0',(start,today)).fetchone()[0]
+            fair=max(1,health['remaining']-max(0,31-prior_active))
+        else:fair=max(1,health['remaining']//health['days_remaining'])
+        today_remaining=max(0,settings.per_day-self.count_usage(now.strftime('day:%Y-%m-%d')))
+        return min(settings.per_run,today_remaining,health['remaining'],fair)
 
     def cache_get(self,key,now):
         row=self.execute('SELECT payload,source FROM response_cache WHERE key=? AND expires_at>?',(key,now)).fetchone()

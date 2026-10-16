@@ -1,54 +1,40 @@
-# Validation evidence — 2026-10-16
+# Validation record — 2026-10-16
 
-## Automated checks
+- Python 3.12 isolated virtual environment; production dependencies installed successfully.
+- PostgreSQL 16.15 in a local disposable Docker container; no managed/paid database created.
+- `python -m pytest -q` with TEST_DATABASE_URL: **98 passed, 1 skipped**.
+- The one skip is the SQLite parameter of the PostgreSQL advisory-lock test; the PostgreSQL parameter passed.
+- Runtime compilation, Render/Railway configuration syntax and disabled-provider defaults checked.
+- Repository content checked against configured secret values before publication; no secret values committed.
+- Both provider HTTP transports are mocked in tests. The normal urllib opener is blocked by an autouse fixture.
+- No live RentCast API requests, real Resend messages, paid deployment or purchases were made.
+- Real external acceptance is still required: official geometry download in Render, RentCast response,
+  real tax enrichment and Resend acceptance/inbox check, using explicitly approved allowances.
 
-Final local run: **117 passed, 3 skipped**, Python 3.12, PostgreSQL 17.11.
-One SQLite test skips the PostgreSQL advisory lock; two SQLite variants skip
-concurrent PostgreSQL quota/claim tests. Their PostgreSQL variants passed.
-All data/email-provider calls in this suite are mocked. PostgreSQL is real and
-isolated from the live sample; no paid cloud database is used for tests.
+Covered behaviors include persistent PostgreSQL state, concurrent-run exclusion, pagination/resume,
+new and missing-field properties, strict tax thresholds, price-reduction events, caches/expiry,
+request approval caps across billing boundaries, DNS/proxy/TLS/timeout/rate-limit handling,
+daily-digest de-duplication, same-key retries and manual reconciliation after the safety window,
+permanent mail rejection, stale snapshot cancellation, output escaping and 2026–2028 DST schedules.
 
-Checks cover: atomic quotas under eight concurrent connections; full rollback
-on exhausted allowance; durable notification/day claims; advisory locking;
-additive migrations; persistence across connections; listing/tax cache expiry;
-resumption after failed collection; strict tax threshold; missing latest amounts;
-price drops; digest deduplication/idempotency; stale evidence; three years of DST
-schedule checks; dashboard authentication, read-only queries and redaction.
-Bundled geometry checks verify downtown/Oakland inclusion, neighboring
-municipalities/border exclusion, and fail-closed checksum tampering.
+## Controlled 100-listing POC update
 
-`python -m rentalsourcing.cloud --check` passed offline with the bundled official
-geometry. Render YAML parsing and `git diff --check` passed. CI runs the same
-pytest suite with PostgreSQL 16; this local record does not assert remote CI passed.
+The POC extension was validated with **105 passed, 1 skipped** against SQLite and local PostgreSQL.
+The added tests verify exact URL decoding, plan-only execution, one listing page, a maximum of three
+unique tax candidates across resumes, complete initial counts, source/year/amount report fields,
+unknown coverage and absent listing links. No real RentCast/Resend requests were made.
 
-## Live acceptance (not mocked)
+## Production dashboard and launch acceptance
 
-- ArcGIS official city layer: HTTPS succeeded. Eight city features downloaded,
-  union validated, WGS84 confirmed and SHA256 recorded in the bundled manifest.
-- Exactly FOUR RentCast attempts: one 100-listing page, three tax lookups.
-  Persisted approval/cycle/day counters each equal four. No retries or extra pages.
-- API reported 422 matching listings. Of 100 sampled: 58 Rejected, 39 Pending
-  Verification, 3 Qualified. Thirty-three were outside city limits and 25 in
-  excluded ZIPs. Only three candidates received tax verification.
-- Tax years returned were 2024/2025; annual totals were $760/$1,611/$1,267.
-  All three passed latest available annual tax + $100 < $2,000. This does not
-  assert current-year tax, complete city coverage or county-document verification.
-- Actual local PostgreSQL stored listings, tax histories, events, cursor and usage.
-  A SQL_ASCII local DB exposed text/bytes decoding; explicit UTF8 connections
-  fixed it. The same job resumed from persisted listings without another API call.
-- Actual HTTP server against the live-sample PostgreSQL: health 200; status without
-  authentication 401; authenticated status 200 with 100 properties and 3 Qualified.
-- A daily-digest preview was rendered from these three live property/tax records.
-  No Resend request or real email was sent. No Render deployment occurred.
-
-## Reproduction
-
-```sh
-pip install -r requirements-dev.txt
-TEST_DATABASE_URL=postgresql://... python -m pytest -q
-python -m rentalsourcing.cloud --check
-```
-
-Do not repeat live acceptance: the approved four attempts are exhausted. Never
-change approval IDs or reset a database to regain allowance. New API budget,
-paid Render provisioning, and real email delivery require explicit approval.
+- Full suite with local PostgreSQL: **137 passed, 1 skipped** (SQLite variant of the PostgreSQL-only lock test).
+- Gunicorn with two workers was exercised over real loopback HTTP against the persisted PostgreSQL volume.
+  Dashboard, JSON API, email-preview and health routes returned 200. Readiness correctly returned 503
+  when official city geometry was unavailable. The database contained one genuine failed acceptance scan,
+  one counted RentCast attempt and zero received properties; no test properties were put in this database.
+- Authentication, escaped output, security headers, no-provider-on-refresh, stale-data downgrades,
+  recurring allowance across billing boundaries and a 95-day daily allocation were verified locally.
+- Actual RentCast acceptance: one authorized attempt returned HTTPError / Forbidden, with no listing body.
+  No automatic retry and no tax requests were made. No claim of successful live collection is made.
+- Actual public GIS download: denied at proxy CONNECT (403), without a fake boundary fallback.
+- Resend is tested with controlled responses only; no real message was sent and no Resend key was available.
+- No Render resource was created. The new Web + Cron + PostgreSQL Blueprint requires payment approval.

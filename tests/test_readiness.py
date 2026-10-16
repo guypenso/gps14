@@ -115,3 +115,38 @@ def test_rate_limit_retry_cannot_exceed_approved_allowance(store,settings,clock,
     c=Client(store,replace(settings,retries=1,approved_requests=1),clock,provider,lambda _:None)
     with pytest.raises(BudgetExceeded):c.get('/listings/sale',{'limit':2,'offset':0})
     assert len(provider.calls)==1
+
+
+def test_http_error_status_and_safe_category_are_recorded(store,settings,clock,provider):
+    import io
+    provider.failures=[urllib.error.HTTPError('https://api.rentcast.io/v1/listings/sale',403,'Forbidden',{},io.BytesIO(b'{"error":"billing/subscription-inactive","secret":"fixture-key-not-real"}'))]
+    c=Client(store,settings,clock,provider,lambda _:None)
+    with pytest.raises(urllib.error.HTTPError):c.get('/listings/sale',{'limit':2,'offset':0})
+    assert c.last_error['http_status']==403 and c.last_error['body_category']=='billing'
+    assert 'fixture-key-not-real' not in str(c.last_error)
+    assert store.operations()
+
+
+def test_recurring_approval_never_resets_early_at_billing_boundary(store,settings,clock):
+    s=replace(settings,approval_mode='rolling_32_days',approved_requests=1)
+    store.reserve_api(s,clock());clock.advance(days=20)
+    with pytest.raises(BudgetExceeded):store.reserve_api(s,clock())
+    clock.advance(days=12)
+    store.reserve_api(s,clock())
+    assert store.rolling_usage(clock())==1
+
+
+def test_one_time_approval_still_never_renews(store,settings,clock):
+    s=replace(settings,approval_mode='one_time',approved_requests=1)
+    store.reserve_api(s,clock());clock.advance(days=40)
+    with pytest.raises(BudgetExceeded):store.reserve_api(s,clock())
+
+
+def test_recurring_schedule_reserves_daily_listings_across_months(store,settings,clock):
+    s=replace(settings,approval_mode='rolling_32_days',approved_requests=40,per_month=40,per_day=4,per_run=4)
+    for _ in range(95):
+        allowance=store.scheduled_allowance(s,clock())
+        assert allowance>=1,clock().isoformat()
+        for attempt in range(allowance):store.reserve_api(s,clock())
+        assert store.rolling_usage(clock())<=40
+        clock.advance(days=1)

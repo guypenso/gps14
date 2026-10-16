@@ -88,7 +88,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if not args.execute:print(json.dumps(plan(),ensure_ascii=False,indent=2));return
     s=Settings.from_env()
-    if not s.enabled or not s.approval_id or not 1<=s.approved_requests<=4:
+    if not s.enabled or not s.approval_id or s.approval_mode!='one_time' or not 1<=s.approved_requests<=4:
         raise PermissionError('POC needs a dedicated approved allowance of 1..4 attempts')
     s=replace(s,page_size=100,max_pages=1,retries=0,per_run=min(4,s.per_run),email_enabled=False)
     boundary=load_boundary(s.boundary_file) # Fail before requesting listings if city verification is unavailable.

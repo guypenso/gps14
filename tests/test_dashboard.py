@@ -1,117 +1,129 @@
+import base64
 import datetime as dt
-import io
 import json
-import tempfile
-import unittest
-from rentalsourcing.dashboard import Dashboard, handler_for
-from rentalsourcing.storage import Store
+from dataclasses import replace
+import pytest
+from rentalsourcing.dashboard import create_app
+from rentalsourcing.engine import Engine
+from rentalsourcing.collector import Client
+from conftest import Provider,listing,taxes
+
+PASSWORD='fixture-dashboard-password-123'
+HEADERS={'Authorization':'Basic '+base64.b64encode(('owner:'+PASSWORD).encode()).decode()}
+
+@pytest.fixture
+def web(store,boundary,clock,monkeypatch):
+    monkeypatch.setenv('DASHBOARD_PASSWORD',PASSWORD)
+    return create_app(store.test_url,testing=True,clock=clock,boundary=boundary).test_client()
 
 
-class DashboardTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.url = 'sqlite:///' + self.temp.name + '/db'
-        store = Store(self.url)
-        store.migrate()
-        store.save_property('live-property',{'formattedAddress':'Real stored address','price':150000},'Pending Verification',['missing_tax_history'],'rentcast-live',1,store.now())
-        store.observe({'id':'actual-record','formattedAddress':'<script>alert(1)</script>', 'price':150000, '_validation':{'city_boundary':True,'tax':{'annual':1000}}, 'secret':'must-not-appear'})
-        store.run('run-id', {'status':'complete','qualified':0})
-        store.close()
-        self.app = Dashboard(self.url, 'x'*32, production=False)
-        self.handler = handler_for(self.app)
-
-    def tearDown(self):
-        self.temp.cleanup()
-
-    def get(self,path,token=None):
-        request = self.handler.__new__(self.handler)
-        request.path = path
-        request.headers = {'Authorization':'Bearer '+token} if token else {}
-        request.wfile = io.BytesIO()
-        result = {'headers':{}}
-        request.send_response = lambda code: result.update(status=code)
-        request.send_header = lambda name,value: result['headers'].update({name:value})
-        request.end_headers = lambda: None
-        request.do_GET()
-        return result['status'],request.wfile.getvalue(),result['headers']
-
-    def test_requires_auth_and_disallows_url_token(self):
-        self.assertEqual(self.get('/api/status')[0],401)
-        self.assertEqual(self.get('/api/status','bad')[0],401)
-        self.assertEqual(self.get('/api/status?token='+'x'*32)[0],400)
-
-    def test_authenticated_snapshot_exposes_only_stored_allowlisted_data(self):
-        status,body,headers=self.get('/api/status','x'*32)
-        self.assertEqual(status,200)
-        data=json.loads(body)
-        self.assertEqual(data['properties'][0]['state'],'Pending Verification')
-        self.assertIsNone(data['properties'][0]['tax'])
-        self.assertEqual(data['observations'][0]['id'],'actual-record')
-        self.assertEqual(data['observations'][0]['_validation']['tax']['annual'],1000)
-        self.assertNotIn(b'must-not-appear',body)
-        self.assertEqual(headers['Cache-Control'],'no-store')
-        self.assertIn('frame-ancestors',headers['Content-Security-Policy'])
-
-    def test_tax_history_is_displayed_without_promoting_pending_property(self):
-        store=Store(self.url)
-        store.save_tax('live-property',{'propertyTaxes':{'2025':{'year':2025,'total':1100}}},'rentcast-live',store.now(),'2099-01-01T00:00:00+00:00')
-        store.close()
-        status,body,_=self.get('/api/status','x'*32)
-        self.assertEqual(status,200)
-        row=json.loads(body)['properties'][0]
-        self.assertEqual(row['tax']['adjusted'],1200)
-        self.assertEqual(row['state'],'Pending Verification')
-        self.assertEqual(row['tax_source'],'rentcast-live')
-
-    def test_qualified_state_requires_fresh_listing_and_live_unexpired_tax(self):
-        now=dt.datetime.now(dt.timezone.utc)
-        cases=[('valid',0,1,'rentcast-live',True,'Qualified'),
-               ('expired-tax',0,-1,'rentcast-live',True,'Pending Verification'),
-               ('missing-tax',0,1,'rentcast-live',False,'Pending Verification'),
-               ('fixture-tax',0,1,'fixture',True,'Pending Verification'),
-               ('stale-listing',25,1,'rentcast-live',True,'Pending Verification')]
-        store=Store(self.url)
-        for identity,age,expiry,source,with_tax,expected in cases:
-            store.save_property(identity,{'formattedAddress':identity,'price':150000},'Qualified',[],'rentcast-live',1,(now-dt.timedelta(hours=age)).isoformat())
-            if with_tax:
-                store.save_tax(identity,{'propertyTaxes':{str(now.year-1):{'year':now.year-1,'total':1000}}},source,(now-dt.timedelta(minutes=1)).isoformat(),(now+dt.timedelta(hours=expiry)).isoformat())
-        store.close()
-        rows={p['id']:p for p in self.app.snapshot()['properties']}
-        for identity,age,expiry,source,with_tax,expected in cases:
-            with self.subTest(identity=identity):
-                self.assertEqual(rows[identity]['state'],expected)
-                self.assertEqual(rows[identity]['stored_state'],'Qualified')
-                if identity in ('expired-tax','missing-tax','fixture-tax'):
-                    self.assertIsNone(rows[identity]['tax'])
-                    self.assertFalse(rows[identity]['tax_current'])
-                if expected=='Pending Verification': self.assertTrue(rows[identity]['reasons'])
-
-    def test_health_and_safe_rendering(self):
-        self.assertEqual(self.get('/healthz')[0],200)
-        script=self.get('/app.js')[1]
-        self.assertIn(b'textContent',script)
-        self.assertNotIn(b'innerHTML',script)
-        self.assertNotIn(b'localStorage',script)
-        self.assertNotIn(b'x'*32,self.get('/')[1])
-
-    def test_production_rejects_sqlite_and_weak_token(self):
-        with self.assertRaises(ValueError): Dashboard(self.url,'x'*32)
-        with self.assertRaises(ValueError): Dashboard(self.url,'weak',production=False)
-
-    def test_reads_do_not_mutate_database(self):
-        from pathlib import Path
-        path=Path(self.temp.name+'/db')
-        before=path.read_bytes()
-        self.app.snapshot()
-        self.app.healthy()
-        self.assertEqual(before,path.read_bytes())
-
-    def test_database_errors_are_redacted(self):
-        self.app.url='sqlite:///'+self.temp.name+'/does-not-exist'
-        status,body,_=self.get('/api/status','x'*32)
-        self.assertEqual(status,503)
-        self.assertNotIn(self.temp.name.encode(),body)
-        self.assertEqual(self.get('/healthz')[0],503)
+def ingest(store,boundary,clock,settings,rows,records=None):
+    provider=Provider(rows)
+    if records is not None:provider.records=records
+    client=Client(store,settings,clock,provider,lambda _:None)
+    Engine(store,boundary,client,settings,clock).run('web-fixtures',clock().date().isoformat())
+    return provider
 
 
-if __name__=='__main__': unittest.main()
+def test_health_public_but_data_private(web):
+    assert web.get('/healthz').status_code==200
+    assert web.get('/').status_code==401
+    assert web.get('/api/dashboard').status_code==401
+    assert web.get('/api/email-preview').status_code==401
+    assert web.get('/readyz').status_code==401
+    assert web.get('/readyz',headers=HEADERS).status_code==200
+
+
+def test_incorrect_password_does_not_unlock_dashboard(web):
+    bad={'Authorization':'Basic '+base64.b64encode(b'owner:bad-password').decode()}
+    assert web.get('/api/dashboard',headers=bad).status_code==401
+
+
+def test_empty_dashboard_has_no_demo_and_coverage_unknown(web):
+    r=web.get('/',headers=HEADERS)
+    assert r.status_code==200
+    assert 'טרם נשמרו נכסים אמיתיים' in r.text
+    assert 'FICTIONAL TEST ADDRESS' not in r.text
+    d=web.get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['total']==0 and d['coverage']['percent'] is None
+    assert r.headers['Cache-Control']=='no-store'
+    assert "frame-ancestors 'none'" in r.headers['Content-Security-Policy']
+
+
+def test_dashboard_shows_verified_pending_rejected_and_tax_fields(web,store,boundary,clock,settings):
+    provider=ingest(store,boundary,clock,replace(settings,page_size=100),[
+      listing('verified'),listing('missing',bedrooms=None),listing('excluded',zipCode='15203'),listing('tax-high')],
+      {'verified':taxes('verified',1500),'tax-high':taxes('tax-high',1900)})
+    before=len(provider.calls)
+    d=web.get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['counts']=={'Qualified':1,'Pending Verification':1,'Rejected':2}
+    good=next(p for p in d['properties'] if p['id']=='verified')
+    assert good['annual_tax']==1500 and good['adjusted_tax']==1600 and good['tax_year']==2025
+    assert good['source']=='RentCast Sale Listings'
+    assert any(p['reason_text'] for p in d['properties'] if p['state']=='Rejected')
+    page=web.get('/?state=Qualified',headers=HEADERS)
+    assert page.status_code==200 and '$1,600.00' in page.text
+    assert len(provider.calls)==before # Reading UI cannot consume provider requests.
+    assert web.post('/api/scan',headers=HEADERS).status_code==404
+
+
+def test_expired_listing_downgraded_without_changing_database(web,store,boundary,clock,settings):
+    ingest(store,boundary,clock,settings,[listing()])
+    clock.advance(hours=25)
+    d=web.get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['counts']['Qualified']==0 and d['properties'][0]['state']=='Pending Verification'
+    assert 'stale_listing' in d['properties'][0]['reasons']
+    assert store.get_property('fixture-property')['state']=='Qualified'
+
+
+def test_unknown_geography_never_displays_a_qualified_deal(store,boundary,clock,settings,monkeypatch,tmp_path):
+    ingest(store,boundary,clock,settings,[listing()])
+    monkeypatch.setenv('DASHBOARD_PASSWORD',PASSWORD)
+    monkeypatch.setenv('CITY_BOUNDARY_FILE',str(tmp_path/'missing.geojson'))
+    app=create_app(store.test_url,testing=True,clock=clock)
+    d=app.test_client().get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['counts']['Qualified']==0 and 'city_boundary_unavailable' in d['properties'][0]['reasons']
+    assert app.test_client().get('/readyz',headers=HEADERS).status_code==503
+
+
+def test_untrusted_fixture_source_hidden_from_live_dashboard(web,store,clock):
+    p=listing()
+    store.save_property(p['id'],p,'Qualified',[],'fixture',1,clock().isoformat())
+    assert web.get('/api/dashboard',headers=HEADERS).get_json()['total']==0
+
+
+def test_missing_required_field_never_displayed_as_approved_even_if_db_says_qualified(web,store,boundary,clock,settings):
+    ingest(store,boundary,clock,settings,[listing()])
+    p=listing(bedrooms=None)
+    store.save_property(p['id'],p,'Qualified',[],'rentcast-live',1,clock().isoformat())
+    assert web.get('/api/dashboard',headers=HEADERS).get_json()['counts']['Qualified']==0
+
+
+def test_html_is_escaped(web,store,boundary,clock,settings):
+    ingest(store,boundary,clock,settings,[listing(formattedAddress='<script>alert(1)</script>')])
+    r=web.get('/',headers=HEADERS)
+    assert '<script>alert(1)</script>' not in r.text
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in r.text
+
+
+def test_preview_is_read_only_and_never_sends(web,store):
+    count=store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]
+    preview=web.get('/api/email-preview',headers=HEADERS).get_json()
+    assert preview['mode']=='preview_only_no_send' and preview['state']=='not_prepared'
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==count
+
+
+def test_weak_dashboard_password_prevents_start(monkeypatch,store):
+    monkeypatch.setenv('DASHBOARD_PASSWORD','weak')
+    with pytest.raises(ValueError,match='20'):create_app(store.test_url,testing=True)
+
+
+def test_missing_price_after_historical_reduction_stays_pending_not_server_error(web,store,boundary,clock,settings):
+    provider=ingest(store,boundary,clock,settings,[listing(history={'2026-10-01':{'price':190000}})])
+    prior=store.get_property('fixture-property')
+    row=dict(prior['payload'],price=None)
+    store.save_property(row['id'],row,'Pending Verification',['price'],'rentcast-live',prior['revision'],clock().isoformat())
+    response=web.get('/api/dashboard',headers=HEADERS)
+    assert response.status_code==200
+    item=response.get_json()['properties'][0]
+    assert item['state']=='Pending Verification' and item['price_reduction'] is False

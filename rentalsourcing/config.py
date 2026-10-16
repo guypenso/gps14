@@ -8,6 +8,7 @@ class Settings:
     email_enabled: bool = False
     environment: str = 'production'
     approval_id: str = ''
+    approval_mode: str = 'one_time'
     approved_requests: int = 0
     per_run: int = 4
     per_day: int = 4
@@ -26,6 +27,7 @@ class Settings:
     def __post_init__(self):
         for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout'):
             if getattr(self,name) <= 0: raise ValueError(f'{name} must be positive')
+        if self.approval_mode not in {'one_time','rolling_32_days'}:raise ValueError('Invalid API approval mode')
         if self.approved_requests < 0 or self.page_size > 500 or self.retries not in range(3):
             raise ValueError('Invalid request limits')
         if not 1 <= self.billing_day <= 28: raise ValueError('BILLING_DAY must be 1..28 (use 28 for later billing dates conservatively)')
@@ -34,7 +36,7 @@ class Settings:
 
     @classmethod
     def from_env(cls):
-        mapping={'approval_id':'API_APPROVAL_ID','approved_requests':'APPROVED_API_REQUESTS',
+        mapping={'approval_mode':'API_APPROVAL_MODE','approval_id':'API_APPROVAL_ID','approved_requests':'APPROVED_API_REQUESTS',
           'per_run':'MAX_API_REQUESTS_PER_RUN','per_day':'MAX_API_REQUESTS_PER_DAY',
           'per_month':'MAX_API_REQUESTS_PER_MONTH','page_size':'LISTING_LIMIT',
           'max_pages':'MAX_LISTING_PAGES','tax_cache_hours':'TAX_CACHE_HOURS',
