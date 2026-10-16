@@ -116,7 +116,9 @@ def snapshot(store,boundary,now):
 def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     app=Flask(__name__);app.config.update(TESTING=testing,MAX_CONTENT_LENGTH=1024,PROPAGATE_EXCEPTIONS=False)
     url=database_url or os.getenv('DATABASE_URL','')
-    if not testing and not url.startswith(('postgres://','postgresql://')):raise ValueError('Dashboard requires PostgreSQL')
+    if not testing:
+        from .database import validate_postgres_url
+        validate_postgres_url(url)
     username=os.getenv('DASHBOARD_USERNAME','owner');password=os.getenv('DASHBOARD_PASSWORD','')
     if len(password)<20:raise ValueError('Set DASHBOARD_PASSWORD to at least 20 characters')
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
@@ -124,9 +126,10 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         try:boundary=load_boundary(os.getenv('CITY_BOUNDARY_FILE','data/pittsburgh.geojson'))
         except (OSError,ValueError,KeyError):event('dashboard_boundary_unavailable')
     if not testing:
-        s=Store(url)
+        s=Store(url,initialize=False)
         try:
-            if s.lock():s.migrate()
+            if s.execute('SELECT version FROM schema_versions WHERE version=2').fetchone() is None:
+                raise RuntimeError('Database migrations are missing; run scripts/start_web.sh')
         finally:s.close()
 
     @app.before_request
