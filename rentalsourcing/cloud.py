@@ -15,6 +15,7 @@ from .engine import Engine
 from .request import diagnose
 from .schedule import scheduled_day,PITTSBURGH
 from .storage import Store
+from .database import validate_postgres_url
 from .telemetry import event
 
 
@@ -54,10 +55,12 @@ def main(argv=None):
     administrative=args.status or args.migrate or args.retry_email or args.reconcile_email
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
-    if not url.startswith(('postgres://','postgresql://')):raise ValueError('Production requires persistent PostgreSQL DATABASE_URL')
+    validate_postgres_url(url)
     store=Store(url)
     try:
-        if not store.lock():event('scan_already_running');return
+        if not store.lock():
+            if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
+            event('scan_already_running');return
         store.migrate()
         if args.migrate:event('migrations_complete');return
         if args.status:

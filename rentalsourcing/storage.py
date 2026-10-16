@@ -8,8 +8,8 @@ class Store:
     def __init__(self, url, *, initialize=True):
         self.pg = url.startswith(('postgres://', 'postgresql://'))
         if self.pg:
-            import psycopg
-            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15, client_encoding='utf8')
+            from .database import connect_postgres
+            self.db = connect_postgres(url)
             self.db.execute('SET statement_timeout=30000')
             self.db.execute('SET lock_timeout=5000')
         elif url.startswith('sqlite:///'):
