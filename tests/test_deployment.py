@@ -11,13 +11,19 @@ def test_render_has_web_cron_postgres_and_safe_defaults():
     assert services['cron']['schedule']=='0 12,13 * * *'
     assert config['databases'][0]['ipAllowList']==[]
     common={v['key']:v.get('value') for v in config['envVarGroups'][0]['envVars']}
-    assert common['APPROVED_API_REQUESTS']=='0' and common['API_APPROVAL_ID']==''
+    assert common['APPROVED_API_REQUESTS']=='0' and not common.get('API_APPROVAL_ID')
     cron={v.get('key'):v for v in services['cron']['envVars']}
     web={v.get('key'):v for v in services['web']['envVars']}
     assert cron['ENABLE_RENTCAST']['value']=='false' and cron['ENABLE_EMAIL']['value']=='false'
     assert web['DASHBOARD_PASSWORD']['generateValue'] is True
     assert 'RENTCAST_API_KEY' not in web and 'RESEND_API_KEY' not in web
-    assert 'sync' in cron['RENTCAST_API_KEY']
+    # Creating disabled services must not require provider credentials.
+    assert not any(v.get('sync') is False for s in services.values() for v in s['envVars'])
+    assert all(k not in cron for k in ('RENTCAST_API_KEY','RESEND_API_KEY','EMAIL_FROM','EMAIL_TO'))
+    assert config['previews']['generation']=='off'
+    assert config['databases'][0]['postgresMajorVersion']=='17'
+    assert config['databases'][0]['storageAutoscalingEnabled'] is False
+    assert (path.parent/'.python-version').read_text().strip()==common['PYTHON_VERSION']
     assert common['LISTING_LIMIT']=='500'
     for service in services.values():
         assert service['branch']=='master'
