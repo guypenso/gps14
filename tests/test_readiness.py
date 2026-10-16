@@ -150,3 +150,9 @@ def test_recurring_schedule_reserves_daily_listings_across_months(store,settings
         for attempt in range(allowance):store.reserve_api(s,clock())
         assert store.rolling_usage(clock())<=40
         clock.advance(days=1)
+
+
+def test_one_time_schedule_leaves_room_for_tax_when_allowance_exceeds_dates(store,settings,clock):
+    remaining_dates=store.budget_health(settings,clock())['days_remaining']
+    s=replace(settings,approved_requests=remaining_dates+5,per_month=remaining_dates+5,per_run=4)
+    assert store.scheduled_allowance(s,clock())==2

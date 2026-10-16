@@ -24,7 +24,7 @@ envVarGroups:
       - key: BILLING_DAY
         value: "1"
       - key: LISTING_LIMIT
-        value: "100"
+        value: "500"
       - key: MAX_LISTING_PAGES
         value: "20"
       - key: TAX_CACHE_HOURS
@@ -39,9 +39,12 @@ services:
   - type: web
     name: rentalsourcing-dashboard
     runtime: python
+    repo: https://github.com/guypenso/gps14
+    branch: master
+    autoDeployTrigger: checksPass
     plan: starter
     region: virginia
-    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
+    buildCommand: "pip install -r requirements.txt && python -m rentalsourcing.cloud --check"
     startCommand: "sh scripts/start_web.sh"
     healthCheckPath: /healthz
     envVars:
@@ -57,10 +60,13 @@ services:
   - type: cron
     name: rentalsourcing-daily
     runtime: python
+    repo: https://github.com/guypenso/gps14
+    branch: master
+    autoDeployTrigger: checksPass
     plan: starter
     region: virginia
     schedule: "0 12,13 * * *"
-    buildCommand: "pip install -r requirements.txt && python scripts/fetch_boundary.py && python -m rentalsourcing.cloud --check"
+    buildCommand: "pip install -r requirements.txt && python -m rentalsourcing.cloud --check"
     startCommand: "python -m rentalsourcing.cloud --scheduled"
     envVars:
       - fromGroup: rentalsourcing-runtime
