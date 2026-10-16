@@ -13,6 +13,8 @@ The production entry point is `python -m rentalsourcing.cloud`. Provider traffic
 No RentCast call is possible on a cache miss until both the enable flag and a persistent user-approved
 request allowance are configured. No paid services are provisioned by installing or testing this repository.
 
+Current acceptance: 100 real listings, 58 rejected, 39 pending tax, three fully verified; all four authorized API attempts consumed. No cloud deployment or real email. See launch/acceptance links above.
+
 ## What runs
 
 1. Fetch Active Sale Listings using early server-side filters and pages of up to 500 records.

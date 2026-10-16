@@ -26,10 +26,18 @@ REASONS={'excluded_zip':'מיקוד מוחרג','price':'מחיר חסר או מ
  'tax_identity_or_source_mismatch':'נתוני המס אינם תואמים בוודאות לנכס',
  'tax_refresh_not_needed_no_new_event':'המס דורש רענון; לא נשלחה התראה חדשה',
  'non_live_source':'מקור הנתונים לא אומת','zipCode':'מיקוד חסר','address':'כתובת חסרה','property_id':'מזהה נכס חסר',
+ 'invalid_timestamp':'מועד האימות חסר או לא תקין','future_timestamp':'מועד האימות נמצא בעתיד',
  'status':'המודעה אינה פעילה למכירה','state':'הנכס אינו בפנסילבניה'}
 
 class StructuralBoundary:
     def contains(self,row):return True
+
+
+def timestamp(value):
+    try:
+        parsed=dt.datetime.fromisoformat(value.replace('Z','+00:00'))
+        return parsed if parsed.tzinfo is not None else None
+    except (ValueError,TypeError,AttributeError):return None
 
 
 def snapshot(store,boundary,now):
@@ -42,16 +50,18 @@ def snapshot(store,boundary,now):
     for identity,payload,state,reasons,source,observed,revision,tax_json,tax_source,tax_fetched,tax_expires in rows[:10000]:
         p=json.loads(payload)
         if demo_marked(p):continue
-        reasons=json.loads(reasons);tax=None
+        stored_state=state
+        reasons=json.loads(reasons);tax=None;tax_current=False
         basic,problems=verification(p,boundary or StructuralBoundary())
         if basic=='Rejected':state='Rejected';reasons=problems
         elif basic=='Pending Verification':state=basic;reasons=problems
         else:
             missing=[]
             if boundary is None:missing.append('city_boundary_unavailable')
-            try:
-                if now-dt.datetime.fromisoformat(observed)>dt.timedelta(hours=24):missing.append('stale_listing')
-            except (TypeError,ValueError):missing.append('stale_listing')
+            observed_time=timestamp(observed)
+            if not observed_time:missing.append('invalid_timestamp')
+            elif observed_time>now:missing.append('future_timestamp')
+            elif now-observed_time>dt.timedelta(hours=24):missing.append('stale_listing')
             if tax_json and tax_source==LIVE:
                 record=json.loads(tax_json)
                 if record.get('id')==identity and not demo_marked(record):
@@ -60,7 +70,10 @@ def snapshot(store,boundary,now):
                     if tax_state=='Rejected':state='Rejected';reasons=[tax_reason]
                 else:missing.append('tax_identity_or_source_mismatch')
             else:missing.append('missing_tax_history')
-            if not tax_expires or tax_expires<=now.isoformat():missing.append('tax_cache_expired')
+            expiry=timestamp(tax_expires);fetched=timestamp(tax_fetched)
+            tax_current=bool(tax and expiry and expiry>now and fetched and fetched<=now)
+            if not tax_current:
+                missing.append('tax_cache_expired');tax=None
             if state!='Rejected' and missing:state='Pending Verification';reasons=list(dict.fromkeys(reasons+missing))
             # HTTP reads can downgrade stale data; only the collection engine may approve a property.
         if state not in counts:state='Pending Verification'
@@ -73,17 +86,29 @@ def snapshot(store,boundary,now):
         if not reduced and ev and ev[0]==revision and number(ev[1]) and number(p.get('price')) and ev[1]>p['price']:
             reduced=True;previous=ev[1]
         items.append(dict(id=identity,address=p.get('formattedAddress') or 'כתובת חסרה',price=p.get('price'),bedrooms=p.get('bedrooms'),
-          bathrooms=p.get('bathrooms'),squareFootage=p.get('squareFootage'),zipCode=p.get('zipCode'),state=state,label=LABELS[state],
+          bathrooms=p.get('bathrooms'),squareFootage=p.get('squareFootage'),zipCode=p.get('zipCode'),state=state,stored_state=stored_state,label=LABELS[state],
           reasons=reasons,reason_text=[REASONS.get(x,x) for x in reasons],source='RentCast Sale Listings',
           observed_at=observed,tax_year=tax['year'] if tax else None,annual_tax=tax['annual'] if tax else None,
-          adjusted_tax=tax['adjusted'] if tax else None,tax_fetched_at=tax_fetched,tax_source='RentCast Property Records' if tax else None,
+          adjusted_tax=tax['adjusted'] if tax else None,tax_current=tax_current,tax_expires_at=tax_expires,tax_fetched_at=tax_fetched,tax_source='RentCast Property Records' if tax else None,
           price_reduction=reduced,previous_price=previous,price_history=history,listing_url=safe_listing_link(p),
           map_url='https://www.google.com/maps/search/?'+urlencode({'api':1,'query':p.get('formattedAddress','')})))
     items.sort(key=lambda p:(not p['price_reduction'],p['state']!='Qualified',p['address']))
     jobs=[dict(id=r[0],day=r[1],state=r[2],stats=json.loads(r[3]),updated_at=r[4]) for r in store.execute('SELECT id,day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 10').fetchall()]
     usage=[dict(period=r[0],attempts=r[1]) for r in store.execute('SELECT period,used FROM usage ORDER BY period LIMIT 100').fetchall()]
     outbox=[dict(id=r[0],state=r[1],provider_id=r[2],updated_at=r[3]) for r in store.execute('SELECT id,state,provider_id,updated_at FROM outbox ORDER BY updated_at DESC LIMIT 10').fetchall()]
-    return dict(properties=items,counts=counts,total=len(items),truncated=truncated,rejection_reasons=failures,
+    item_map={p['id']:p for p in items}
+    events=[]
+    for identity,property_id,kind,price,previous,state,payload,created in store.execute('SELECT id,property_id,kind,price,previous_price,state,payload,created_at FROM deal_events ORDER BY created_at DESC LIMIT 100').fetchall():
+        payload=json.loads(payload);p=item_map.get(property_id)
+        if not p or payload.get('source')!=LIVE or payload.get('tax_source')!=LIVE or demo_marked(payload.get('listing',{})):continue
+        events.append(dict(id=identity,property_id=property_id,address=p['address'],kind=kind,price=price,previous_price=previous,state=state,created_at=created,current_property_state=p['state']))
+    successful=store.execute("SELECT id,day,state,stats,updated_at FROM scan_jobs WHERE state='complete' ORDER BY updated_at DESC LIMIT 1").fetchone()
+    last_successful_scan=dict(id=successful[0],day=successful[1],state=successful[2],stats=json.loads(successful[3]),updated_at=successful[4]) if successful else None
+    failed_runs=[]
+    for identity,payload in store.execute('SELECT id,payload FROM runs').fetchall():
+        run=json.loads(payload)
+        if run.get('status')=='failed':failed_runs.append(dict(id=identity,**run))
+    return dict(last_successful_scan=last_successful_scan,failed_runs=failed_runs[-20:],new_deals=[e for e in events if e['kind']=='new'],price_reductions=[e for e in events if e['kind']=='price_reduction'],properties=items,counts=counts,total=len(items),truncated=truncated,rejection_reasons=failures,
       boundary_verified=boundary is not None,jobs=jobs,usage=usage,outbox=outbox,operations=store.operations(),
       coverage=dict(state='לא נמדד',percent=None,sample_size=0),generated_at=now.isoformat())
 

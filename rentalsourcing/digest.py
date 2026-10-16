@@ -19,8 +19,30 @@ class ReconciliationRequired(RuntimeError):pass
 def money(value):return '${:,.2f}'.format(value)
 
 
+def recent_timestamp(value,now,hours=24):
+    try:
+        then=dt.datetime.fromisoformat(value.replace('Z','+00:00'))
+        return then.tzinfo is not None and dt.timedelta(0)<=now-then<dt.timedelta(hours=hours)
+    except (AttributeError,TypeError,ValueError):return False
+
+
+def listing_link(row):
+    value=row.get('listingUrl')
+    if not isinstance(value,str):return None
+    try:
+        parsed=urllib.parse.urlsplit(value)
+        if parsed.scheme=='https' and parsed.hostname and not parsed.username and not parsed.password:
+            return value
+    except ValueError:pass
+    return None
+
+
 def render(day,items,stats,health,operations):
-    lines=[f'RentalSourcing — {day}',f"מצב הסריקה: {'חלקית / נדרשת השלמה' if stats.get('partial') else 'הושלמה'}"]
+    failed=bool(stats.get('error_type'))
+    incomplete=failed or stats.get('partial')
+    status='נכשלה / נדרשת בדיקה' if failed else ('חלקית / נדרשת השלמה' if incomplete else 'הושלמה')
+    lines=[f'RentalSourcing — {day}',f'מצב הסריקה: {status}']
+    items=sorted(items,key=lambda item:item['kind']!='price_reduction')
     cards=[]
     for item in items:
         p=item['listing'];t=item['tax'];previous=item.get('previous_price')
@@ -32,14 +54,19 @@ def render(day,items,stats,health,operations):
         text+=f"\nחדרי שינה: {p['bedrooms']} | אמבטיות: {p['bathrooms']} | שטח: {p['squareFootage']} sqft | ZIP: {p['zipCode']}"
         text+=f"\nמס שנתי לשנת {t['year']}: {money(t['annual'])} + $100 = {money(t['adjusted'])}"
         text+=f"\nמקור: RentCast Sale Listings | מזהה: {p['id']}\nאימות: {item['verified_at']} | נתוני מס נשלפו: {item['tax_fetched_at']}\nמפה: {map_url}"
+        link=listing_link(p)
+        text+='\nמודעה: '+(link or 'קישור מודעה לא הוחזר על ידי הספק')
         lines.append(text)
         cards.append('<section style="border:1px solid #ddd;padding:16px;margin:12px 0"><pre style="white-space:pre-wrap;font:inherit">'+html.escape(text)+'</pre></section>')
-    if not items:lines.append('אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')
+    if not items:
+        lines.append('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')
+    if failed:lines.append('סוג התקלה: '+str(stats['error_type']))
     footer=f"ניסיונות API שנותרו באישור ובמחזור: {health.get('remaining',0)}. נכסים שחסר להם מידע נשארים Pending Verification. שנת המס היא האחרונה הזמינה מהספק."
     lines.append(footer)
     for warning in operations:lines.append('הודעת מערכת: '+warning)
-    markup='<html lang="he" dir="rtl"><body><h1>RentalSourcing</h1><p>'+html.escape(lines[1])+'</p>'+''.join(cards)
+    markup='<html lang="he" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:Arial,sans-serif;max-width:680px;margin:auto;padding:16px"><h1>RentalSourcing</h1><p>'+html.escape(lines[1])+'</p>'+''.join(cards)
     if not items:markup+='<p>'+html.escape(lines[2])+'</p>'
+    if failed:markup+='<p>'+html.escape('סוג התקלה: '+str(stats['error_type']))+'</p>'
     markup+='<p>'+html.escape(footer)+'</p>'+''.join('<p>'+html.escape(w)+'</p>' for w in operations)+'</body></html>'
     return '\n\n'.join(lines),markup
 
@@ -64,17 +91,18 @@ class Digest:
             if demo_marked(row) or p['revision']!=revision or p['payload'].get('price')!=price:continue
             if verification(row,self.boundary)[0]!='Candidate':continue
             now=self.clock()
-            if now-dt.datetime.fromisoformat(data['verified_at'])>dt.timedelta(hours=24):continue
-            if now-dt.datetime.fromisoformat(p['observed_at'])>dt.timedelta(hours=24):continue
+            if not recent_timestamp(data.get('verified_at'),now):continue
+            if not recent_timestamp(p['observed_at'],now):continue
             cached=self.store.get_tax(property_id,now.isoformat())
-            if not cached or cached[1]!=LIVE or demo_marked(cached[0]):continue
+            if not cached or cached[1]!=LIVE or cached[0].get('id')!=property_id or demo_marked(cached[0]):continue
             state,tax,_=tax_verification(cached[0],now.date())
             if state!='Qualified' or tax!=data.get('tax'):continue
             items.append(dict(data,kind=kind,previous_price=previous));ids.append(identity)
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,self.store.operations())
+        status='תקלה בסריקה' if stats.get('error_type') else ('סריקה חלקית' if stats.get('partial') else f'{len(items)} נכסים מאומתים')
         body=dict(from_=self.settings.email_from,to=[self.settings.email_to],
-                  subject=f'RentalSourcing | {day} | {len(items)} נכסים מאומתים',text=text,html=markup)
+                  subject=f'RentalSourcing | {day} | {status}',text=text,html=markup)
         body['from']=body.pop('from_')
         outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
         with self.store.transaction():
@@ -102,7 +130,7 @@ class Digest:
                 p=self.store.get_property(ev[0]) if ev else None
                 cached=self.store.get_tax(ev[0],now.isoformat()) if ev else None
                 valid=bool(p and p['state']=='Qualified' and p['source']==LIVE and p['revision']==ev[1] and p['payload'].get('price')==ev[2] and
-                    now-dt.datetime.fromisoformat(p['observed_at'])<dt.timedelta(hours=24) and cached and cached[1]==LIVE and
+                    recent_timestamp(p['observed_at'],now) and cached and cached[1]==LIVE and cached[0].get('id')==ev[0] and not demo_marked(cached[0]) and
                     verification(p['payload'],self.boundary)[0]=='Candidate' and tax_verification(cached[0],now.date())[0]=='Qualified')
                 if not valid:
                     with self.store.transaction():

@@ -1,10 +1,20 @@
-# Official city geometry
+# Verified Pittsburgh municipal boundary
 
-Run `python scripts/fetch_boundary.py` once during the Render build. This downloads the official
-CityBoundary layer linked from https://data.wprdc.org/dataset/pittsburgh-city-boundary,
-requests WGS84 longitude/latitude, validates polygon topology and downtown/Bellevue test points,
-and writes a SHA256 provenance manifest. Production refuses an absent or mismatched manifest.
-No simplified rectangle or ZIP boundary is used as a substitute. The generated files are ignored
-by Git because the build retrieves the official source. Tests use clearly fictional polygons only.
-The upstream public GIS service must be reachable during the deployment build; no RentCast calls
-are performed by this script. Review the source's use terms before distributing the geometry.
+`pittsburgh.geojson` is the complete eight-feature City of Pittsburgh boundary,
+downloaded from the official city ArcGIS layer linked by WPRDC on 2026-10-16.
+It is WGS84 (EPSG:4326); adjacent features are unioned before point membership.
+Source and exact query URL, retrieval time, and SHA256 are recorded in
+`pittsburgh.source.json`. The production loader verifies this manifest and digest.
+
+Catalog: https://data.wprdc.org/dataset/pittsburgh-city-boundary
+Layer: https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/CityBoundary/FeatureServer/0
+
+The verified files are bundled so deployment and scans do not depend on GIS
+network availability. Render validates them offline at build time. A missing or
+modified file fails closed. Border points and absent coordinates are excluded.
+Downtown/Oakland inclusion and Bellevue/Green Tree/Wilkinsburg exclusion are
+checked against the bundled geometry in `tests/test_official_boundary.py`.
+
+To deliberately refresh from the official source, run `python scripts/fetch_boundary.py`
+and review the resulting geometry and manifest before committing. Never replace
+this file with a ZIP, county, neighborhood, approximate box, or test polygon.

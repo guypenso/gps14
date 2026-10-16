@@ -18,6 +18,11 @@ def test_render_has_web_cron_postgres_and_safe_defaults():
     assert web['DASHBOARD_PASSWORD']['generateValue'] is True
     assert 'RENTCAST_API_KEY' not in web and 'RESEND_API_KEY' not in web
     assert 'sync' in cron['RENTCAST_API_KEY']
+    assert common['LISTING_LIMIT']=='500'
+    for service in services.values():
+        assert service['branch']=='master'
+        assert service['autoDeployTrigger']=='checksPass'
+        assert 'fetch_boundary.py' not in service['buildCommand']
 
 
 def test_git_example_does_not_include_personal_recipient():

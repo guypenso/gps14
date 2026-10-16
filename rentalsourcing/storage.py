@@ -9,7 +9,7 @@ class Store:
         self.pg = url.startswith(('postgres://', 'postgresql://'))
         if self.pg:
             import psycopg
-            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15)
+            self.db = psycopg.connect(url, autocommit=True, connect_timeout=15, client_encoding='utf8')
             self.db.execute('SET statement_timeout=30000')
             self.db.execute('SET lock_timeout=5000')
         elif url.startswith('sqlite:///'):
@@ -173,7 +173,10 @@ class Store:
             today=now.strftime('day:%Y-%m-%d')
             prior_active=self.execute('SELECT COUNT(*) FROM usage WHERE period>=? AND period<? AND used>0',(start,today)).fetchone()[0]
             fair=max(1,health['remaining']-max(0,31-prior_active))
-        else:fair=max(1,health['remaining']//health['days_remaining'])
+        else:
+            # Spread the allowance across the remaining dates without rounding every
+            # day down to a listing-only run that can never verify a pending tax.
+            fair=max(1,(health['remaining']+health['days_remaining']-1)//health['days_remaining'])
         today_remaining=max(0,settings.per_day-self.count_usage(now.strftime('day:%Y-%m-%d')))
         return min(settings.per_run,today_remaining,health['remaining'],fair)
 

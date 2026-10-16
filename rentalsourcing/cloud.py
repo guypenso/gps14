@@ -18,6 +18,13 @@ from .storage import Store
 from .telemetry import event
 
 
+def scheduled_job(store,day):
+    # A partial inventory scan must keep its cursor across mornings. Tax-only
+    # backlog is copied into the next fresh scan by Engine instead.
+    old=store.execute("SELECT id FROM scan_jobs WHERE id LIKE ? AND collection_done=0 AND state IN ('running','partial','failed') ORDER BY day,id LIMIT 1",('daily:%',)).fetchone()
+    return old[0] if old else 'daily:'+day
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='RentalSourcing daily production collector')
     group=parser.add_mutually_exclusive_group()
@@ -66,7 +73,7 @@ def main(argv=None):
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
         store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203'],tax_add=100,tax_strict_max=2000))
-        job_id=args.resume or ('daily:'+day if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
+        job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()
             if not job:raise ValueError('Unknown scan to resume')

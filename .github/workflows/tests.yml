@@ -1,5 +1,7 @@
 name: Offline and PostgreSQL integration tests
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest

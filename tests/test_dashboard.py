@@ -127,3 +127,58 @@ def test_missing_price_after_historical_reduction_stays_pending_not_server_error
     assert response.status_code==200
     item=response.get_json()['properties'][0]
     assert item['state']=='Pending Verification' and item['price_reduction'] is False
+
+
+@pytest.mark.parametrize('value',[None,'not-a-date','2026-10-16T12:00:00','2026-10-17T12:00:00+00:00'])
+def test_invalid_or_future_listing_timestamps_never_approve(web,store,boundary,clock,settings,value):
+    ingest(store,boundary,clock,settings,[listing()])
+    store.execute('UPDATE properties SET observed_at=? WHERE id=?',(value or '', 'fixture-property'))
+    response=web.get('/api/dashboard',headers=HEADERS)
+    assert response.status_code==200
+    p=response.get_json()['properties'][0]
+    assert p['state']=='Pending Verification' and p['stored_state']=='Qualified'
+    assert {'invalid_timestamp','future_timestamp'} & set(p['reasons'])
+
+
+@pytest.mark.parametrize('field,value',[
+    ('expires_at','2026-10-16T11:59:59+00:00'),
+    ('expires_at','2026-10-17T12:00:00'),
+    ('expires_at','bad'),
+    ('fetched_at','2026-10-17T12:00:00+00:00'),
+    ('fetched_at','2026-10-16T12:00:00')])
+def test_invalid_or_expired_tax_is_masked(web,store,boundary,clock,settings,field,value):
+    ingest(store,boundary,clock,settings,[listing()])
+    store.execute('UPDATE tax_history SET '+field+'=? WHERE property_id=?',(value,'fixture-property'))
+    p=web.get('/api/dashboard',headers=HEADERS).get_json()['properties'][0]
+    assert p['state']=='Pending Verification'
+    assert p['annual_tax'] is None and p['adjusted_tax'] is None and not p['tax_current']
+    assert 'tax_cache_expired' in p['reasons']
+
+
+def test_launch_operational_status_and_event_states(web,store,boundary,clock,settings):
+    ingest(store,boundary,clock,settings,[listing()])
+    # The completed scan remains visible even when many later jobs fail.
+    for n in range(12):
+        store.job('failure-'+str(n),clock().date().isoformat())
+        clock.advance(minutes=1)
+        store.checkpoint('failure-'+str(n),0,False,{},'failed')
+    store.run('failed-attempt',dict(status='failed',error_type='TimeoutError'))
+    store.operation('launch-error','A provider timeout left verification pending')
+    d=web.get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['last_successful_scan']['state']=='complete'
+    assert d['new_deals'][0]['kind']=='new'
+    assert d['new_deals'][0]['state']=='ready'
+    assert d['new_deals'][0]['current_property_state']=='Qualified'
+    assert d['failed_runs'][0]['error_type']=='TimeoutError'
+    assert any('provider timeout' in message for message in d['operations'])
+    assert 'סריקה אחרונה שהושלמה' in web.get('/',headers=HEADERS).text
+
+
+def test_demo_marked_live_rows_and_unverified_events_are_hidden(web,store,boundary,clock,settings):
+    ingest(store,boundary,clock,settings,[listing()])
+    row=listing('not-real',demo=True)
+    store.save_property(row['id'],row,'Qualified',[],'rentcast-live',1,clock().isoformat())
+    store.execute('INSERT INTO deal_events VALUES (?,?,?,?,?,?,?,?,?)',('unverified-event','fixture-property','price_reduction',180000,190000,1,'ready','{}',clock().isoformat()))
+    d=web.get('/api/dashboard',headers=HEADERS).get_json()
+    assert d['total']==1
+    assert not d['price_reductions']

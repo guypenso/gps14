@@ -1,0 +1,6 @@
+{
+  "source": "https://data.wprdc.org/dataset/pittsburgh-city-boundary",
+  "download_url": "https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/CityBoundary/FeatureServer/0/query?where=1%3D1&outFields=OBJECTID&outSR=4326&f=geojson&returnGeometry=true",
+  "retrieved_at": "2026-10-16T11:16:07.653980+00:00",
+  "sha256": "c01733057730badc245d67e0c7ea8d42e1886c03754a3150f83402d42d10d37b"
+}
