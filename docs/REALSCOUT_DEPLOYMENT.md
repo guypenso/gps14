@@ -13,7 +13,7 @@
 | Original outbox/daily idempotency and source-aware report | Complete offline |
 | Strict selective API limits/cache reuse; no bulk in RealScout mode | Complete offline, disabled |
 | Disposable PostgreSQL migrations/concurrent workers | Tested; never production |
-| Receiving account eligibility/cost and receiver-authentication contract | Blocked on approved provider/account inspection |
+| Receiving account eligibility/cost and raw-message availability / aligned DKIM preservation | Blocked on approved provider/account inspection |
 | Gmail forwarding route incl. sender auth/body shape/confirmation | Blocked on permission and controlled receipt |
 | Existing live Render/DB/schedule/provider status inspection | Blocked on secure access authorization/configured connector |
 | Production backup, deployment/migration, controlled report send | Requires explicit approval |
@@ -33,7 +33,7 @@ Keep all existing provider keys, EMAIL_FROM/EMAIL_TO, EMAIL_APPROVAL_ID, databas
 |---|---|
 | DISCOVERY_SOURCE | `rentcast` until daily cutover; `realscout` only after approval |
 | ENABLE_REALSCOUT_INGEST | `false`, later true for signed receiving endpoint |
-| ENABLE_REALSCOUT_WORKER | `false`, later true after authentication contract verified |
+| ENABLE_REALSCOUT_WORKER | `false`, later true after original raw DKIM path verified |
 | ENABLE_REALSCOUT_DAILY | `false`, later true on web+existing cron for report adapter |
 | ENABLE_REALSCOUT_ENRICHMENT | `false`; selective property evidence only after paid-call approval |
 | ENABLE_REALSCOUT_STATUS_VERIFICATION | `false`; optional extra exact-address request, separate activation |
@@ -44,8 +44,9 @@ Keep all existing provider keys, EMAIL_FROM/EMAIL_TO, EMAIL_APPROVAL_ID, databas
 | RESEND_RECEIVING_API_KEY | Receiving-read-capable API key; use narrowest provider-supported scope; never sending-only key by assumption |
 | REALSCOUT_LINK_KEY | Fernet key generated securely by operator, backed up separately from DB; same on web+cron |
 | PUBLIC_APP_URL | Actual existing HTTPS dashboard URL, no credentials/query/fragment |
-| REALSCOUT_TRUSTED_AUTHSERV_ID | Blank until provider-owned/sanitized Authentication-Results contract verified |
-| REALSCOUT_AUTH_CONTRACT_APPROVAL_ID | Review evidence reference; never set just to bypass a failed message |
+| REALSCOUT_TRUSTED_AUTHSERV_ID | RETIRED; must remain blank |
+| REALSCOUT_AUTH_CONTRACT_APPROVAL_ID | RETIRED; must remain blank |
+| REALSCOUT_RAW_DOWNLOAD_HOSTS | JSON exact approved storage hosts; see REALSCOUT_AUTHENTICATION.md |
 | REALSCOUT_WORKER_MAX_JOBS | `20` per drain |
 | REALSCOUT_WORKER_MAX_ATTEMPTS | `5` before quarantine |
 | REALSCOUT_WORKER_LEASE_SECONDS | `180` (>=90) |
@@ -55,7 +56,7 @@ Example policy with placeholders, NOT real credentials/addresses:
 
 ```json
 [
-  {"inbox":"exclusive@YOUR-MANAGED-SUBDOMAIN.resend.app","allowed_senders":["EXACT-ORIGINAL-FROM@REALSCOUT-DOMAIN"],"profile":"exclusive_alert"}
+  {"inbox":"exclusive@YOUR-MANAGED-SUBDOMAIN.resend.app","allowed_senders":["EXACT-ORIGINAL-FROM@REALSCOUT-DOMAIN"],"profile":"exclusive_alert","original_recipients":["AUTHORIZED-ORIGINAL-GMAIL-ADDRESS"]}
 ]
 ```
 
@@ -73,7 +74,7 @@ Existing request caps still apply: APPROVED_API_REQUESTS/ID/mode, MAX_API_REQUES
 4. In Gmail web Settings -> See all settings -> Forwarding and POP/IMAP -> Add a forwarding address, enter the dedicated alias. Gmail sends a confirmation message to it. With authorization, use the provider receiving dashboard to complete this confirmation or have the owner click/enter the confirmation. Do **not** allowlist Google confirmation senders in the property parser: these messages are not listings. If the signed webhook rejects them, use the receiving dashboard to read the confirmation independently. Leave global 'forward all mail' disabled.
 5. Gmail Settings -> Filters and Blocked Addresses -> Create a new filter: exact original From address (not broad @domain), and exclusive subject `Exclusives: Be the first to see these homes`. Preview search results and ensure they only include authorized alerts. Create filter -> Forward it to the exclusive alias. Do not tick 'also apply filter to matching conversations' (no bulk private historic forwarding). No Gmail OAuth/password/IMAP grant is required. Gmail may require a separate forwarding address and confirmation for the regular alias.
 6. Regular template: after original sample validation, create a separate narrow filter using its exact From plus actual subject/search-name matching supported by the sample; forward to the saved-search alias. Do not invent this subject from the Exclusives sample. Gmail subject/from filtering cannot grant blanket permission to parse unrelated templates.
-7. With explicit authorization for **one controlled receipt**, validate Gmail preserves expected original From/Date/text/HTML and Resend's receiver-owned authentication namespace. Record the actual authserv-id only after the provider confirms header spoof resistance; set the authentication-contract approval. If authentication is absent/broken/ambiguous, stop here: quarantine and use provider support or a separately reviewed secure ingestion path. Never trust archived Authentication-Results, ARC text, or merely exact From as a bypass. Verify webhook's `to` and retrieved `to`/`received_for` include the dedicated alias; if forwarding alters either, obtain actual provider schema and adapt with tests rather than widening policy.
+7. With explicit authorization for **one controlled receipt**, follow REALSCOUT_AUTHENTICATION.md: obtain one raw message using the official SDK-supported raw URL, approve the exact storage host privately, verify the original aligned DKIM and signed original-recipient headers, and confirm the signed webhook destination. No Authentication-Results or received_for trust bypass is permitted. Leave the retired header-trust variables empty; require REALSCOUT_RAW_DOWNLOAD_HOSTS and original_recipients. Missing raw bytes/altered signed content quarantine. Do not enable processing merely by recording an approval ID.
 8. Enable INGEST+WORKER with approval and validated settings, inspect private `/api/realscout/status` and `/api/realscout/report`. Jobs persist across restarts. Requeue approved quarantined messages only after the cause is fixed. Confirm one source message produces one observation per card on duplicate webhook delivery and no portal link is opened. Keep paid enrichment off for this transport validation.
 9. With separate production/report approval, set DISCOVERY_SOURCE=realscout and DAILY=true on existing web/cron using one configuration release. Keep existing cron and existing verified sender/recipient configuration. Inspect prepared report before first controlled send; preserve outbox sent/uncertain history. If a legacy report already sent today, the RealScout report waits until next day instead of duplicating it. Selective RentCast/status remain off until separate bounded spending approval.
 
@@ -81,7 +82,7 @@ Existing request caps still apply: APPROVED_API_REQUESTS/ID/mode, MAX_API_REQUES
 
 `python -m rentalsourcing.cloud --migrate` is the existing migration entry point, also run by start_web.sh. Use only after backup and deployment/migration approval. Changes are additive and idempotent in the existing database; do not export/replace/truncate production.
 
-New tables: realscout_messages, realscout_candidates, realscout_observations, realscout_links, realscout_inbound_jobs, realscout_evidence, realscout_status_evidence, realscout_reports, realscout_report_items, realscout_health, realscout_migrations. Queue lease/retry/profile fields and message processed_at are additive. Existing schema_versions, properties/history/taxes/cache/usage/approval/outbox and sender errors remain. Migration marker version1 is separate from original schema version2. Per-operation transactions plus PG advisory locks preserve atomicity. No down migration drops history. Transfer utility preserves new tables when source/target share the migrated schema; do not run it against production to activate this integration.
+New tables: realscout_messages, realscout_candidates, realscout_observations, realscout_links, realscout_inbound_jobs, realscout_evidence, realscout_status_evidence, realscout_reports, realscout_report_items, realscout_health, realscout_migrations; version2 adds realscout_dkim_keys and realscout_auth_evidence. Queue lease/retry/profile fields and message processed_at are additive. Existing schema_versions, properties/history/taxes/cache/usage/approval/outbox and sender errors remain. Migration marker version1 is separate from original schema version2. Per-operation transactions plus PG advisory locks preserve atomicity. No down migration drops history. Transfer utility preserves new tables when source/target share the migrated schema; do not run it against production to activate this integration.
 
 ## Monitoring and recovery (operator actions)
 
@@ -101,5 +102,7 @@ If RealScout daily cutover fails, restore the previous daily/source flags as one
 
 1. Confirm permitted automated RealScout alert processing/forwarding and approve the controlled receiving validation.
 2. Supply one original **regular** saved-search .eml; no password/key in chat. Exclusives sample is already validated.
-3. Grant secure authorized access to existing Render/Resend/VPS settings, or provision the private env values through their dashboards; confirm Gmail's forwarding-address verification when required. Provider support must establish the receiver-authentication contract/receiving eligibility before activation.
+3. Grant secure authorized access to existing Render/Resend/VPS settings, or provision the private env values through their dashboards; confirm Gmail's forwarding-address verification when required. Provider support must establish the raw-message availability / aligned DKIM preservation/receiving eligibility before activation.
 4. Explicitly approve final production deployment/migration and controlled real email send; separately approve any bounded paid RentCast allowance if wanted. No technical commands are required from the owner.
+
+Authentication update: REALSCOUT_AUTHENTICATION.md supersedes all earlier header-contract guidance. No services or flags were activated.

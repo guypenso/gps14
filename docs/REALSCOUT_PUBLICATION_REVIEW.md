@@ -49,3 +49,5 @@ Explicit permitted-use/one-message receipt authorization, secure existing Render
 verified receiving-authentication contract and account eligibility. Regular-template enablement
 still requires its own .eml. Live sender/recipient delivery status remains unverified. No production
 change, real message send, mailbox access or paid property request is authorized by publishing a PR.
+
+Authentication update: the historical header-contract gate above is superseded by REALSCOUT_AUTHENTICATION.md. Header-based trust is retired; verified original raw DKIM is required.

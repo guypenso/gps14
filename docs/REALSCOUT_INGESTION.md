@@ -4,7 +4,7 @@ Implemented locally against the maintained `guypenso/gps14` master revision `051
 
 ## Implemented flow
 
-Resend signed `email.received` notification -> authenticated public POST route -> PostgreSQL durable job -> bounded supported Receiving API retrieval -> independently verified sender/destination -> profile-specific HTML/MIME/plain-text parser -> candidate/observation history -> original hard filters -> cached or explicitly enabled selective RentCast evidence -> ranked, source-aware report -> EXISTING daily outbox/Resend sender.
+Resend signed `email.received` notification -> authenticated public POST route -> PostgreSQL durable job -> bounded supported Receiving API retrieval -> cryptographically verified original sender/destination -> profile-specific HTML/MIME/plain-text parser -> candidate/observation history -> original hard filters -> cached or explicitly enabled selective RentCast evidence -> ranked, source-aware report -> EXISTING daily outbox/Resend sender.
 
 - POST `/webhooks/resend/inbound`: official Svix verification of raw bytes and timestamp; only this POST is exempt from dashboard Basic auth. Invalid signatures 401, unauthorized sender/destination 403, unavailable durable queue 503, retries/duplicates 200. Disabled endpoint 404. Maximum webhook body 128 KiB.
 - Worker GET `https://api.resend.com/emails/receiving/<UUID>`: supported receiving endpoint, separate receiving key, fixed HTTPS host/path, no redirects, 30-second timeout, 2 MB response bound, exact returned ID. No mailbox enumeration, attachment download, detail-link resolution, images or portal crawling. Data-URI HTML is decoded locally.
@@ -14,13 +14,16 @@ Resend signed `email.received` notification -> authenticated public POST route -
 - Links are Fernet encrypted separately; private bearer tokens are absent from report/outbox/logs. Reports link to `/realscout/detail/<candidate>` behind existing dashboard Basic auth; only a user click redirects to the original URL. Back up the link key separately from the DB. No key rotation command is supplied: preserve the original key until a reviewed re-encryption migration is available.
 - `/api/realscout/status` and `/api/realscout/report` are private Basic-auth GETs. Existing dashboard remains intact. The new report endpoint exposes source-aware candidates; the old dashboard inventory table remains RentCast history.
 
-## Critical authentication activation gate
+## Cryptographic sender authentication
 
-Webhook authentication proves Resend sent a notification, not that the email sender is RealScout. Exact From allowlisting alone is insufficient. Receiving API HTML/text/headers are supported; a top-level `authentication.dmarc` field is **not assumed to be a documented API contract**. Production transport discards any such field and normalizes only a reviewed, receiver-owned `Authentication-Results` header.
-
-`REALSCOUT_TRUSTED_AUTHSERV_ID` and `REALSCOUT_AUTH_CONTRACT_APPROVAL_ID` must remain blank until a controlled forwarded-message test and provider documentation/support confirm that this header namespace is generated/sanitized by Resend, cannot be supplied/spoofed by the original sender, and remains distinguishable through Gmail forwarding. The code requires one exact authserv-id, exactly one DMARC pass with `header.from` matching the original From domain. Sender-supplied archived pass headers/ARC chains are not substitutes. Without the approved contract, fetched mail quarantines; worker activation fails config validation. A real forwarding route has **not** been validated.
-
-If Resend does not supply an enforceably trustworthy receiver-owned authentication result, do not flip these settings based merely on observed header text. A separately reviewed gateway with authenticated original-message evidence, or a narrowly authorized Gmail read-only ingestion adapter, is required. That fallback is not implemented/authorized here. This is an explicit external blocker, not a silent insecure bypass.
+The old configurable Authentication-Results trust path is retired and cannot be enabled with an
+approval string. The app verifies fully signed original MIME using exact-domain-aligned RSA2048+
+DKIM and an explicit signed original-recipient allowlist. Provider-projected HTML/headers and
+received_for never establish authenticity. A dedicated alias is routing, not sender authentication.
+See [verified research, implementation, configuration and smallest controlled test](REALSCOUT_AUTHENTICATION.md).
+Raw-message availability is supported by the official SDK but optional and omitted in the public
+OpenAPI response schema; it and actual forwarding preservation still require one approved receipt.
+All verification remains disabled. No new service/subscription is required.
 
 ## Original investment policy preserved
 

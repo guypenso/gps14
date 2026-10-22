@@ -31,6 +31,7 @@ class RealScoutSettings:
     poll_seconds: int=30
     message_limit: int=2_000_000
     allow_unvalidated_saved_search: bool=False
+    raw_download_hosts: tuple=()
     trusted_authserv_id: str=''
     authentication_contract_approval: str=''
 
@@ -42,9 +43,15 @@ class RealScoutSettings:
             raise ValueError('RealScout processing limits exceed bounded maxima')
         if self.lease_seconds<90:raise ValueError('Worker lease must exceed bounded retrieval timeout')
         if self.status_verification_enabled and not self.enrichment_enabled:raise ValueError('Status verification requires separately enabled selective enrichment')
-        if self.worker_enabled and not (self.trusted_authserv_id and self.authentication_contract_approval):
-            raise ValueError('Receiving authentication header contract must be verified before enabling the worker')
-        if any(c.isspace() or c in ';\r\n' for c in self.trusted_authserv_id):raise ValueError('Invalid trusted authserv-id')
+        if self.trusted_authserv_id or self.authentication_contract_approval:
+            raise ValueError('Header-trust configuration retired; use verified original raw DKIM')
+        if (self.worker_enabled or (self.ingest_enabled and self.daily_enabled)) and (not self.raw_download_hosts or any(not p.original_recipients for p in self.policies)):
+            raise ValueError('Raw download host and original recipient policies required before worker activation')
+        if any(not isinstance(h,str) or not h or h!=h.lower() or '/' in h or ':' in h or '*' in h or '.' not in h for h in self.raw_download_hosts):
+            raise ValueError('Use exact lowercase provider storage hostnames')
+        if self.raw_download_hosts:
+            from .realscout_auth import raw_url
+            for h in self.raw_download_hosts:raw_url('https://'+h+'/validate',self.raw_download_hosts)
         enabled=self.ingest_enabled or self.daily_enabled or self.worker_enabled or self.enrichment_enabled
         if enabled and not self.approval_id:raise ValueError('RealScout processing permission approval is required')
         if (self.worker_enabled or self.enrichment_enabled) and not self.ingest_enabled:
@@ -73,7 +80,7 @@ class RealScoutSettings:
             if not isinstance(profiles,list):raise ValueError
             policies=tuple(InboundPolicy(inbox=p['inbox'],allowed_senders=tuple(p['allowed_senders']),
                 search_name=p.get('search_name','RentalSourcing - Pittsburgh Under $200K'),
-                alert_profile=p['profile']) for p in profiles)
+                alert_profile=p['profile'],original_recipients=tuple(p.get('original_recipients',[]))) for p in profiles)
         except (ValueError,KeyError,TypeError):raise ValueError('Invalid REALSCOUT_INBOX_PROFILES') from None
         return cls(ingest_enabled=flag('ENABLE_REALSCOUT_INGEST'),daily_enabled=flag('ENABLE_REALSCOUT_DAILY'),
             worker_enabled=flag('ENABLE_REALSCOUT_WORKER'),enrichment_enabled=flag('ENABLE_REALSCOUT_ENRICHMENT'),
@@ -85,6 +92,7 @@ class RealScoutSettings:
             max_attempts=int(os.getenv('REALSCOUT_WORKER_MAX_ATTEMPTS','5')),
             lease_seconds=int(os.getenv('REALSCOUT_WORKER_LEASE_SECONDS','180')),
             poll_seconds=int(os.getenv('REALSCOUT_WORKER_POLL_SECONDS','30')),
+            raw_download_hosts=tuple(json.loads(os.getenv('REALSCOUT_RAW_DOWNLOAD_HOSTS','[]'))),
             trusted_authserv_id=os.getenv('REALSCOUT_TRUSTED_AUTHSERV_ID',''),
             authentication_contract_approval=os.getenv('REALSCOUT_AUTH_CONTRACT_APPROVAL_ID',''),
             allow_unvalidated_saved_search=flag('REALSCOUT_SAVED_SEARCH_VALIDATED'))

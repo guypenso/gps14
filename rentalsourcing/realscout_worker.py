@@ -9,7 +9,8 @@ import urllib.request
 from uuid import UUID,uuid4
 from .request import NoRedirect
 from .realscout_store import LinkVault,instant
-from .realscout_inbound import process_received,trusted_authentication
+from .realscout_inbound import process_received
+from .realscout_auth import RawDkimVerifier,AuthFailure
 from .telemetry import event
 
 
@@ -50,7 +51,7 @@ class ReceivingClient:
             except (ValueError,UnicodeError):raise RetrievalFailure('unsupported_html_encoding',False) from None
         # Always normalize at the trusted transport boundary, never trust an
         # undocumented/sender-supplied top-level authentication object.
-        data['authentication']=trusted_authentication(data,self.trusted_authserv_id)
+        data['authentication']={}
         return data
 
 
@@ -74,11 +75,12 @@ def claim(store,settings,now):
     return row[0],row[1],token
 
 
-def run_once(store,settings,*,client=None,clock=None):
+def run_once(store,settings,*,client=None,clock=None,verifier=None):
     if not settings.ingest_enabled:raise PermissionError('RealScout private retrieval is disabled')
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
     client=client or ReceivingClient(settings.receiving_key,limit=settings.message_limit,
         trusted_authserv_id=settings.trusted_authserv_id if settings.authentication_contract_approval else '')
+    verifier=verifier or RawDkimVerifier(store,settings.raw_download_hosts,clock=clock)
     vault=LinkVault(settings.link_key);counts={'processed':0,'retried':0,'quarantined':0}
     # Exhausted interrupted jobs must not remain stuck in processing forever.
     store.execute("UPDATE realscout_inbound_jobs SET state='quarantined',error_category='attempts_exhausted',lease_token=NULL,lease_until=NULL WHERE attempts>=? AND state IN ('processing','pending','retry') AND (lease_until IS NULL OR lease_until<=?)",
@@ -90,16 +92,26 @@ def run_once(store,settings,*,client=None,clock=None):
         try:
             policy=next((p for p in settings.policies if p.inbox.lower()==alias),None)
             if policy is None:raise RetrievalFailure('inbox_profile_no_longer_authorized',False)
+            accepted=store.execute('SELECT 1 FROM realscout_auth_evidence a JOIN realscout_messages m ON m.id=a.message_key WHERE a.email_id=?',(email_id,)).fetchone()
+            if accepted:
+                # Prior verified ingest committed before a crash/ACK failure: no private re-fetch.
+                store.execute("UPDATE realscout_inbound_jobs SET state='processed',error_category=NULL,lease_token=NULL,lease_until=NULL,updated_at=? WHERE email_id=? AND lease_token=?",
+                    (clock().isoformat(),email_id,token))
+                counts['processed']+=1
+                continue
             data=client.get(email_id)
             if data.get('id')!=email_id:raise RetrievalFailure('receiving_identity_mismatch',False)
             owned=store.execute('SELECT lease_token,lease_until FROM realscout_inbound_jobs WHERE email_id=?',(email_id,)).fetchone()
             if owned[0]!=token or instant(owned[1])<=clock():raise RetrievalFailure('worker_lease_lost')
-            result=process_received(store,data,policy,authorized=True,vault=vault,processed_at=clock().isoformat())
+            proof=verifier.verify(data,policy)
+            owned=store.execute('SELECT lease_token,lease_until FROM realscout_inbound_jobs WHERE email_id=?',(email_id,)).fetchone()
+            if owned[0]!=token or instant(owned[1])<=clock():raise RetrievalFailure('worker_lease_lost')
+            result=process_received(store,data,policy,authorized=True,vault=vault,processed_at=clock().isoformat(),verification=proof)
             store.execute("UPDATE realscout_inbound_jobs SET state='processed',error_category=NULL,lease_token=NULL,lease_until=NULL,updated_at=? WHERE email_id=? AND lease_token=?",
                           (clock().isoformat(),email_id,token))
             counts['processed']+=1
         except Exception as exc:
-            if isinstance(exc,RetrievalFailure):category,retry=exc.category,exc.retryable
+            if isinstance(exc,(RetrievalFailure,AuthFailure)):category,retry=exc.category,exc.retryable
             elif isinstance(exc,PermissionError):category,retry='sender_or_destination_authentication_failed',False
             elif isinstance(exc,(ValueError,KeyError,TypeError,UnicodeError)):category,retry='template_or_metadata_review_required',False
             else:category,retry='internal_processing_failure',True

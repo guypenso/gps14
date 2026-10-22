@@ -314,7 +314,9 @@ def test_already_retrieved_body_requires_authorization_authentication_and_queue(
     with pytest.raises(PermissionError):process_received(inbox,data,inbound_policy,authorized=True,vault=vault)
     inbox.execute('INSERT INTO realscout_inbound_jobs (email_id,event_id,received_at,state,attempts) VALUES (?,?,?,?,0)',(data['id'],'synthetic-event',NOW.isoformat(),'pending'))
     with pytest.raises(PermissionError):process_received(inbox,{**data,'authentication':{}},inbound_policy,authorized=True,vault=vault)
-    result=process_received(inbox,data,inbound_policy,authorized=True,vault=vault)
+    from realscout_auth_fixtures import FixtureVerifier
+    inbox.execute('UPDATE realscout_inbound_jobs SET recipient_alias=? WHERE email_id=?',(inbound_policy.inbox,data['id']))
+    result=process_received(inbox,data,inbound_policy,authorized=True,vault=vault,verification=FixtureVerifier().verify(data,inbound_policy))
     assert len(result['candidates'])==1
     assert inbox.execute('SELECT COUNT(*) FROM realscout_messages').fetchone()[0]==1
 

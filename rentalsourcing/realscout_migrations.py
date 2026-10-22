@@ -15,6 +15,8 @@ def upgrade(store):
           'lease_until':'TEXT','lease_token':'TEXT','error_category':'TEXT','updated_at':'TEXT','profile':'TEXT','recipient_alias':'TEXT'},
     }
     tables=[
+      'CREATE TABLE IF NOT EXISTS realscout_dkim_keys (name TEXT PRIMARY KEY,payload TEXT,fetched_at TEXT NOT NULL,expires_at TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS realscout_auth_evidence (email_id TEXT PRIMARY KEY,raw_sha256 TEXT NOT NULL,signing_domain TEXT NOT NULL,selector TEXT NOT NULL,verified_at TEXT NOT NULL,method TEXT NOT NULL,message_key TEXT NOT NULL)',
       'CREATE TABLE IF NOT EXISTS realscout_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)',
       '''CREATE TABLE IF NOT EXISTS realscout_evidence (candidate_id TEXT PRIMARY KEY,property_id TEXT NOT NULL,
            payload TEXT NOT NULL,source TEXT NOT NULL,fetched_at TEXT NOT NULL,expires_at TEXT NOT NULL)''',
@@ -36,3 +38,5 @@ def upgrade(store):
     store.execute('UPDATE realscout_messages SET processed_at=received_at WHERE processed_at IS NULL')
     store.execute('INSERT INTO realscout_migrations VALUES (?,?) ON CONFLICT(version) DO NOTHING',
                   (1,dt.datetime.now(dt.timezone.utc).isoformat()))
+
+    store.execute('INSERT INTO realscout_migrations VALUES (?,?) ON CONFLICT(version) DO NOTHING',(2,dt.datetime.now(dt.timezone.utc).isoformat()))

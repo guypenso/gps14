@@ -11,28 +11,8 @@ from .realscout_store import ingest, instant
 
 
 def trusted_authentication(data, authserv_id):
-    """Fail closed unless an explicitly approved receiver owns this header namespace.
-
-    The configured authserv-id is NOT inferred from an email. Operators must first
-    verify that Resend prepends/sanitizes this Authentication-Results namespace.
-    Archived, sender-supplied and ARC headers never establish trust on their own.
-    No assumption is made that the Receiving API exposes a top-level DMARC field.
-    """
-    if not authserv_id:return {}
-    headers=data.get('headers')
-    if not isinstance(headers,dict):return {}
-    values=[v for k,v in headers.items() if k.lower()=='authentication-results']
-    if len(values)!=1 or not isinstance(values[0],str):return {}
-    value=re.sub(r'\r?\n[ \t]+',' ',values[0])
-    if '\n' in value or '\r' in value:return {}
-    parts=value.split(';')
-    if parts[0].strip().lower()!=authserv_id.lower():return {}
-    results=[p.strip() for p in parts[1:] if re.match(r'\s*dmarc\s*=',p,re.I)]
-    if len(results)!=1 or not re.match(r'dmarc\s*=\s*pass\b',results[0],re.I):return {}
-    domains=re.findall(r'\bheader\.from\s*=\s*([A-Za-z0-9.-]+)',results[0],re.I)
-    sender=parseaddr(data.get('from',''))[1].lower()
-    if len(domains)!=1 or '@' not in sender or domains[0].lower()!=sender.rsplit('@',1)[1]:return {}
-    return {'dmarc':'pass'}
+    """Retired: arbitrary/archived headers can never grant sender authenticity."""
+    return {}
 
 
 @dataclass(frozen=True)
@@ -41,6 +21,7 @@ class InboundPolicy:
     allowed_senders: tuple[str,...]
     search_name: str = SEARCH
     alert_profile: str = 'saved_search'
+    original_recipients: tuple[str,...] = ()
 
     def __post_init__(self):
         if not self.inbox or not self.allowed_senders:raise ValueError('Exact inbox and sender allowlist required')
@@ -69,32 +50,25 @@ def accept_notification(store, raw, headers, *, signing_secret, policy):
     return dict(queued=bool(created),duplicate=not bool(created),email_id=email_id)
 
 
-def process_received(store, data, policy, *, authorized=False, vault=None, processed_at=None):
+def process_received(store, data, policy, *, authorized=False, vault=None, processed_at=None, verification=None):
     """Accepts ALREADY retrieved provider data. Does not retrieve private email itself.
     The worker must bind data.id to a queued email_id before calling and mark its
     job processed only after this commit. Retries are safe via message identity.
     """
     if not authorized:raise PermissionError('Email ingestion is not enabled/authorized')
-    sender=parseaddr(data.get('from',''))[1].lower()
-    if sender not in {s.lower() for s in policy.allowed_senders}:raise PermissionError('Sender not allowlisted')
-    if data.get('authentication',{}).get('dmarc')!='pass':
-        raise PermissionError('Email authentication unverified; quarantine, including unsupported forwarding')
-    recipients=[parseaddr(v)[1].lower() for v in data.get('to',[])]+[parseaddr(v)[1].lower() for v in data.get('received_for',[])]
-    if policy.inbox.lower() not in recipients:raise PermissionError('Unexpected receiving address')
-    job=store.execute('SELECT state FROM realscout_inbound_jobs WHERE email_id=?',(data.get('id'),)).fetchone()
-    if not job:raise PermissionError('Email body is not bound to a verified queued notification')
-    headers={k.lower():v for k,v in data.get('headers',{}).items()}
-    msg=EmailMessage();msg['From']=data['from'];msg['Subject']=data.get('subject','')
-    msg['Message-ID']=data.get('message_id') or '<resend-received-'+str(UUID(data['id']))+'>'
-    if headers.get('date'):msg['Date']=headers['date']
-    msg.set_content(data.get('text') or '')
-    html=data.get('html')
-    if html:
-        if not isinstance(html,str) or html.startswith('data:'):
-            raise ValueError('Unsupported HTML format; provider-specific decoding required')
-        msg.add_alternative(html,subtype='html')
-    parsed=parse_email(msg.as_bytes(),policy.search_name,profile=policy.alert_profile)
+    from .realscout_auth import VerifiedEmail
+    if not isinstance(verification,VerifiedEmail) or verification.email_id!=data.get('id'):
+        raise PermissionError('Cryptographically verified original message required')
+    if verification.sender not in {s.lower() for s in policy.allowed_senders}:
+        raise PermissionError('Sender not allowlisted')
+    job=store.execute('SELECT recipient_alias FROM realscout_inbound_jobs WHERE email_id=?',(data.get('id'),)).fetchone()
+    if not job or job[0]!=policy.inbox.lower():raise PermissionError('Original message is not bound to the authorized receiving job')
+    # Parse ONLY signature-verified raw MIME; provider HTML/text/header projections are not input.
+    parsed=parse_email(verification.raw,policy.search_name,profile=policy.alert_profile)
     result=ingest(store,parsed,received_at=data['created_at'],authorized=True,vault=vault,processed_at=processed_at)
     # Queue ownership/state acknowledgement is the worker's responsibility.
     # This leaves the message commit replayable after a crash before ACK.
+    store.execute('INSERT INTO realscout_auth_evidence VALUES (?,?,?,?,?,?,?) ON CONFLICT(email_id) DO NOTHING',
+        (verification.email_id,verification.raw_sha256,verification.signing_domain,verification.selector,
+         verification.verified_at,'aligned-full-message-dkim',parsed.message_key))
     return result

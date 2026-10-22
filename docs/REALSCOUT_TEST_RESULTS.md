@@ -33,9 +33,9 @@ actual account plan/endpoint availability or actual property tax values.
   rejection, source/identity/demo mismatch, current status discrepancies and expired evidence.
 - Svix signature/timestamp/tamper, wrong recipient/sender, invalid/oversized events, persistence
   failure503, Basic-auth report/status/link protection, private tokens absent from report/outbox.
-- Production transport discards undocumented top-level authentication claims; explicit trusted
-  receiver-header contract, exact authserv-id and DMARC From-domain alignment, malformed/duplicate/
-  spoofed header rejection. Missing actual provider contract still blocks live activation.
+- Production transport discards projected authentication claims and never trusts archived verdicts.
+  Raw RSA2048/SHA256 verification, exact signing-domain/sender/original-recipient binding, signed
+  parsing-critical headers, whole-body integrity and age/expiry checks are exercised cryptographically.
 - Receiving fixed HTTPS UUID endpoint, ID binding/no redirects; 429/retry/quarantine, crashed leases,
   ingest-before-ACK replay, multiple PG workers each claiming a message once.
 - Exact-address enrichment, no city inventory query in RealScout mode, existing approvals/run/day/
@@ -78,3 +78,30 @@ Not verified: live Resend receiving account/cost/permissions/header trust, actua
 actual regular saved-search template, live sender/recipient delivery issue, production deployment/
 backups/cron inventory, provider-wide usage or property data. No offline test establishes ROI or
 complete MLS coverage. See REALSCOUT_DEPLOYMENT.md for explicit activation blockers.
+
+## Authentication implementation update — October23, Israel
+
+Final revised suite: **475 passed, 7 skipped in38.84s**, disposable PostgreSQL16 plus SQLite and the
+explicitly supplied private original parser expectations. This adds63 cases to the prior419 total;
+new crypto tests use genuine generated RSA signatures, mocked DNS wire-format responses and mocked
+raw downloads. No provider/DNS/mailbox was accessed. Queue/report regression tests use an explicitly
+named test verifier double; cryptographic tests run the real RawDkimVerifier with generated keys.
+
+Covered: spoofed sender, wrong signing domain/key, RSA1024 rejection, body/header tampering,
+duplicate critical headers, unsigned critical fields, partial-body signatures, forged Authentication-
+Results/JSON verdicts, authorized signed original To, queue alias binding despite forged received_for,
+replay under new provider IDs without observation refresh, Svix event dedup, exact HTTPS raw-host
+allowlist, no redirected/credential-bearing raw downloads, missing/oversized raw, DNS outages and
+CNAME/TTL cache, malformed DNS wire responses, lease loss during verification, audit metadata and
+content/token-safe failure logging. Original financial criteria/outbox/budget tests remain green.
+
+Migration2 adds only auth evidence/public DKIM cache tables; live migration/deployment not performed.
+The SDK raw capability/account compatibility and actual Gmail preservation still require one approved
+receipt. See REALSCOUT_AUTHENTICATION.md for official-source research and exact controlled-test scope.
+
+Final recovery regressions also verify delayed raw availability retries before one successful ingest,
+and committed cryptographic evidence can ACK after a restart without repeating private retrieval.
+A fresh actual Gunicorn/start_web.sh smoke test on isolated PostgreSQL16 confirmed migration2,
+health200 and disabled webhook404. No background worker/provider request or production change.
+Offline secret scan:11 candidates, all explicit test placeholders/example attack URLs/public checksum;
+no actual credentials, private original email contents, raw URLs or original property expectations.

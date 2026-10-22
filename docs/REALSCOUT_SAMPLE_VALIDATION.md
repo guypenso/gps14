@@ -48,4 +48,10 @@ in REALSCOUT_TEST_RESULTS.md. No production database was accessed.
 The worker, authenticated webhook, selective enrichment and existing daily outbox adapter are
 implemented but default off. See REALSCOUT_DEPLOYMENT.md for settings, forwarding, migrations and
 rollback. A real regular saved-search sample, authorized provider/account inspection and a verified
-receiver-owned authentication contract remain required before activation.
+raw-message/forwarding DKIM compatibility test remain required before activation.
+
+Authentication update: offline structural inspection of the authorized original confirms a primary
+exact-domain-aligned RSA2048 signature with the parsing-critical header set and no partial-body tag.
+This is structural compatibility, NOT cryptographic verification of the real sample: no original
+DNS key was queried. Real cryptographic tests use generated fictional messages/keys. See
+REALSCOUT_AUTHENTICATION.md for the implemented verifier and required one-message account test.

@@ -1,4 +1,5 @@
-# Optional offline ingestion adapter dependencies, not installed by production builds.
-# Production requirements and deployment files are unchanged.
+# Ingestion/security dependencies, installed through production and dev requirements.
 cryptography==50.0.2
 svix==2.8.0
+dkimpy==1.1.8
+dnspython==2.8.0

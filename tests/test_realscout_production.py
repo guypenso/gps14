@@ -28,14 +28,22 @@ from rentalsourcing.collector import Client
 from rentalsourcing.digest import ReconciliationRequired
 from conftest import Response,Provider,taxes
 
+from realscout_auth_fixtures import FixtureVerifier
+
+@pytest.fixture(autouse=True)
+def explicit_non_crypto_test_transport(monkeypatch):
+    # This module exercises queue/report failures. Actual RSA/DNS verification is
+    # covered end-to-end in test_realscout_dkim.py, without this test double.
+    monkeypatch.setattr('rentalsourcing.realscout_worker.RawDkimVerifier',FixtureVerifier)
+
 
 @pytest.fixture
 def rsconfig():
     return RealScoutSettings(ingest_enabled=True,daily_enabled=True,approval_id='explicit-synthetic-only',
-        policies=(InboundPolicy('alerts@example.invalid',('agent@example.invalid',)),),
+        policies=(InboundPolicy('alerts@example.invalid',('agent@example.invalid',),original_recipients=('owner@example.invalid',)),),
         webhook_secret='whsec_'+base64.b64encode(b'only-a-synthetic-test-secret-123').decode(),
         receiving_key='synthetic-receiving-key',link_key=Fernet.generate_key().decode(),
-        public_url='https://dashboard.example.invalid',allow_unvalidated_saved_search=True)
+        public_url='https://dashboard.example.invalid',allow_unvalidated_saved_search=True,raw_download_hosts=('storage.example.invalid',))
 
 
 @pytest.fixture
@@ -180,7 +188,7 @@ def test_expired_lease_after_restart_is_recovered(store,clock,rsconfig):
 def test_partial_commit_before_ack_is_idempotently_recovered(store,clock,rsconfig):
     from rentalsourcing.realscout_inbound import process_received
     eid=stage(store,rsconfig,clock);item=claim(store,rsconfig,clock());data=body(rsconfig,clock,eid)
-    process_received(store,data,rsconfig.policies[0],authorized=True,vault=LinkVault(rsconfig.link_key),processed_at=clock().isoformat())
+    process_received(store,data,rsconfig.policies[0],authorized=True,vault=LinkVault(rsconfig.link_key),processed_at=clock().isoformat(),verification=FixtureVerifier().verify(data,rsconfig.policies[0]))
     clock.advance(seconds=rsconfig.lease_seconds+1)
     assert run_once(store,rsconfig,client=Inbox({eid:data}),clock=clock)['processed']==1
     assert store.execute('SELECT COUNT(*) FROM realscout_candidates').fetchone()[0]==1
@@ -387,7 +395,7 @@ def test_repeat_daily_after_accepted_send_does_not_retrieve_or_enrich(store,boun
 def test_receiving_authentication_contract_is_explicit_and_aligned(header,expected):
     from rentalsourcing.realscout_inbound import trusted_authentication
     data={'from':'agent@example.invalid','headers':{'Authentication-Results':header}}
-    assert bool(trusted_authentication(data,'receiver.example.invalid'))==expected
+    assert not trusted_authentication(data,'receiver.example.invalid')
     assert not trusted_authentication(data,'')
 
 
@@ -398,13 +406,13 @@ def test_receiving_transport_never_accepts_undocumented_authentication_object():
             return Response({'id':eid,'from':'agent@example.invalid','authentication':{'dmarc':'pass'},
                 'headers':{'Authentication-Results':'receiver.example.invalid; dmarc=pass header.from=example.invalid'}})
     assert ReceivingClient('synthetic',opener=Opener()).get(eid)['authentication']=={}
-    assert ReceivingClient('synthetic',opener=Opener(),trusted_authserv_id='receiver.example.invalid').get(eid)['authentication']=={'dmarc':'pass'}
+    assert ReceivingClient('synthetic',opener=Opener(),trusted_authserv_id='receiver.example.invalid').get(eid)['authentication']=={}
 
 
-def test_worker_activation_requires_reviewed_provider_auth_contract(rsconfig):
-    with pytest.raises(ValueError):replace(rsconfig,worker_enabled=True)
-    assert replace(rsconfig,worker_enabled=True,trusted_authserv_id='receiver.example.invalid',
-                   authentication_contract_approval='synthetic-only').worker_enabled
+def test_worker_activation_requires_raw_host_and_original_recipient(rsconfig):
+    with pytest.raises(ValueError):replace(rsconfig,worker_enabled=True,raw_download_hosts=())
+    assert replace(rsconfig,worker_enabled=True,raw_download_hosts=('storage.example.invalid',)).worker_enabled
+    with pytest.raises(ValueError):replace(rsconfig,trusted_authserv_id='receiver.example.invalid')
 
 
 def test_unlinked_financial_plan_is_bounded_and_does_not_crash(store,boundary,clock,rsconfig,coreconfig):

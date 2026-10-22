@@ -142,8 +142,8 @@ the provider account. Existing four-call approval remains a one-time allowance.
 The maintained app now includes profile-specific MIME/HTML/plain-text RealScout parsing, signed
 Resend inbound jobs, a restart-safe PostgreSQL worker, cached/selective financial evidence and
 source-aware reports through the existing daily outbox. No new cron or database is needed.
-The original Exclusives sample is validated; a real saved-search sample and a verified receiving
-authentication contract remain activation gates. All RealScout flags default off.
+The original Exclusives sample is validated; a real saved-search sample and one controlled
+raw-message/forwarding DKIM compatibility test remain activation gates. All RealScout flags default off.
 
 See [implementation and criteria](docs/REALSCOUT_INGESTION.md),
 [exact configuration, Gmail/Resend setup, migration and rollback](docs/REALSCOUT_DEPLOYMENT.md),
@@ -152,3 +152,5 @@ See [implementation and criteria](docs/REALSCOUT_INGESTION.md),
 The [synthetic report](docs/examples/realscout-synthetic/report.txt) is explicitly fictional.
 `python scripts/realscout_dry_run.py --synthetic --output-dir /tmp/realscout-preview` runs offline
 through the maintained modules without provider calls, email sends or persistent state.
+
+Sender-authentication implementation and verified provider findings: [original raw DKIM verification](docs/REALSCOUT_AUTHENTICATION.md). No textual Authentication-Results waiver is supported.
