@@ -1,0 +1,1 @@
+Fixtures are synthetic or redacted structural regressions with fictional addresses and fake links. The authorized original message remains outside the repository and is tested only with REALSCOUT_SAMPLE_EML. No real private link/contact information is included. No mailbox was accessed. Do not open fixture URLs.

@@ -112,7 +112,7 @@ never-attempted digest is cancelled. Provider acceptance is not proof of inbox d
 A full query is not proof of every listing in the city: RentCast coverage and postal-city classification
 still apply. Tax year means latest available reported annual year, not a prediction of the next tax bill.
 Offset pagination can shift while provider listings change. No MLS/Zillow/Redfin connector is implemented.
-The pipeline uses the current RentCast-only strategy. Credentials, live provider acceptance and Render
+The default discovery strategy remains RentCast; the separately gated RealScout adapter is described below. Credentials, live provider acceptance and Render
 billing approval remain deployment prerequisites; no live-provider success is claimed by offline tests.
 
 ## Controlled proof of concept
@@ -135,3 +135,22 @@ API_APPROVAL_MODE defaults to one_time. Optional rolling_32_days requires an exp
 allowance approval and counts all app attempts across the preceding 32 UTC dates, preventing a
 calendar reset from creating a new spending allowance. No mode monitors other applications using
 the provider account. Existing four-call approval remains a one-time allowance.
+
+
+## RealScout email discovery (disabled by default)
+
+The maintained app now includes profile-specific MIME/HTML/plain-text RealScout parsing, signed
+Resend inbound jobs, a restart-safe PostgreSQL worker, cached/selective financial evidence and
+source-aware reports through the existing daily outbox. No new cron or database is needed.
+The original Exclusives sample is validated; a real saved-search sample and one controlled
+raw-message/forwarding DKIM compatibility test remain activation gates. All RealScout flags default off.
+
+See [implementation and criteria](docs/REALSCOUT_INGESTION.md),
+[exact configuration, Gmail/Resend setup, migration and rollback](docs/REALSCOUT_DEPLOYMENT.md),
+[actual sample validation](docs/REALSCOUT_SAMPLE_VALIDATION.md), and
+[offline test results](docs/REALSCOUT_TEST_RESULTS.md).
+The [synthetic report](docs/examples/realscout-synthetic/report.txt) is explicitly fictional.
+`python scripts/realscout_dry_run.py --synthetic --output-dir /tmp/realscout-preview` runs offline
+through the maintained modules without provider calls, email sends or persistent state.
+
+Sender-authentication implementation and verified provider findings: [original raw DKIM verification](docs/REALSCOUT_AUTHENTICATION.md). No textual Authentication-Results waiver is supported.

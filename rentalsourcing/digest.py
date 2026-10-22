@@ -74,8 +74,8 @@ def render(day,items,stats,health,operations):
 
 
 class Digest:
-    def __init__(self,store,boundary,settings,clock=None,opener=None):
-        self.store=store;self.boundary=boundary;self.settings=settings
+    def __init__(self,store,boundary,settings,clock=None,opener=None,realscout_settings=None):
+        self.store=store;self.boundary=boundary;self.settings=settings;self.realscout_settings=realscout_settings
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
 
@@ -211,10 +211,15 @@ class Digest:
         return dict(outbox_id=identity,state=data.get('last_event','unknown'),delivered=data.get('last_event')=='delivered')
 
     def send(self,identity):
-        if self.store.pg:self.store.execute('SELECT pg_advisory_lock(73541211)')
-        try:return self._send(identity)
+        acquired=[]
+        try:
+            if self.store.pg:
+                # Same ordering as the collector: prevent evidence/price changes during send validation.
+                for key in (73541209,73541211):
+                    self.store.execute('SELECT pg_advisory_lock(?)',(key,));acquired.append(key)
+            return self._send(identity)
         finally:
-            if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(73541211)')
+            for key in reversed(acquired):self.store.execute('SELECT pg_advisory_unlock(?)',(key,))
 
     def _send(self,identity):
         if not self.settings.email_enabled or not self.settings.email_approval_id or self.settings.environment!='production':raise PermissionError('Production email disabled or not approved')
@@ -229,6 +234,17 @@ class Digest:
         if first and now-dt.datetime.fromisoformat(first)>=dt.timedelta(hours=23):
             self.store.operation('reconcile:'+identity,'Resend result needs manual reconciliation; no automatic retry after idempotency safety window.')
             raise ReconciliationRequired('Check this message in Resend before retrying')
+        rs_report=self.store.execute('SELECT 1 FROM realscout_reports WHERE outbox_id=?',(identity,)).fetchone()
+        if rs_report:
+            from .realscout_config import RealScoutSettings
+            from .realscout_delivery import validate_frozen
+            config=self.realscout_settings or RealScoutSettings.from_env()
+            if not config.daily_enabled or self.settings.discovery_source!='realscout':
+                raise PermissionError('RealScout report sending is not enabled')
+            if not validate_frozen(self.store,self.boundary,identity,now):
+                if first:raise ReconciliationRequired('Frozen report evidence changed; reconcile previous delivery before retrying')
+                self.store.execute("UPDATE outbox SET state='cancelled',updated_at=? WHERE id=?",(now.isoformat(),identity))
+                return 'cancelled_stale'
         envelope=json.loads(body)
         if envelope.get('from')!=self.settings.email_from or envelope.get('to')!=[self.settings.email_to]:
             raise PermissionError('Frozen email sender/recipient differ from approved configuration; prepare again before sending')

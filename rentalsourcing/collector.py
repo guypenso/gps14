@@ -24,11 +24,11 @@ def tax_expiry(record,now,settings):
 
 class Client:
     source=LIVE
-    def __init__(self,store,settings=None,clock=None,opener=None,sleep=time.sleep):
+    def __init__(self,store,settings=None,clock=None,opener=None,sleep=time.sleep,cache_only=False):
         self.store=store;self.settings=settings or Settings.from_env()
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
-        self.sleep=sleep;self.count=0;self.cache_hits=0;self.last_fetched_at=None;self.last_error=None
+        self.sleep=sleep;self.cache_only=cache_only;self.count=0;self.cache_hits=0;self.last_fetched_at=None;self.last_error=None
 
     def get(self,path,params=None,cache=True):
         # A session lock covers cache lookup, reservation and response persistence.
@@ -41,8 +41,14 @@ class Client:
             if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(?)',(lock,))
 
     def _get(self,path,params=None,cache=True):
-        if path!='/listings/sale' and not path.startswith('/properties/'):
+        if path not in {'/listings/sale','/properties'} and not path.startswith('/properties/'):
             raise ValueError('Unsupported RentCast endpoint')
+        if path=='/properties' and (set(params or {})!={'address','limit'} or not isinstance(params['address'],str) or not params['address'].strip() or params['limit']!=1):
+            raise ValueError('Selective property lookup requires an exact address and limit=1')
+        if self.settings.discovery_source=='realscout' and path=='/listings/sale':
+            allowed=(self.settings.selective_status_verification and set(params or {})=={'address','limit','status'}
+                and isinstance(params['address'],str) and params['address'].strip() and params['limit']==1 and params['status']=='Active')
+            if not allowed:raise PermissionError('Bulk discovery disabled in RealScout mode')
         query=urllib.parse.urlencode(sorted((params or {}).items()))
         url='https://api.rentcast.io/v1'+path+('?' + query if query else '')
         key=hashlib.sha256(url.encode()).hexdigest();now=self.clock()
@@ -51,6 +57,7 @@ class Client:
             if saved and saved[1]==LIVE:
                 body=saved[0];self.cache_hits+=1;self.last_fetched_at=body['fetched_at']
                 return self.wrap(body['data']),body['total']
+        if self.cache_only:raise PermissionError('Cache-only verification; no provider request is authorized')
         deferred=self.store.execute('SELECT retry_after FROM api_attempts WHERE request_key=?',(key,)).fetchone()
         if deferred and deferred[0]>now.isoformat():raise RequestDeferred('Identical API request deferred after an interrupted or failed attempt')
         if not self.settings.enabled:raise PermissionError('Live RentCast collection disabled')
@@ -58,7 +65,7 @@ class Client:
         request=urllib.request.Request(url,headers={'X-Api-Key':os.environ['RENTCAST_API_KEY'],'Accept':'application/json'})
         for attempt in range(self.settings.retries+1):
             if self.count>=self.settings.per_run:raise BudgetExceeded('Run API allowance reached')
-            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path.startswith('/properties/'))
+            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path=='/properties' or path.startswith('/properties/'))
             if health['warning']:event('budget_warning',**health)
             self.count+=1
             if self.count>1:self.sleep(1)
@@ -70,11 +77,14 @@ class Client:
                 with self.opener.open(request,timeout=self.settings.timeout) as response:
                     if response.status!=200:raise ValueError('Unexpected HTTP status')
                     data=json.load(response);total=response.headers.get('X-Total-Count')
-                    if path=='/listings/sale' and not isinstance(data,list):raise ValueError('Listings must be a list')
+                    if path in {'/listings/sale','/properties'} and not isinstance(data,list):raise ValueError('Listings must be a list')
                     if path.startswith('/properties/') and not isinstance(data,dict):raise ValueError('Property must be an object')
                 self.last_fetched_at=self.clock().isoformat()
                 if cache:
-                    expires=self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale' else tax_expiry(data,self.clock(),self.settings)
+                    expires=(self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale' else
+                        tax_expiry(data[0],self.clock(),self.settings) if path=='/properties' and len(data)==1 and isinstance(data[0],dict) else
+                        self.clock()+dt.timedelta(hours=self.settings.negative_tax_cache_hours) if path=='/properties' else
+                        tax_expiry(data,self.clock(),self.settings))
                     self.store.cache_put(key,dict(data=data,total=total,fetched_at=self.last_fetched_at),LIVE,expires.isoformat())
                 self.store.execute('DELETE FROM api_attempts WHERE request_key=?',(key,))
                 event('rentcast_success',endpoint=path.split('/')[1],attempts=self.count)

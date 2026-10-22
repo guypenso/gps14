@@ -7,3 +7,10 @@ __pycache__/
 *.db
 *.sqlite*
 .venv/
+
+# Original alerts, private expected fields and derived reports must stay outside Git.
+*.eml
+!tests/fixtures/realscout/*.eml
+docs/examples/realscout-supplied/
+private-validation/
+*.private.json
