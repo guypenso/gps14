@@ -36,6 +36,22 @@ envVarGroups:
         value: "30"
       - key: NETWORK_RETRIES
         value: "0"
+      # Dormant integration only. Configure existing services after explicit approval.
+      # Do not apply this Blueprint to create replacement resources.
+      - key: DISCOVERY_SOURCE
+        value: rentcast
+      - key: ENABLE_REALSCOUT_INGEST
+        value: "false"
+      - key: ENABLE_REALSCOUT_WORKER
+        value: "false"
+      - key: ENABLE_REALSCOUT_DAILY
+        value: "false"
+      - key: ENABLE_REALSCOUT_ENRICHMENT
+        value: "false"
+      - key: ENABLE_REALSCOUT_STATUS_VERIFICATION
+        value: "false"
+      - key: REALSCOUT_SAVED_SEARCH_VALIDATED
+        value: "false"
 services:
   - type: web
     name: rentalsourcing-dashboard

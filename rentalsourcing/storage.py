@@ -93,6 +93,8 @@ class Store:
         with self.transaction():
             for statement in statements:self.execute(statement)
             self.execute('INSERT INTO schema_versions VALUES (2,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
+        from .realscout_store import migrate as migrate_realscout
+        migrate_realscout(self)
 
     @staticmethod
     def now():return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -139,7 +141,7 @@ class Store:
                              (cycle_key(settings,now),baseline))
                 # The cycle is incremented once; changing an approval cannot reset it.
                 periods=[periods[0],(cycle_key(settings,now),min(settings.per_month,settings.approved_requests))]
-                if tax_request:
+                if tax_request and settings.discovery_source=='rentcast':
                     future_days=future_listing_days(now,end)
                     if min(settings.per_month,settings.approved_requests)-self.count_usage(cycle_key(settings,now))<=future_days*settings.listing_requests_per_day:
                         raise BudgetExceeded('Remaining API allowance reserved for future daily listing scans')
@@ -172,7 +174,7 @@ class Store:
         if settings.approval_mode=='billing_cycle' and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None
-        if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
+        if settings.discovery_source=='rentcast' and remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
         if warning and record_warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
         return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning)

@@ -40,6 +40,9 @@ def main(argv=None):
     parser.add_argument('--email-day',help='Preparation target Israeli date YYYY-MM-DD')
     group.add_argument('--resume',metavar='JOB_ID',help='Resume persisted scan with the same cursor/tasks')
     group.add_argument('--status',action='store_true',help='Show persisted scans, pending verification and budget')
+    group.add_argument('--realscout-worker-once',action='store_true',help='Drain authorized inbound queue; never send')
+    group.add_argument('--realscout-requeue',metavar='EMAIL_ID',help='Explicitly requeue a quarantined/retry receiving job; never resets API allowance or sends')
+    group.add_argument('--realscout-status',action='store_true',help='Read-only inbound queue health; no provider calls')
     group.add_argument('--migrate',action='store_true',help='Apply additive database migrations only')
     group.add_argument('--retry-email',metavar='OUTBOX_ID',help='Retry frozen daily digest within safe idempotency window')
     group.add_argument('--reconcile-email',metavar='OUTBOX_ID',help='Mark message accepted after checking Resend manually')
@@ -47,6 +50,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,format='%(message)s')
     settings=Settings.from_env()
+    from .realscout_config import RealScoutSettings
+    rs_settings=RealScoutSettings.from_env()
     if args.check:
         exists=Path(settings.boundary_file).is_file()
         if exists:load_boundary(settings.boundary_file)
@@ -59,10 +64,20 @@ def main(argv=None):
     if args.scheduled or args.scheduled_email:
         day=scheduled_day()
         if day is None:event('outside_israel_schedule');return
-    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
+    if settings.discovery_source=='realscout' and args.scheduled:
+        if not rs_settings.daily_enabled:event('realscout_daily_disabled');return
+    administrative=args.realscout_requeue or args.realscout_worker_once or args.realscout_status or args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
     validate_postgres_url(url)
+    if args.realscout_status:
+        store=Store(url,initialize=False)
+        try:
+            store.execute('SET default_transaction_read_only = on')
+            from .realscout_worker import monitor
+            event('realscout_status',**monitor(store,dt.datetime.now(dt.timezone.utc)))
+        finally:store.close()
+        return
     store=Store(url)
     try:
         if not store.lock():
@@ -74,6 +89,18 @@ def main(argv=None):
         changed=reevaluate(store,boundary,dt.datetime.now(dt.timezone.utc))
         event('stored_criteria_rechecked',changed=changed)
         if args.migrate:event('migrations_complete');return
+        if args.realscout_requeue:
+            if not rs_settings.ingest_enabled:raise PermissionError('Authorized ingestion must be enabled before recovery')
+            from .realscout_worker import requeue
+            requeue(store,args.realscout_requeue,dt.datetime.now(dt.timezone.utc))
+            event('realscout_job_requeued',count=1);return
+        if args.realscout_worker_once:
+            from .realscout_worker import run_once
+            event('realscout_worker_result',**run_once(store,rs_settings));return
+        if settings.discovery_source=='realscout' and (args.scheduled or args.scheduled_email):
+            if not rs_settings.daily_enabled:event('realscout_daily_disabled');return
+            from .realscout_runtime import daily
+            daily(store,boundary,settings,day,rs_settings=rs_settings);return
         if args.status:
             event('status',budget=store.budget_health(settings),
               jobs=store.execute('SELECT id,state,offset_value,collection_done FROM scan_jobs ORDER BY updated_at DESC LIMIT 10').fetchall(),
@@ -97,6 +124,7 @@ def main(argv=None):
             return
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
+        if settings.discovery_source=='realscout':raise PermissionError('Bulk discovery is disabled in RealScout mode')
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
         store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203','15204'],tax_add=100,tax_strict_max=2000))

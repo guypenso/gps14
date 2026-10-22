@@ -114,7 +114,9 @@ def snapshot(store,boundary,now):
 
 
 def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
-    app=Flask(__name__);app.config.update(TESTING=testing,MAX_CONTENT_LENGTH=1024,PROPAGATE_EXCEPTIONS=False)
+    app=Flask(__name__);app.config.update(TESTING=testing,MAX_CONTENT_LENGTH=131072,PROPAGATE_EXCEPTIONS=False)
+    from .realscout_config import RealScoutSettings
+    rs_settings=RealScoutSettings.from_env()
     url=database_url or os.getenv('DATABASE_URL','')
     if not testing:
         from .database import validate_postgres_url
@@ -135,6 +137,8 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.before_request
     def authenticate():
         if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
+        # Only this exact POST route uses webhook signatures instead of dashboard Basic auth.
+        if request.path=='/webhooks/resend/inbound' and request.method=='POST':return None
         auth=request.authorization
         valid=bool(auth and hmac.compare_digest((auth.username or '').encode(),username.encode()) & hmac.compare_digest((auth.password or '').encode(),password.encode()))
         if not valid:return Response('נדרשת כניסה לדשבורד',401,{'WWW-Authenticate':'Basic realm="RentalSourcing", charset="UTF-8"'},content_type='text/plain; charset=utf-8')
@@ -196,4 +200,9 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.errorhandler(500)
     def unavailable(error):return jsonify(error='הנתונים אינם זמינים כרגע; בדוק את לוג השירות'),503
 
+    from .realscout_web import register
+    register(app,lambda:Store(url,initialize=False),rs_settings,clock,boundary)
+    if rs_settings.worker_enabled and not testing:
+        from .realscout_worker import start_background
+        app.extensions['realscout_worker']=start_background(lambda:Store(url,initialize=False),rs_settings)
     return app

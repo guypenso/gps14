@@ -1,0 +1,10 @@
+{
+  "synthetic_only": true,
+  "source": "tests/fixtures/realscout/multipart.eml",
+  "parsed_cards": 4,
+  "known_local_rejections": 2,
+  "awaiting_listing_and_location_evidence": 2,
+  "qualified_from_email_alone": 0,
+  "paid_api_calls": 0,
+  "real_emails_sent": 0
+}

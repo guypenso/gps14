@@ -10,7 +10,10 @@ from .storage import Store
 
 TABLES=('usage','observations','notifications','scheduled_days','runs','settings',
         'properties','price_history','tax_history','response_cache','scan_jobs',
-        'scan_tasks','deal_events','outbox','operations')
+        'scan_tasks','deal_events','outbox','operations','email_errors','api_attempts',
+        'realscout_messages','realscout_candidates','realscout_observations','realscout_links',
+        'realscout_inbound_jobs','realscout_evidence','realscout_status_evidence','realscout_reports',
+        'realscout_report_items','realscout_health')
 
 
 def transfer(source,target):

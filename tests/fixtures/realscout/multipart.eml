@@ -1,0 +1,73 @@
+From: Agent Alerts <alerts@example.invalid>
+To: inbox@example.invalid
+Subject: RentalSourcing - Pittsburgh Under $200K
+Message-ID: <synthetic-multipart@example.invalid>
+Date: Thu, 22 Oct 2026 04:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6021273892068905434=="
+
+--===============6021273892068905434==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+RentalSourcing - Pittsburgh Under $200K
+SYNTHETIC FIXTURE =E2=80=94 not an actual alert.
+
+New Listing
+101 Fixture St
+Pittsburgh, PA 15212
+$175,000
+3 Beds | 1.5 Baths | 1,200 Sq Ft
+View Details: https://client.realscout.com/listings/synthetic-0?token=3DSYNTH=
+ETIC_PRIVATE_0
+
+New Listing
+202 Sample Ave Unit 2
+Pittsburgh, PA 15207
+$199,999
+3 Beds | 2 Baths | 1,500 Sq Ft
+View Details: https://client.realscout.com/listings/synthetic-1?token=3DSYNTH=
+ETIC_PRIVATE_1
+
+New Listing
+303 Excluded St
+Pittsburgh, PA 15204
+$150,000
+3 Beds | 1 Baths | 1,100 Sq Ft
+View Details: https://client.realscout.com/listings/synthetic-2?token=3DSYNTH=
+ETIC_PRIVATE_2
+
+New Listing
+404 Small St
+Pittsburgh, PA 15212
+$160,000
+2 Beds | 1 Baths | 1,100 Sq Ft
+View Details: https://client.realscout.com/listings/synthetic-3?token=3DSYNTH=
+ETIC_PRIVATE_3
+
+
+--===============6021273892068905434==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><h1>RentalSourcing - Pittsburgh Under $200K</h1><p>SYNTHETIC FIXT=
+URE =E2=80=94 not a RealScout-exported message.</p><table><tr><td><div>New Li=
+sting</div><p>101 Fixture St<br>Pittsburgh, PA 15212</p><p>$175,000</p><span>=
+3 Beds</span> <span>1.5 Baths</span> <span>1,200 Sq Ft</span><div><a href=3D"=
+https://client.realscout.com/listings/synthetic-0?token=3DSYNTHETIC_PRIVATE_0=
+">View Details</a></div></td></tr><tr><td><div>New Listing</div><p>202 Sample=
+ Ave Unit 2<br>Pittsburgh, PA 15207</p><p>$199,999</p><span>3 Beds</span> <sp=
+an>2 Baths</span> <span>1,500 Sq Ft</span><div><a href=3D"https://client.real=
+scout.com/listings/synthetic-1?token=3DSYNTHETIC_PRIVATE_1">View Details</a><=
+/div></td></tr><tr><td><div>New Listing</div><p>303 Excluded St<br>Pittsburgh=
+, PA 15204</p><p>$150,000</p><span>3 Beds</span> <span>1 Baths</span> <span>1=
+,100 Sq Ft</span><div><a href=3D"https://client.realscout.com/listings/synthe=
+tic-2?token=3DSYNTHETIC_PRIVATE_2">View Details</a></div></td></tr><tr><td><d=
+iv>New Listing</div><p>404 Small St<br>Pittsburgh, PA 15212</p><p>$160,000</p=
+><span>2 Beds</span> <span>1 Baths</span> <span>1,100 Sq Ft</span><div><a hre=
+f=3D"https://client.realscout.com/listings/synthetic-3?token=3DSYNTHETIC_PRIV=
+ATE_3">View Details</a></div></td></tr></table></body></html>
+
+--===============6021273892068905434==--

@@ -1,0 +1,4 @@
+# Optional offline ingestion adapter dependencies, not installed by production builds.
+# Production requirements and deployment files are unchanged.
+cryptography==50.0.2
+svix==2.8.0
