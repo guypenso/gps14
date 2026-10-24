@@ -1,3 +1,5 @@
+> Current product policy: listing-only MVP is the default. Advanced underwriting is retained but disabled. See [MVP_REPORTING.md](MVP_REPORTING.md); financial assumptions are not MVP eligibility or activation prerequisites.
+
 # Multi-source integration — 2026-10-24
 
 ## Financial-policy update

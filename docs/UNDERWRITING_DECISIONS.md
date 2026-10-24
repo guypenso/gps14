@@ -1,3 +1,5 @@
+> Current product policy: listing-only MVP is the default. Advanced underwriting is retained but disabled. See [MVP_REPORTING.md](MVP_REPORTING.md); financial assumptions are not MVP eligibility or activation prerequisites.
+
 # Underwriting decision sheet — proposed only, NOT approved/runtime defaults
 
 Update: the owner has confirmed BOTH cash and financed analysis, with balanced annual-return/monthly-flow ranking. See DUAL_UNDERWRITING.md for the implemented dual policy. Expense values and financing terms below remain proposals, not approvals.

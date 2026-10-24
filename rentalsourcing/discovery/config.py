@@ -22,7 +22,8 @@ class DiscoverySettings:
     sources:tuple=()
     assumptions:dict=field(default_factory=dict)
     financing:str|None=None
-    dual_enabled:bool=True
+    report_mode:str="mvp"
+    dual_enabled:bool=False
     financing_scenarios:dict=field(default_factory=dict)
     property_inputs:dict=field(default_factory=dict)
     property_financing_scenarios:dict=field(default_factory=dict)
@@ -40,6 +41,8 @@ class DiscoverySettings:
             if not self.enabled:raise ValueError('Unified discovery must be enabled explicitly')
         if self.enabled and not self.approval_id:raise PermissionError('Unified processing permission required')
         if not 1<=self.rentcast_interval_days<=31 or not 0<=self.max_candidates<=20 or not 0<=self.reverify_limit<=20:raise ValueError('Bounded discovery settings required')
+        if self.report_mode not in {'mvp','advanced','legacy'}:raise ValueError('Unknown report mode')
+        if self.report_mode=='advanced' and not self.dual_enabled:raise ValueError('Advanced reporting requires explicit dual underwriting flag')
         if self.financing not in (None,'cash','loan'):raise ValueError('Unknown financing mode')
         validate_dual(self.assumptions)
         validate_weights(self.ranking_weights)
@@ -80,7 +83,7 @@ class DiscoverySettings:
         loans={name:{k:Input(**v) for k,v in values.items()} for name,values in json.loads(os.getenv('UNIFIED_FINANCING_SCENARIOS_JSON','{}')).items()}
         property_inputs={identity:{k:Input(**v) for k,v in values.items()} for identity,values in json.loads(os.getenv('UNIFIED_PROPERTY_INPUTS_JSON','{}')).items()}
         property_loans={identity:{name:{k:Input(**v) for k,v in values.items()} for name,values in profiles.items()} for identity,profiles in json.loads(os.getenv('UNIFIED_PROPERTY_FINANCING_JSON','{}')).items()}
-        return cls(property_financing_scenarios=property_loans,dual_enabled=flag('ENABLE_DUAL_UNDERWRITING') if 'ENABLE_DUAL_UNDERWRITING' in os.environ else True,financing_scenarios=loans,property_inputs=property_inputs,ranking_weights=json.loads(os.getenv('UNIFIED_RANKING_WEIGHTS_JSON','{"annual_return":0.5,"monthly_cash_flow":0.5}')),ranking_approval_id=os.getenv('UNIFIED_RANKING_APPROVAL_ID',''),primary_financing_scenario=os.getenv('UNIFIED_PRIMARY_FINANCING_SCENARIO','base'),enabled=flag('ENABLE_UNIFIED_DISCOVERY'),daily_enabled=flag('ENABLE_UNIFIED_DAILY'),
+        return cls(report_mode=os.getenv('UNIFIED_REPORT_MODE','mvp'),property_financing_scenarios=property_loans,dual_enabled=flag('ENABLE_DUAL_UNDERWRITING') if 'ENABLE_DUAL_UNDERWRITING' in os.environ else False,financing_scenarios=loans,property_inputs=property_inputs,ranking_weights=json.loads(os.getenv('UNIFIED_RANKING_WEIGHTS_JSON','{"annual_return":0.5,"monthly_cash_flow":0.5}')),ranking_approval_id=os.getenv('UNIFIED_RANKING_APPROVAL_ID',''),primary_financing_scenario=os.getenv('UNIFIED_PRIMARY_FINANCING_SCENARIO','base'),enabled=flag('ENABLE_UNIFIED_DISCOVERY'),daily_enabled=flag('ENABLE_UNIFIED_DAILY'),
             export_webhook_enabled=flag('ENABLE_MLS_EXPORT_WEBHOOK'),approval_id=os.getenv('UNIFIED_PROCESSING_APPROVAL_ID',''),
             sources=tuple(sources),assumptions=assumptions,financing=os.getenv('UNIFIED_FINANCING_MODE') or None,
             rentcast_discovery=flag('ENABLE_UNIFIED_RENTCAST_DISCOVERY'),rentcast_enrichment=flag('ENABLE_UNIFIED_RENTCAST_ENRICHMENT'),

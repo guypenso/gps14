@@ -142,7 +142,7 @@ def test_config_requires_property_keys_approved_assumptions_and_named_primary_pr
 
 def test_dual_report_persistence_rendering_and_frozen_financing_change(store,boundary,settings):
     source,eid=setup_property(store);data=inputs();specific={k:data.pop(k) for k in ['annual_insurance','renovation_budget']}
-    cfg=DiscoverySettings(enabled=True,daily_enabled=True,approval_id='FICTIONAL-ONLY',sources=({'source':source,'transport':'reso'},),assumptions=data,property_inputs={eid:specific},financing_scenarios={'base':terms()})
+    cfg=DiscoverySettings(report_mode="advanced",dual_enabled=True,enabled=True,daily_enabled=True,approval_id='FICTIONAL-ONLY',sources=({'source':source,'transport':'reso'},),assumptions=data,property_inputs={eid:specific},financing_scenarios={'base':terms()})
     s=unified(settings);oid=prepare(store,boundary,s,cfg,'2026-10-24',NOW)
     report=json.loads(store.execute('SELECT snapshot FROM discovery_reports WHERE outbox_id=?',(oid,)).fetchone()[0])
     assert report['underwriting_version']=='dual-v1' and report['properties'][0]['status']=='Qualified'
@@ -254,6 +254,8 @@ def test_dual_env_roundtrip_and_synthetic_delivery_guard(store,boundary,settings
     from rentalsourcing.discovery.models import normalize
     monkeypatch.setenv('UNIFIED_FINANCING_SCENARIOS_JSON',json.dumps({'base':{k:asdict(v) for k,v in terms().items()}}))
     monkeypatch.setenv('UNIFIED_RANKING_WEIGHTS_JSON','{"annual_return":0.5,"monthly_cash_flow":0.5}')
+    monkeypatch.setenv('UNIFIED_REPORT_MODE','advanced')
+    monkeypatch.setenv('ENABLE_DUAL_UNDERWRITING','true')
     cfg=DiscoverySettings.from_env()
     assert cfg.dual_enabled and not cfg.enabled and not cfg.daily_enabled and cfg.financing_scenarios['base']['interest_rate'].value==.06
     source=Source('fixture_mls','mls','FICTIONAL','fictional scope',True,True,True)

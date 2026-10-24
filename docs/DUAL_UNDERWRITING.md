@@ -1,3 +1,5 @@
+> Current product policy: listing-only MVP is the default. Advanced underwriting is retained but disabled. See [MVP_REPORTING.md](MVP_REPORTING.md); financial assumptions are not MVP eligibility or activation prerequisites.
+
 # Dual acquisition underwriting — implementation and activation contract
 
 The owner approved comparing BOTH all-cash and financed acquisitions and balancing annual percentage return with monthly dollar cash flow. Expense values, financing terms and permanent ranking weights have NOT been approved. No provider, schedule, hard filter or production setting is changed. No migration is needed: versioned scenario results, provenance and ranking context are stored in existing discovery_reports snapshots and the original outbox.

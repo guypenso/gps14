@@ -8,6 +8,36 @@ from ..core import verification,tax_verification
 CRITICAL_CONFLICTS={'price','status','bedrooms','bathrooms','squareFootage','latitude','longitude','annual_tax','tax_year','monthly_rent','hoa_monthly'}
 
 
+HARD_CONFLICTS={'price','status','state','zipCode','bedrooms','bathrooms','squareFootage','latitude','longitude','annual_tax','tax_year'}
+
+
+def screen(store,entity_id,boundary,now):
+    """Original hard rules only. Financial estimates never determine eligibility."""
+    info=resolution(store,entity_id,now);fields=info['fields']
+    row=store.execute('SELECT address,version,first_seen FROM discovery_entities WHERE id=?',(entity_id,)).fetchone()
+    if not row:raise ValueError('Unknown property')
+    status,reasons=verification(dict(fields,id=entity_id,formattedAddress=row[0]),boundary)
+    tax=None
+    if fields.get('annual_tax') is None or fields.get('tax_year') is None:
+        reasons.append('annual_tax_and_year_required')
+    elif info['provenance'].get('annual_tax',{}).get('kind')!='verified_source':
+        reasons.append('verified_annual_tax_required')
+    else:
+        year=int(fields['tax_year'])
+        tax_state,tax,why=tax_verification({'propertyTaxes':{str(year):{'year':year,'total':fields['annual_tax']}}},now.date())
+        if why:reasons.append(why)
+        if tax_state=='Rejected':status='Rejected'
+    conflicts=HARD_CONFLICTS&info['conflicts'].keys()
+    reasons+=['conflicting_'+f for f in sorted(conflicts)]
+    # A known hard failure remains a rejection; unrelated financial conflicts do not block.
+    if status!='Rejected':status='Pending Verification' if reasons else 'Qualified'
+    return dict(id=entity_id,address=row[0],version=row[1],discovered_at=row[2],fields=fields,
+        status=status,original_screening=status,reasons=sorted(set(reasons)),tax=tax,
+        investment_score=None,provenance=info['provenance'],conflicts=info['conflicts'],
+        stale_evidence=info['stale_evidence'],sources=info['sources'],synthetic=info['synthetic'],
+        latest_verification=max((p['observed_at'] for p in info['provenance'].values()),default=None))
+
+
 def evaluate(store,entity_id,boundary,now,*,assumptions=None,financing=None,dual_mode=False,loan_scenarios=None,property_inputs=None):
     info=resolution(store,entity_id,now);fields=info['fields']
     row=store.execute('SELECT address,version,first_seen FROM discovery_entities WHERE id=?',(entity_id,)).fetchone()
