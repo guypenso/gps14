@@ -74,8 +74,8 @@ def render(day,items,stats,health,operations):
 
 
 class Digest:
-    def __init__(self,store,boundary,settings,clock=None,opener=None,realscout_settings=None):
-        self.store=store;self.boundary=boundary;self.settings=settings;self.realscout_settings=realscout_settings
+    def __init__(self,store,boundary,settings,clock=None,opener=None,realscout_settings=None,discovery_settings=None):
+        self.store=store;self.boundary=boundary;self.settings=settings;self.realscout_settings=realscout_settings;self.discovery_settings=discovery_settings
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
 
@@ -234,6 +234,15 @@ class Digest:
         if first and now-dt.datetime.fromisoformat(first)>=dt.timedelta(hours=23):
             self.store.operation('reconcile:'+identity,'Resend result needs manual reconciliation; no automatic retry after idempotency safety window.')
             raise ReconciliationRequired('Check this message in Resend before retrying')
+        unified=self.store.execute('SELECT 1 FROM discovery_reports WHERE outbox_id=?',(identity,)).fetchone()
+        if unified:
+            from .discovery.config import DiscoverySettings
+            from .discovery.report import validate_frozen
+            config=self.discovery_settings or DiscoverySettings.from_env()
+            if not (config.enabled and config.daily_enabled and self.settings.discovery_source=='unified'):raise PermissionError('Unified reporting disabled')
+            if not validate_frozen(self.store,self.boundary,identity,now,config):
+                if first:raise ReconciliationRequired('Frozen unified report evidence changed; reconcile previous delivery')
+                self.store.execute("UPDATE outbox SET state='cancelled',updated_at=? WHERE id=?",(now.isoformat(),identity));return 'cancelled_stale'
         rs_report=self.store.execute('SELECT 1 FROM realscout_reports WHERE outbox_id=?',(identity,)).fetchone()
         if rs_report:
             from .realscout_config import RealScoutSettings

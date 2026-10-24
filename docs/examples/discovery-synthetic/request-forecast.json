@@ -1,0 +1,43 @@
+{
+  "assumptions": {
+    "days": 31,
+    "pages_per_scan": 1,
+    "uncached_candidates": 9,
+    "requests_per_candidate": 2,
+    "verification": 6
+  },
+  "forecasts": {
+    "daily": {
+      "discovery_requests": 31,
+      "enrichment_requests": 18,
+      "verification_requests": 6,
+      "total": 55,
+      "within_internal40": false,
+      "within_included50": false
+    },
+    "every_other_day": {
+      "discovery_requests": 16,
+      "enrichment_requests": 18,
+      "verification_requests": 6,
+      "total": 40,
+      "within_internal40": true,
+      "within_included50": true
+    },
+    "weekly": {
+      "discovery_requests": 5,
+      "enrichment_requests": 18,
+      "verification_requests": 6,
+      "total": 29,
+      "within_internal40": true,
+      "within_included50": true
+    },
+    "event_driven_only": {
+      "discovery_requests": 0,
+      "enrichment_requests": 18,
+      "verification_requests": 6,
+      "total": 24,
+      "within_internal40": true,
+      "within_included50": true
+    }
+  }
+}

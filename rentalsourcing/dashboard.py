@@ -117,6 +117,8 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     app=Flask(__name__);app.config.update(TESTING=testing,MAX_CONTENT_LENGTH=131072,PROPAGATE_EXCEPTIONS=False)
     from .realscout_config import RealScoutSettings
     rs_settings=RealScoutSettings.from_env()
+    from .discovery.config import DiscoverySettings
+    discovery_settings=DiscoverySettings.from_env()
     url=database_url or os.getenv('DATABASE_URL','')
     if not testing:
         from .database import validate_postgres_url
@@ -139,6 +141,7 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
         # Only this exact POST route uses webhook signatures instead of dashboard Basic auth.
         if request.path=='/webhooks/resend/inbound' and request.method=='POST':return None
+        if request.path.startswith('/webhooks/mls/export/') and request.method=='POST':return None  # Dedicated HMAC route authenticates itself.
         auth=request.authorization
         valid=bool(auth and hmac.compare_digest((auth.username or '').encode(),username.encode()) & hmac.compare_digest((auth.password or '').encode(),password.encode()))
         if not valid:return Response('נדרשת כניסה לדשבורד',401,{'WWW-Authenticate':'Basic realm="RentalSourcing", charset="UTF-8"'},content_type='text/plain; charset=utf-8')
@@ -202,6 +205,10 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
 
     from .realscout_web import register
     register(app,lambda:Store(url,initialize=False),rs_settings,clock,boundary)
+    from .discovery.export_web import register as register_exports
+    register_exports(app,lambda:Store(url,initialize=False),discovery_settings,clock)
+    from .discovery.web import register as register_discovery
+    register_discovery(app,lambda:Store(url,initialize=False),discovery_settings,clock,boundary)
     if rs_settings.worker_enabled and not testing:
         from .realscout_worker import start_background
         app.extensions['realscout_worker']=start_background(lambda:Store(url,initialize=False),rs_settings)

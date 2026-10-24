@@ -1,0 +1,5 @@
+ListingKey,ListingId,OriginatingSystemName,UnparsedAddress,ListPrice,BedroomsTotal,BathroomsTotalInteger,LivingArea,StandardStatus,Latitude,Longitude,TaxAnnualAmount,TaxYear,PropertySubType,AssociationFee,AssociationFeeFrequency,ModificationTimestamp,ListingURL
+fixture-1,MLS-1001,FictionalMLS,"101 Fixture St, Pittsburgh, PA 15212",150000,3,1,1200,Active,40.45,-80,1500,2025,SingleFamilyResidence,0,Monthly,2026-10-24T08:00:00+00:00,https://listing.example.invalid/MLS-1001
+fixture-2,MLS-1002,FictionalMLS,"202 Sample Ave, Pittsburgh, PA 15212",160000,3,2,1400,Active,40.45,-80,1899.99,2025,SingleFamilyResidence,0,Monthly,2026-10-24T08:00:00+00:00,https://listing.example.invalid/MLS-1002
+fixture-3,MLS-1003,FictionalMLS,"303 Example St, Pittsburgh, PA 15203",120000,3,1,1200,Active,40.45,-80,1500,2025,SingleFamilyResidence,0,Monthly,2026-10-24T08:00:00+00:00,https://listing.example.invalid/MLS-1003
+fixture-4,MLS-1004,FictionalMLS,"404 Fiction Rd, Pittsburgh, PA 15212",140000,3,1,1300,Active,40.45,-80,,,SingleFamilyResidence,0,Monthly,2026-10-24T08:00:00+00:00,https://listing.example.invalid/MLS-1004

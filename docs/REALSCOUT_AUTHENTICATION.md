@@ -1,6 +1,12 @@
 # Inbound authentication: verified original DKIM
 
-## Verified official-source findings (October 23, 2026 Israel)
+## Current documentation correction (October 24, 2026 Israel)
+
+The official [Retrieve Received Email documentation](https://resend.com/docs/api-reference/emails/retrieve-received-email) explicitly documents a nullable top-level `authentication` object: SPF, DKIM and DMARC results computed by the receiving server, separate from sender-controlled headers. It also documents raw-message download URLs. This direct documentation supersedes the uncertainty inferred from the older OpenAPI/SDK snapshot below. No private account request was made.
+
+The fixed HTTPS ReceivingClient binds the returned email ID and constructs a typed internal provider-evidence object only from valid API result enums. Sender headers and webhook JSON cannot construct this evidence. Explicit receiver DKIM/DMARC failure vetoes acceptance; processing failures defer. Forwarded SPF failure alone does not override valid original DKIM. Missing/null/gray results never grant trust. Independent full-message aligned DKIM remains required, so this does not weaken PR #9. An approved real forwarding test is still required to validate account availability, byte preservation, sender signature coverage and DNS access. Authentication-Results headers and received_for remain untrusted.
+
+## Historical OpenAPI/SDK findings (October 23, 2026 Israel)
 
 Official Resend OpenAPI `resend/resend-openapi`, main, `resend.yaml` (blob
 b8abc922c01f395b502f8d9f49ef3b40a546aee6, API info version1.5.1):
@@ -36,7 +42,7 @@ References:
 No manual header-trust waiver can enable authenticity. Legacy REALSCOUT_TRUSTED_AUTHSERV_ID and
 REALSCOUT_AUTH_CONTRACT_APPROVAL_ID must be empty; nonempty values fail configuration validation.
 The retired trusted_authentication helper always returns no evidence. Raw Authentication-Results,
-Received, ARC headers, API-projected authentication objects and From allowlisting never grant trust.
+Received, ARC headers, untyped authentication dictionaries and From allowlisting never grant trust. Provider-generated results are handled only through the typed transport boundary described above.
 
 Instead, the EXISTING app verifies original DKIM itself:
 

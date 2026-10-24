@@ -62,6 +62,15 @@ def raw_url(value,hosts):
 
 
 @dataclass(frozen=True)
+class ProviderAuthentication:
+    """Created only by the fixed, TLS-authenticated Receiving API transport."""
+    email_id:str
+    spf:str
+    dkim:str
+    dmarc:str
+
+
+@dataclass(frozen=True)
 class VerifiedEmail:
     email_id: str
     raw: bytes=field(repr=False)
@@ -165,6 +174,12 @@ class RawDkimVerifier:
     def verify_bytes(self,raw,data,source_policy):
         now=self.clock()
         if not isinstance(raw,bytes) or len(raw)>LIMIT:raise AuthFailure('original_raw_message_too_large')
+        receiver=data.get('_receiver_authentication')
+        if isinstance(receiver,ProviderAuthentication):
+            if receiver.email_id!=data.get('id'):raise AuthFailure('receiver_auth_identity_mismatch')
+            if receiver.dkim=='fail' or receiver.dmarc=='fail':raise AuthFailure('receiver_authentication_failed')
+            if receiver.dkim=='processing_failed' or receiver.dmarc=='processing_failed':raise AuthFailure('receiver_authentication_deferred',True)
+        # API verdicts add corroboration/veto. They NEVER replace signed raw content checks.
         msg=BytesParser(policy=mail_policy.default).parsebytes(raw)
         if msg.defects or any(len(msg.get_all(k,[]))!=1 for k in CRITICAL) or any(len(msg.get_all(k,[]))>1 for k in OPTIONAL):
             raise AuthFailure('ambiguous_signed_headers')
