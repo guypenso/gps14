@@ -4,6 +4,10 @@
 
 This change extends the maintained application and depends on draft PR #9. It is not a replacement application. All new behavior defaults off. No production deployment, migration, schedule, mailbox, paid request or live delivery was performed. MLS connectors are fixture-tested; **no authorized live MLS connection or real coverage measurement exists yet**.
 
+## Independent access decision
+
+The agent-sponsored route is superseded by the owner's independent-access requirement. See MLS_ACCESS_RESEARCH.md: direct West Penn private-use eligibility is BLOCKED PENDING LICENSING; Trestle is a delivery mechanism, not a license bypass. No broker sponsorship/export is proposed for activation.
+
 ## Recovered policy (unchanged)
 
 The original evaluator remains authoritative: Pittsburgh municipal polygon, Pennsylvania, Active sale listings, price $0.01–$200,000, at least 3 bedrooms, 1 bathroom and 1,000 square feet; exclude ZIPs 15203, 15204, 15210. Latest annual property tax **plus $100 must be strictly below $2,000**. $1,900 annual tax fails. Missing latest-year tax does not fall back to an older bill.

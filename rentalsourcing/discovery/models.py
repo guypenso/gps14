@@ -86,10 +86,16 @@ class Listing:
         d=asdict(self);d['source']=asdict(self.source);return d
 
 
+class OutOfScopeListing(ValueError):
+    """Recognized non-purchase record, not a malformed purchase candidate."""
+
+
 def normalize(row,source,*,observed_at=None,style='reso'):
     if not isinstance(row,dict):raise ValueError('Listing must be an object')
     from ..provenance import demo_marked
     if demo_marked(row) and not source.synthetic:raise PermissionError('Demo data cannot become production evidence')
+    if str(row.get('PropertyType','')).replace(' ','').lower() in {'residentiallease','commerciallease','rental'}:
+        raise OutOfScopeListing('Rental listings are not purchase listings')
     mapping={'ListPrice':'price','BedroomsTotal':'bedrooms','BathroomsTotalInteger':'bathrooms',
       'LivingArea':'squareFootage','StandardStatus':'status','PropertySubType':'propertyType',
       'Latitude':'latitude','Longitude':'longitude','TaxAnnualAmount':'annual_tax','TaxYear':'tax_year',
@@ -116,7 +122,6 @@ def normalize(row,source,*,observed_at=None,style='reso'):
     amount=row.get('AssociationFee');period=row.get('AssociationFeeFrequency')
     if amount not in (None,'') and period in {'Monthly','Annually','Quarterly'}:
         fields['hoa_monthly']=numeric(amount)/{'Monthly':1,'Annually':12,'Quarterly':3}[period]
-    if str(row.get('PropertyType','')).replace(' ','').lower() in {'residentiallease','commerciallease','rental'}:raise ValueError('Rental listings are not purchase listings')
     return Listing(source,str(identity or ''),a['street'],a['city'],state,a['zip'][:5],stamp,fields,
         str(row['ListingId']) if row.get('ListingId') else None,row.get('OriginatingSystemName'),
         row.get('ListingURL') or row.get('PublicRemarksURL') or row.get('listingUrl'),tuple(k for k in ('monthly_rent','estimated_value') if k in fields),bool(row.get('DeletedYN',False)),row.get('ModificationTimestamp') if style=='reso' else None)

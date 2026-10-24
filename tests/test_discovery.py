@@ -449,3 +449,66 @@ def test_broker_csv_signed_for_one_source_cannot_be_replayed_to_another():
     headers={'X-MLS-Timestamp':stamp,'X-MLS-Event':event,'X-MLS-Exported-At':NOW.isoformat(),'X-MLS-Signature':hmac.new(secret.encode(),data,hashlib.sha256).hexdigest()}
     assert verify(body,headers,secret,NOW,source_name='source_a')
     with pytest.raises(PermissionError):verify(body,headers,secret,NOW,source_name='source_b')
+
+@pytest.mark.parametrize('lease_type',['ResidentialLease','Commercial Lease'])
+def test_mixed_mls_page_skips_known_lease_without_losing_sale_or_watermark(store,mls,lease_type):
+    class Transport:
+        def open(self,req,timeout=None):
+            return JSONResponse({'value':[
+                {'ListingKey':'lease-only','PropertyType':lease_type,'OriginatingSystemName':'FictionalMLS'},
+                record()]})
+    result=ResoConnector(mls,'https://feed.example.invalid/odata/',token='synthetic',opener=Transport(),expected_system='FictionalMLS').scan(store,NOW)
+    assert result['complete'] and result['records']==1 and result['skipped_non_purchase']==1
+    assert store.execute('SELECT COUNT(*) FROM discovery_records').fetchone()[0]==1
+    assert json.loads(store.execute('SELECT cursor FROM discovery_sources').fetchone()[0])=={'watermark':NOW.isoformat()}
+
+
+def test_mls_skip_does_not_hide_scope_violations_or_malformed_purchase(store,mls):
+    class Transport:
+        row={'ListingKey':'lease','PropertyType':'ResidentialLease','OriginatingSystemName':'UnauthorizedMLS'}
+        def open(self,req,timeout=None):return JSONResponse({'value':[self.row]})
+    transport=Transport();connector=ResoConnector(mls,'https://feed.example.invalid/odata/',token='synthetic',opener=transport,expected_system='FictionalMLS')
+    assert connector.scan(store,NOW)['error']=='PermissionError'
+    transport.row=record(UnparsedAddress='unresolvable address')
+    result=connector.scan(store,NOW)
+    assert not result['complete'] and result['error']=='ValueError' and result['skipped_non_purchase']==0
+    assert store.execute('SELECT cursor FROM discovery_sources').fetchone()[0] is None
+
+
+def test_documented_trestle_oauth_form_expiry_and_incremental_sale_status_changes(store,mls,monkeypatch):
+    import rentalsourcing.discovery.connectors as connectors
+    tick=[1000];monkeypatch.setattr(connectors.time,'time',lambda:tick[0])
+    class Transport:
+        calls=[];tokens=0;changed=False
+        def open(self,req,timeout=None):
+            self.calls.append(req)
+            if req.full_url.endswith('/oidc/connect/token'):
+                assert parse_qs(req.data.decode())=={'grant_type':['client_credentials'],'scope':['api'],'client_id':['fictional-client'],'client_secret':['fictional-secret']}
+                assert req.get_header('Content-type')=='application/x-www-form-urlencoded'
+                self.tokens+=1
+                return JSONResponse({'access_token':'fictional-token-'+str(self.tokens),'expires_in':120})
+            assert req.get_header('Authorization')=='Bearer fictional-token-'+str(self.tokens)
+            query=parse_qs(urlsplit(req.full_url).query)
+            assert query['$orderby']==['ModificationTimestamp,ListingKey']
+            assert 'StandardStatus' not in query['$filter'][0] and 'ListPrice' not in query['$filter'][0]
+            row=record()
+            if self.changed:
+                assert (NOW-dt.timedelta(minutes=5)).isoformat() in query['$filter'][0]
+                row=record(ListPrice=140000,StandardStatus='Pending',ModificationTimestamp=(NOW+dt.timedelta(minutes=1)).isoformat())
+            return JSONResponse({'value':[row]})
+    transport=Transport();adapter=ResoConnector(mls,'https://api.cotality.com/trestle/odata/',token_url='https://api.cotality.com/trestle/oidc/connect/token',client_id='fictional-client',client_secret='fictional-secret',expected_system='FictionalMLS',opener=transport)
+    assert adapter.scan(store,NOW)['complete']
+    assert transport.tokens==1
+    transport.changed=True;tick[0]+=100
+    assert adapter.scan(store,NOW+dt.timedelta(minutes=2))['complete'] and transport.tokens==2
+    fields=resolution(store,normalize(record(),mls).entity_id,NOW+dt.timedelta(minutes=2))['fields']
+    assert fields['price']==140000 and fields['status']=='Pending'
+
+
+def test_point_verification_never_refreshes_purchase_with_lease_evidence(store,mls):
+    eid=add(store,mls)
+    class Transport:
+        def open(self,req,timeout=None):return JSONResponse({'value':[record(PropertyType='ResidentialLease',ListPrice=1500)]})
+    result=ResoConnector(mls,'https://feed.example.invalid/odata/',token='synthetic',opener=Transport(),expected_system='FictionalMLS').verify_keys(store,['1'],NOW+dt.timedelta(hours=1))
+    assert result['verified']==0 and result['unresolved']==1
+    assert resolution(store,eid,NOW+dt.timedelta(hours=1))['fields']['price']==150000

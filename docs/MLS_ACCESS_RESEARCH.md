@@ -1,35 +1,78 @@
-# Authorized Pittsburgh MLS access — official-source review, 2026-10-24
+# Independent Pittsburgh MLS access — decision record, 2026-10-24
 
-No MLS credentials, signed license or authorized benchmark dataset is available in this environment. No real listing feed has been connected. A client RealScout account does not establish data-feed rights. Research below uses public official documentation, not private account operations.
+Supersedes the earlier agent-sponsored recommendation. No agent/broker-sponsored route is proposed or pursued. Public official sources were reviewed without contacting providers, creating accounts, retrieving private data or making paid calls.
 
-| Priority | Route and verified evidence | Required permission / cost / limitation |
-|---|---|---|
-| 1 | Broker-sponsored recurring RESO-shaped CSV, if Sean's brokerage can provide it | Ask broker/West Penn whether private analysis, third-party hosting/storage and investment emails are permitted. No export capability, fee or permission has been confirmed. Smallest integration is one approved export plus written scope; recurring automation depends on a supported producer, not portal scraping. |
-| 2 | West Penn through Trestle | [Trestle's source selector](https://trestle.corelogic.com/SubscriptionWizard) explicitly lists West Penn MLS, Inc. [Technical documentation](https://trestle-documentation.corelogic.com/web-api/) specifies OAuth client credentials, scope `api`, token `https://api.cotality.com/trestle/oidc/connect/token`, OData `https://api.cotality.com/trestle/odata/`. Connector implemented and fixture-tested. Broker/MLS approval and actual connection metadata are still required. |
-| 3 | Direct West Penn-approved feed/vendor arrangement | [Official IDX page](https://www.westpennmls.com/idx/) describes brokerage subscriber authorization and written consent; broker may contact the data center at 412-367-5860. Published public material does not establish an individual investor's eligibility, a direct API endpoint, current private-analysis license fee or refresh SLA. |
-| 4 | RealScout forwarding, complementary discovery | Existing PR #9 preserved; written processing permission and one controlled authentication test remain necessary. Email alert coverage is not complete-MLS coverage. Regular template still requires an authorized sample. |
-| 5 | Other vendors only after explicit coverage/license confirmation | [Bridge](https://www.zillowgroup.com/developers/api/mls-broker-data/mls-listings/) describes MLS-discretion invitation access; West Penn availability and cost remain unverified. [SimplyRETS](https://simplyrets.com/) publishes $49/$99/$199 monthly tiers and $99 connection fee, but West Penn feed support was not verified. [IDX Broker](https://www.idxbroker.com/mls/west-penn-mls-wpmls) advertises West Penn website IDX support; that is not permission for bulk underwriting ingestion. |
+**Decision: BLOCKED PENDING LICENSING.** No independently obtainable West Penn feed is confirmed. The best evidenced lead is a direct, private-use license from West Penn, delivered through its existing Trestle connection if West Penn authorizes it. This is a lead for a licensing decision, not an available subscription or a connected source. Becoming a technology provider alone does not confer data rights. Independent access is not established as technically impossible.
 
-[Trestle FAQ](https://trestle-documentation.corelogic.com/support/faq/) lists small RESO connections at $100/month, increasing to $105 in January 2027, plus separate MLS licensing fees. Confirm an actual quote and connection rights before purchase. Its refresh aim is within five minutes, not a contractual coverage or freshness guarantee. Available records depend on the licensed product and permissions. ListingKey is the source key; ListingId alone is not globally unique. Do not guess the actual OriginatingSystemName from marketing names.
+## Short decision table
 
-The [public West Penn IDX agreement](https://www.westpennmls.com/wp-content/uploads/IDX-AGREEMENT-09-20-2018.pdf) is dated 2018. It is evidence of contractual restrictions, not confirmation of current terms or authorization for this workflow. Request the current agreement covering the precise use, hosting, retention and recipients. [RESO](https://www.reso.org/reso-web-api/) supplies standards, not access credentials or MLS data.
+| Route | Coverage / automation evidence | Independent eligibility and use | Cost / commitment | Decision |
+|---|---|---|---|---|
+| Direct West Penn private-use license | West Penn is the relevant MLS; public material documents brokerage IDX, not an investor analytics API | Published IDX requires brokerage subscribers. A separate non-member/private-analysis agreement, any exemption from sponsorship, internal storage, automated scoring and owner-only emails all require written confirmation | No applicable private-use setup/monthly/MLS fee, minimum term or refresh SLA published in reviewed material | Ask the actual licensor first; pending, not confirmed available |
+| West Penn via Trestle/Cotality | Official public active-source list names West Penn MLS, Inc.; OAuth/OData, replication and incremental query mechanisms documented | Trestle facilitates the MLS license; it does not grant it. FAQ warns that member-serving uses and broker/agent ratification are typical. No West Penn independent-investor exception verified | Small RESO connection $100/month; $105 from January 2027, PLUS unknown MLS fees. Private-use setup, minimum commitment and other charges unverified | Preferred technical delivery only if West Penn expressly approves independent use |
+| RentCast (NON-MLS fallback) | Official nationwide sale-listing API, Active/Inactive records, prices, listing dates/history. Advertised daily updates and 12–24h new-listing ingestion; no measured Pittsburgh completeness/SLA | Self-service API terms explicitly permit internal analytics and storage. No MLS membership/sponsor prerequisite documented. It explicitly does not source listings directly from MLS | Developer includes 50 requests/month; existing account entitlement supplied by owner, not privately inspected. Overage automatic; no provider hard cap. No long-term API commitment | Most practical existing permitted fallback; not MLS access and not activated by this work |
 
-## Message to Sean — prepared, not sent
+### Primary evidence
 
-Sean, can your broker authorize a structured West Penn listing feed for my private RentalSourcing investment analysis, hosted on Render with PostgreSQL and a daily report only to me? Preferred is an existing broker-approved RESO/Trestle connection; otherwise a supported recurring CSV export is sufficient. Please confirm West Penn/RealScout permission for this third-party processing, retention and email use, any vendor sponsorship/contracts and all fees before activation. We need the authorized Pittsburgh residential-for-sale scope, active/status changes and price changes, listing key/system, full address/unit, price, beds/baths, area, coordinates, tax amount/year, HOA/period, property type, parcel ID, modification timestamp and listing link where available. Please confirm refresh frequency and removal rules. No password or shared portal login is needed; scoped credentials can be provisioned securely after approval. Can your brokerage provide this or introduce its MLS data contact?
+- [West Penn IDX and official contact](https://www.westpennmls.com/idx/): subscriber/brokerage program; `inbox@westpennmls.com`, 412-367-5860. Public IDX material does not establish eligibility for this separate private use. No inference that absence of a posted program equals a refusal.
+- [Trestle public subscription/source catalog](https://trestle.corelogic.com/SubscriptionWizard): search-indexed active-source list explicitly includes West Penn MLS, Inc. The interactive catalog can render only its initial form in some clients. No account was created.
+- [Trestle licensing/pricing FAQ](https://trestle-documentation.corelogic.com/support/faq/): MLS is licensor, approval workflow and fee structure. Source availability is distinct from buyer eligibility. Refresh aim is within five minutes; not a contracted West Penn SLA or proof of full inventory/status rights.
+- [Trestle technical getting started](https://trestle-documentation.corelogic.com/web-api/), [query reference](https://trestle-documentation.corelogic.com/web-api/reference/) and [Property dictionary](https://trestle-documentation.corelogic.com/metadata/resources/Property/): documented protocol compatibility, not live entitlement.
+- [RentCast API license](https://www.rentcast.io/terms-api), [listing provenance/freshness](https://developers.rentcast.io/reference/property-listings), [sale API](https://developers.rentcast.io/reference/sale-listings), [billing](https://developers.rentcast.io/reference/billing-and-pricing): different from its website/platform terms. Provider coverage/freshness statements remain vendor claims until independently benchmarked.
 
-## Acceptance evidence required
+## Vendor elimination — no speculative integrations
 
-1. Written product/scope/use authorization and fee approval.
-2. Scoped API credentials or one authorized structured export; metadata confirms fields and originating system.
-3. Controlled ingestion into a test schema, duplicates/status/deletions and missing fields reviewed.
-4. Authorized same-scope listing snapshot benchmark, measured recall and discovery delay over repeated days.
-5. Only then activate existing daily pipeline after explicit production approval.
+[Repliers' West Penn directory](https://repliers.com/mls-directory/pennsylvania/west-penn-multilist/) is credible market evidence, but its [licensing requirements](https://help.repliers.com/en/article/mls-requirements-for-data-licensing-when-signing-up-with-repliers-12fknh6/) require the customer's MLS authorization and describe member-controlled products; paying Repliers does not authorize an investor's independent product. Therefore it is not an available independent route.
 
-No coverage claim can substitute for these steps. If the only licensed route costs more than the approved budget, MLS remains access-blocked; RentCast is complementary, not a permanent MLS replacement.
+[ATTOM Active Listings](https://cloud-help.attomdata.com/article/516-active-listings) explicitly requires licensing with at least one MLS for Slipstream. Pittsburgh entitlement and a direct independent-use license/price were not verified. [Bridge](https://www.zillowgroup.com/developers/api/mls-broker-data/mls-listings/) is invite-only at MLS discretion; relevant independent rights were not verified. [HouseCanary's developer guide](https://www.housecanary.com/blog/real-estate-data-api-for-developers) explicitly distinguishes its Data Explorer API from a live MLS feed. Its national investor marketing is not evidence of a West Penn listing API license. SimplyRETS public API/pricing alone does not establish this market or use authorization. No new vendor integrations were built.
 
-## Other provider evidence
+## One inquiry to settle the licensing gate — prepared, NOT sent
 
-[WPRDC assessment dataset](https://data.wprdc.org/en/dataset/property-assessments) lists CC0 with portal terms and the [field dictionary](https://data.wprdc.org/en/dataset/property-assessments/resource/65855e14-549e-4992-b5be-d629afc676fa). Assessments and historical sales are not annual tax bills or active listings. Adapter performs exact parcel matching only; no real parcel retrieval was performed.
+To: inbox@westpennmls.com
+Cc: trestlesupport@cotality.com
+Subject: Independent private-use West Penn data license / Trestle eligibility — RentalSourcing
 
-[RentCast billing documentation](https://developers.rentcast.io/reference/billing-and-pricing) states the 50-request Developer allowance and automatically billed overages; it does not provide a reliable hard spending stop. The application enforces its own limits. [Rent estimates](https://developers.rentcast.io/reference/rent-estimate-long-term) are estimates with comparables, and multi-family values can be per-unit. Automatic whole-property underwriting therefore restricts unsupported multi-family rent interpretation rather than multiplying an invented unit count.
+Hello West Penn Data Licensing and Trestle teams,
+
+I am an independent real estate investor, not an MLS member or brokerage, and am not seeking broker sponsorship. I operate RentalSourcing, a private application that identifies Pittsburgh residential purchase opportunities, stores normalized listings/history in PostgreSQL on Render, calculates investment metrics and sends one daily report only to me. There is no public IDX website, resale, lead marketing or data redistribution. Access may occur from Israel.
+
+Before I create an account or incur fees, please confirm:
+
+1. Can West Penn contract directly with me or my entity for this exact use without MLS membership, a real estate license, sponsoring broker/agent, member customer or brokerage signatory? If yes, what license/product and signatories are required? If no, please state whether any independently licensed distributor can authorize this use and identify it.
+2. Can the approved license be delivered through Trestle RESO Web API? Please identify the product, originating-system identifier, metadata endpoint, allowed geographic/property scope and whether it includes all eligible Pittsburgh listings rather than selected broker inventory or syndication opt-ins.
+3. Which statuses are licensed (active, coming soon, pending, withdrawn/expired/cancelled/closed), how are price changes, removals, corrections and relistings delivered, and what update latency, coverage exclusions and support commitments apply?
+4. Are PostgreSQL replication, cross-provider deduplication/enrichment, derived investment scores, stored price history, backups, Render/cloud hosting and my private daily email expressly permitted? Please provide attribution, audit, security, geographic access, retention and termination/purge requirements, including whether derived history must be deleted.
+5. What are all setup, platform, MLS, per-user/connection, usage/overage and recurring fees, taxes, minimum commitments and cancellation terms? Trestle lists a $100 small RESO connection ($105 from January 2027); please confirm the applicable total quote and any different product tier.
+6. Can you supply the current agreement and an authorized test sample or sandbox covering ListingKey/ListingId/system, address/unit, status, asking price, beds/baths, area, coordinates, property type, annual tax/year, HOA/period, parcel, modification timestamps and listing links where available? Please confirm query/replication quotas, removal synchronization and any fields restricted under this use.
+
+Please give a written eligibility decision and itemized quote before any account activation or payment. I am not requesting shared credentials or access under another party's license.
+
+Thank you.
+
+## Connection-ready technical review
+
+Existing PR #9 security/queue and PR #10 multi-source storage, budget, reports and connectors were inspected; none was replaced. Trestle's documented OAuth client-credentials form (`grant_type=client_credentials`, `scope=api`) and bearer authentication match the connector. URLs remain `https://api.cotality.com/trestle/oidc/connect/token` and `https://api.cotality.com/trestle/odata/`. Pagination follows `@odata.nextLink`, with same-origin/resource and credential-leak guards; default page size500 is below the documented1000 maximum. `$filter` date/string syntax, ModificationTimestamp ordering, five-minute overlap and durable page checkpoints are exercised offline. Expected system must come from approved metadata, never a guessed marketing name.
+
+**Concrete fix:** a recognized ResidentialLease/CommercialLease record previously raised the same ValueError as a malformed purchase and stopped its whole page. It now raises a typed non-purchase exception; scan reports an explicit skipped count and continues valid sales. Point verification never refreshes a purchase with rental evidence. Wrong-source records and malformed purchases still fail closed without advancing the watermark. No investment thresholds or sale property-type restrictions changed.
+
+A new mocked contract test checks actual documented token form, token renewal, initial/incremental queries, price reduction and transition to Pending. Status/price eligibility filters are deliberately not pushed into the incremental query: doing so would hide properties moving out of eligibility. Licensed geographic scope and initial history size must be agreed before a real bootstrap. Full replication >1million records uses a different documented endpoint; this bounded Property connector intentionally rejects that path rather than pretend to support it. If that scale is required, approve the product/scope and corresponding implementation first. No live metadata/schema compatibility can be certified without access.
+
+## Objective CONNECTED acceptance gate
+
+All items are required; passing fixture tests is insufficient:
+
+- Written independent-use license with all required approvals, fees and permitted processing confirmed.
+- Scoped authorized credentials installed securely; actual product metadata/field types and system identifier inspected.
+- Approved bounded retrieval returns real Pittsburgh purchase listings; normalized data persists in isolated test schema and identities/units reconcile.
+- A second approved retrieval verifies real incremental updates, price changes and status transitions; removal/revocation behavior is confirmed for the contracted product.
+- Same-scope authorized benchmark measures recall, unique/missed listings and discovery delay over repeated snapshots. Report denominator, exclusions and observation window; do not reuse national marketing percentages as Pittsburgh coverage.
+- Actual account request volume and total quoted/billed costs fit the owner-approved budget, including initial load and retries.
+- Only after explicit deployment/migration/activation approval may existing production workflow change.
+
+Current result: **NOT CONNECTED — BLOCKED PENDING LICENSING**. No permission, live credentials, real-listing retrieval, production coverage/freshness or commercial quote has been verified. A positive provider email alone still does not satisfy the connection gate.
+
+## If independent MLS licensing is refused
+
+Keep the MLS connector disabled and the MLS requirement open; request a named distributor with explicit rights only if West Penn identifies one. Reuse the existing RentCast sale-listing adapter, not generic assessor records, as the labeled non-MLS fallback. Its terms permit internal analysis/storage; daily status/price observations use the existing evidence/history and report pipeline. Actual Pittsburgh coverage remains unmeasured and listing history is not assumed to expose every intermediate price edit.
+
+No production or allowance change was made. Existing default discovery allocation8 means a daily fallback cannot simply be enabled. An OPTIONAL owner-approved 31-day budget allocation could be31 one-page discovery calls +6 verification +3 enrichment =40, preserving the existing internal ceiling and ten calls of headroom under50. This requires reallocation (discovery_cap31/enrichment_cap3/verification_reserve6), interval1 and verified cycle baseline; these are proposals, not settings applied or a new spend approval. One page is at most500 results and is not a completeness guarantee. Retries, extra pages or enrichment consume those same limits; stopping may sacrifice freshness. More volume requires budget/access decisions, not overages. With current settings, use only already-approved cadence and label cached/no-scan days accurately. A daily email is not evidence of a daily fresh scan.

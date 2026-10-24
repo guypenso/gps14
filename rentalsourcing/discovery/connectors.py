@@ -5,7 +5,7 @@ import datetime as dt
 from urllib.parse import urlsplit,urljoin,urlencode,parse_qs,unquote
 import urllib.request
 from ..request import NoRedirect
-from .models import normalize,Source,Listing,numeric,instant
+from .models import normalize,Source,Listing,numeric,instant,OutOfScopeListing
 from .repository import ingest,register,health
 
 
@@ -55,7 +55,7 @@ class ResoConnector:
         filters=f'ModificationTimestamp ge {since} and ModificationTimestamp le {until}'
         if self.expected_system:filters+=" and OriginatingSystemName eq '"+self.expected_system.replace("'","''")+"'"
         url=checkpoint.get('next') or self.base+'Property?'+urlencode({'$filter':filters,'$orderby':'ModificationTimestamp,ListingKey','$top':self.page_size})
-        count=0;requests=0;seen=set()
+        count=0;requests=0;skipped=0;seen=set()
         try:
             for _ in range(self.max_pages):
                 safe_endpoint(url,self.base)
@@ -65,7 +65,10 @@ class ResoConnector:
                 if not isinstance(result.get('value'),list):raise ValueError('Invalid RESO response')
                 for row in result['value']:
                     if self.expected_system and row.get('OriginatingSystemName')!=self.expected_system:raise PermissionError('MLS scope/system mismatch')
-                    listing=normalize(row,self.source,observed_at=now.isoformat())
+                    try:listing=normalize(row,self.source,observed_at=now.isoformat())
+                    except OutOfScopeListing:
+                        skipped+=1
+                        continue
                     ingest(store,listing,now,authorized=True);count+=1
                 nxt=result.get('@odata.nextLink')
                 if nxt:
@@ -75,12 +78,12 @@ class ResoConnector:
                     store.execute('UPDATE discovery_sources SET cursor=? WHERE name=?',(cursor,self.source.name))
                 else:
                     health(store,self.source.name,now,success=True,cursor=json.dumps({'watermark':until}))
-                    return dict(source=self.source.name,mode='licensed_api',complete=True,records=count,requests=requests,window_end=until)
+                    return dict(source=self.source.name,mode='licensed_api',complete=True,records=count,skipped_non_purchase=skipped,requests=requests,window_end=until)
             health(store,self.source.name,now,error='page_cap_reached')
-            return dict(source=self.source.name,complete=False,records=count,requests=requests,error='page_cap_reached')
+            return dict(source=self.source.name,complete=False,records=count,skipped_non_purchase=skipped,requests=requests,error='page_cap_reached')
         except Exception as exc:
             health(store,self.source.name,now,error=type(exc).__name__)
-            return dict(source=self.source.name,complete=False,records=count,requests=requests,error=type(exc).__name__)
+            return dict(source=self.source.name,complete=False,records=count,skipped_non_purchase=skipped,requests=requests,error=type(exc).__name__)
 
     def verify_keys(self,store,keys,now):
         """Bounded current-status recheck of shortlisted stale records, not another full scan."""
@@ -91,7 +94,9 @@ class ResoConnector:
         seen=set()
         for row in result.get('value',[]):
             if row.get('ListingKey') not in keys or (self.expected_system and row.get('OriginatingSystemName')!=self.expected_system):raise PermissionError('Point verification source identity mismatch')
-            ingest(store,normalize(row,self.source,observed_at=now.isoformat()),now,authorized=True);seen.add(row['ListingKey'])
+            try:listing=normalize(row,self.source,observed_at=now.isoformat())
+            except OutOfScopeListing:continue  # Never refresh a sale record with lease evidence.
+            ingest(store,listing,now,authorized=True);seen.add(row['ListingKey'])
         return {'verified':len(seen),'unresolved':len(set(keys)-seen),'requests':1}
 
 
