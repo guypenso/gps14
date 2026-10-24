@@ -1,0 +1,36 @@
+RentalSourcing | 2026-10-24
+SYNTHETIC OFFLINE EXAMPLE — ALL PROPERTY VALUES AND LINKS ARE FICTIONAL
+
+New qualifying listings (1)
+101 Fixture St, Pittsburgh, PA 15212
+Asking $175,000.00 | 3.0 beds | 1.0 baths | 1200.0 sqft | ZIP 15212
+Latest verified annual tax: $1,500.00 (2025)
+Status: Active | Source: fictional_mls | First discovered: 2026-10-24T12:00:00+00:00
+All original hard filters verified. Investment analysis remains your responsibility.
+fictional_mls: https://listing.example.invalid/mvp-1
+
+
+Qualifying price reductions (1)
+202 Sample Ave, Pittsburgh, PA 15212
+Asking $195,000.00 | 3.0 beds | 1.0 baths | 1200.0 sqft | ZIP 15212
+Latest verified annual tax: $1,800.00 (2025)
+Status: Active | Source: fictional_mls | First discovered: 2026-10-23T21:00:00+00:00
+Price reduction observed
+All original hard filters verified. Investment analysis remains your responsibility.
+fictional_mls: https://listing.example.invalid/mvp-2
+
+
+Newly verified listings (0)
+
+Pending Verification (1)
+303 Example Rd, Pittsburgh, PA 15212
+Asking $160,000.00 | 3.0 beds | 1.0 baths | 1200.0 sqft | ZIP 15212
+Latest verified annual tax: Missing / unverified
+Status: Active | Source: fictional_mls | First discovered: 2026-10-24T12:00:00+00:00
+Missing / unresolved: annual_tax_and_year_required
+fictional_mls: https://listing.example.invalid/mvp-3
+
+System status
+Discovery run: fictional_mls: fresh discovery
+Listings evaluated: 3 | New: 2 | Qualifying: 2 | Pending verification: 1
+fictional_mls: last successful check 2026-10-24T12:00:00+00:00; current

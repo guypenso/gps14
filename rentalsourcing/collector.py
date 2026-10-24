@@ -30,18 +30,18 @@ class Client:
         self.opener=opener or urllib.request.build_opener(NoRedirect)
         self.sleep=sleep;self.cache_only=cache_only;self.count=0;self.cache_hits=0;self.last_fetched_at=None;self.last_error=None
 
-    def get(self,path,params=None,cache=True):
+    def get(self,path,params=None,cache=True,purpose=None):
         # A session lock covers cache lookup, reservation and response persistence.
         # A second worker rechecks the cache after the first worker finishes.
         raw=path+'?'+urllib.parse.urlencode(sorted((params or {}).items()))
         lock=int.from_bytes(hashlib.sha256(raw.encode()).digest()[:8],'big',signed=True)
         if self.store.pg:self.store.execute('SELECT pg_advisory_lock(?)',(lock,))
-        try:return self._get(path,params,cache)
+        try:return self._get(path,params,cache,purpose)
         finally:
             if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(?)',(lock,))
 
-    def _get(self,path,params=None,cache=True):
-        if path not in {'/listings/sale','/properties'} and not path.startswith('/properties/'):
+    def _get(self,path,params=None,cache=True,purpose=None):
+        if path not in {'/listings/sale','/properties','/avm/rent/long-term'} and not path.startswith('/properties/'):
             raise ValueError('Unsupported RentCast endpoint')
         if path=='/properties' and (set(params or {})!={'address','limit'} or not isinstance(params['address'],str) or not params['address'].strip() or params['limit']!=1):
             raise ValueError('Selective property lookup requires an exact address and limit=1')
@@ -49,6 +49,10 @@ class Client:
             allowed=(self.settings.selective_status_verification and set(params or {})=={'address','limit','status'}
                 and isinstance(params['address'],str) and params['address'].strip() and params['limit']==1 and params['status']=='Active')
             if not allowed:raise PermissionError('Bulk discovery disabled in RealScout mode')
+        if path=='/avm/rent/long-term':
+            if not (self.settings.discovery_source=='unified' and self.settings.rent_estimates_enabled and set(params or {})=={'address'} and isinstance(params['address'],str) and params['address'].strip()):
+                raise PermissionError('Rent AVM requires explicitly enabled exact-address verification')
+        purpose=purpose or ('verification' if path=='/listings/sale' and 'address' in (params or {}) else 'discovery' if path=='/listings/sale' else 'rent_estimate' if path=='/avm/rent/long-term' else 'enrichment')
         query=urllib.parse.urlencode(sorted((params or {}).items()))
         url='https://api.rentcast.io/v1'+path+('?' + query if query else '')
         key=hashlib.sha256(url.encode()).hexdigest();now=self.clock()
@@ -65,7 +69,7 @@ class Client:
         request=urllib.request.Request(url,headers={'X-Api-Key':os.environ['RENTCAST_API_KEY'],'Accept':'application/json'})
         for attempt in range(self.settings.retries+1):
             if self.count>=self.settings.per_run:raise BudgetExceeded('Run API allowance reached')
-            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path=='/properties' or path.startswith('/properties/'))
+            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path=='/properties' or path.startswith('/properties/'),purpose=purpose,request_hash=key)
             if health['warning']:event('budget_warning',**health)
             self.count+=1
             if self.count>1:self.sleep(1)
@@ -78,18 +82,21 @@ class Client:
                     if response.status!=200:raise ValueError('Unexpected HTTP status')
                     data=json.load(response);total=response.headers.get('X-Total-Count')
                     if path in {'/listings/sale','/properties'} and not isinstance(data,list):raise ValueError('Listings must be a list')
-                    if path.startswith('/properties/') and not isinstance(data,dict):raise ValueError('Property must be an object')
+                    if (path.startswith('/properties/') or path=='/avm/rent/long-term') and not isinstance(data,dict):raise ValueError('Property must be an object')
                 self.last_fetched_at=self.clock().isoformat()
                 if cache:
                     expires=(self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale' else
                         tax_expiry(data[0],self.clock(),self.settings) if path=='/properties' and len(data)==1 and isinstance(data[0],dict) else
                         self.clock()+dt.timedelta(hours=self.settings.negative_tax_cache_hours) if path=='/properties' else
+                        self.clock()+dt.timedelta(hours=self.settings.tax_cache_hours) if path=='/avm/rent/long-term' else
                         tax_expiry(data,self.clock(),self.settings))
                     self.store.cache_put(key,dict(data=data,total=total,fetched_at=self.last_fetched_at),LIVE,expires.isoformat())
+                if health.get('reservation_id'):self.store.execute("UPDATE discovery_api_ledger SET outcome='success' WHERE id=?",(health['reservation_id'],))
                 self.store.execute('DELETE FROM api_attempts WHERE request_key=?',(key,))
                 event('rentcast_success',endpoint=path.split('/')[1],attempts=self.count)
                 return self.wrap(data),total
             except Exception as exc:
+                if health.get('reservation_id'):self.store.execute("UPDATE discovery_api_ledger SET outcome='failed_counted_conservatively' WHERE id=?",(health['reservation_id'],))
                 self.last_error=diagnose(exc)
                 if isinstance(exc,urllib.error.HTTPError):
                     # Do not log raw bodies: an upstream proxy can echo credentials.

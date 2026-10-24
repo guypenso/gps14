@@ -95,6 +95,8 @@ class Store:
             self.execute('INSERT INTO schema_versions VALUES (2,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
         from .realscout_store import migrate as migrate_realscout
         migrate_realscout(self)
+        from .discovery.schema import migrate as migrate_discovery
+        migrate_discovery(self)
 
     @staticmethod
     def now():return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -121,18 +123,22 @@ class Store:
         row=self.execute('SELECT used FROM usage WHERE period=?',(period,)).fetchone()
         return row[0] if row else 0
 
-    def reserve_api(self,settings,now=None,*,tax_request=False):
+    def reserve_api(self,settings,now=None,*,tax_request=False,purpose=None,request_hash=None):
         from .billing import cycle_key, billing_window, future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
         if not settings.approval_id or settings.approved_requests<=0:raise BudgetExceeded('No approved live API allowance')
         start,end,anchor=billing_window(settings,now)
         if settings.approval_mode=='billing_cycle' and now<anchor:
             raise BudgetExceeded('Approved subscription cycle has not started')
+        reservation=None
         periods=[(now.strftime('day:%Y-%m-%d'),settings.per_day),
                  (cycle_key(settings,now),settings.per_month),
                  ('approval:'+settings.approval_id,settings.approved_requests)]
         with self.transaction():
             if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
+            if settings.discovery_source=='unified':
+                from .discovery.budget import seed
+                seed(self,settings,now)
             if settings.approval_mode=='billing_cycle':
                 # Seed the already consumed account usage once, without resetting
                 # persisted app usage when an approval ID or process changes.
@@ -153,7 +159,12 @@ class Store:
                 self.execute('INSERT INTO usage VALUES (?,0) ON CONFLICT(period) DO NOTHING',(key,))
                 if not self.execute('UPDATE usage SET used=used+1 WHERE period=? AND used<? RETURNING used',(key,limit)).fetchone():
                     raise BudgetExceeded('API allowance reached: '+key.split(':')[0])
-        return self.budget_health(settings,now)
+            if settings.discovery_source=='unified':
+                from .discovery.budget import reserve
+                reservation=reserve(self,settings,now,purpose,request_hash or '')
+        result=self.budget_health(settings,now)
+        if reservation:result['reservation_id']=reservation
+        return result
 
     def rolling_usage(self,now):
         start=(now-dt.timedelta(days=31)).strftime('day:%Y-%m-%d')

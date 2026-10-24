@@ -1,0 +1,543 @@
+{
+  "report_mode": "mvp",
+  "underwriting_version": "mvp-v1",
+  "rankings": null,
+  "ranking_approval_id": "",
+  "primary_financing_scenario": "base",
+  "all_states": {
+    "property:b983d4da61a61dc57952df396264f37c40890200b6b6a95aa82152d8bb1ff50d": "Qualified",
+    "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd": "Qualified",
+    "property:6d66b04abc73a9b3a350d79a30658cd99377ded3aed0bc18c2bb33fa07157073": "Pending Verification"
+  },
+  "day": "2026-10-24",
+  "since": "2026-10-23T21:00:00+00:00",
+  "cutoff": "2026-10-24T12:00:00+00:00",
+  "properties": [
+    {
+      "id": "property:b983d4da61a61dc57952df396264f37c40890200b6b6a95aa82152d8bb1ff50d",
+      "address": "101 Fixture St, Pittsburgh, PA 15212",
+      "version": 1,
+      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "fields": {
+        "price": 175000.0,
+        "latitude": 40.45,
+        "status": "Active",
+        "zipCode": "15212",
+        "bedrooms": 3.0,
+        "bathrooms": 1.0,
+        "state": "PA",
+        "longitude": -80.0,
+        "squareFootage": 1200.0,
+        "tax_year": 2025.0,
+        "annual_tax": 1500.0
+      },
+      "status": "Qualified",
+      "original_screening": "Qualified",
+      "reasons": [],
+      "tax": {
+        "year": 2025,
+        "annual": 1500.0,
+        "adjusted": 1600.0
+      },
+      "investment_score": null,
+      "provenance": {
+        "price": {
+          "value": 175000.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "1"
+        },
+        "annual_tax": {
+          "value": 1500.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "1",
+          "synthetic": true
+        },
+        "tax_year": {
+          "value": 2025.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "1",
+          "synthetic": true
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fictional_mls"
+      ],
+      "synthetic": true,
+      "latest_verification": "2026-10-24T12:00:00+00:00",
+      "new": true,
+      "price_reduction": false,
+      "changed": false,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fictional_mls",
+          "url": "https://listing.example.invalid/mvp-1"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fictional_mls",
+          "record_id": "1",
+          "mls_id": null,
+          "mls_system": null
+        }
+      ],
+      "rental_comparables": [],
+      "recommendation": false
+    },
+    {
+      "id": "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd",
+      "address": "202 Sample Ave, Pittsburgh, PA 15212",
+      "version": 2,
+      "discovered_at": "2026-10-23T21:00:00+00:00",
+      "fields": {
+        "price": 195000.0,
+        "latitude": 40.45,
+        "status": "Active",
+        "zipCode": "15212",
+        "bedrooms": 3.0,
+        "bathrooms": 1.0,
+        "state": "PA",
+        "longitude": -80.0,
+        "squareFootage": 1200.0,
+        "tax_year": 2025.0,
+        "annual_tax": 1800.0
+      },
+      "status": "Qualified",
+      "original_screening": "Qualified",
+      "reasons": [],
+      "tax": {
+        "year": 2025,
+        "annual": 1800.0,
+        "adjusted": 1900.0
+      },
+      "investment_score": null,
+      "provenance": {
+        "price": {
+          "value": 195000.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "2"
+        },
+        "annual_tax": {
+          "value": 1800.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "2",
+          "synthetic": true
+        },
+        "tax_year": {
+          "value": 2025.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "2",
+          "synthetic": true
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fictional_mls"
+      ],
+      "synthetic": true,
+      "latest_verification": "2026-10-24T12:00:00+00:00",
+      "new": false,
+      "price_reduction": true,
+      "changed": true,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fictional_mls",
+          "url": "https://listing.example.invalid/mvp-2"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fictional_mls",
+          "record_id": "2",
+          "mls_id": null,
+          "mls_system": null
+        }
+      ],
+      "rental_comparables": [],
+      "recommendation": false
+    },
+    {
+      "id": "property:6d66b04abc73a9b3a350d79a30658cd99377ded3aed0bc18c2bb33fa07157073",
+      "address": "303 Example Rd, Pittsburgh, PA 15212",
+      "version": 1,
+      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "fields": {
+        "price": 160000.0,
+        "latitude": 40.45,
+        "status": "Active",
+        "zipCode": "15212",
+        "bedrooms": 3.0,
+        "bathrooms": 1.0,
+        "state": "PA",
+        "longitude": -80.0,
+        "squareFootage": 1200.0,
+        "tax_year": 2025.0
+      },
+      "status": "Pending Verification",
+      "original_screening": "Pending Verification",
+      "reasons": [
+        "annual_tax_and_year_required"
+      ],
+      "tax": null,
+      "investment_score": null,
+      "provenance": {
+        "price": {
+          "value": 160000.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        },
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "fictional_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "3"
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fictional_mls"
+      ],
+      "synthetic": true,
+      "latest_verification": "2026-10-24T12:00:00+00:00",
+      "new": true,
+      "price_reduction": false,
+      "changed": false,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fictional_mls",
+          "url": "https://listing.example.invalid/mvp-3"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fictional_mls",
+          "record_id": "3",
+          "mls_id": null,
+          "mls_system": null
+        }
+      ],
+      "rental_comparables": [],
+      "recommendation": false
+    }
+  ],
+  "omitted": 0,
+  "counts": {
+    "total": 3,
+    "new": 2,
+    "price_reductions": 1,
+    "qualified": 2,
+    "pending": 1,
+    "rejected": 0,
+    "recommendations": 0,
+    "seen_this_window": 3
+  },
+  "sources": [
+    {
+      "synthetic": true,
+      "name": "fictional_mls",
+      "kind": "mls",
+      "enabled": true,
+      "scope": "synthetic sample",
+      "last_success": "2026-10-24T12:00:00+00:00",
+      "last_attempt": "2026-10-24T12:00:00+00:00",
+      "error": null,
+      "stale": false,
+      "mode": "licensed_feed_or_export"
+    }
+  ],
+  "authorized_mls_connected": false,
+  "coverage_pct": null,
+  "coverage_statement": "No authorized real MLS benchmark has been measured. Incremental checks and alert events are not full-inventory scans.",
+  "no_new_listings": false,
+  "synthetic": true,
+  "score_policy": "Original hard-filter screening only; no investment ranking.",
+  "dry_run": true,
+  "real_api_requests": 0,
+  "real_emails": 0,
+  "source_results": [
+    {
+      "source": "fictional_mls",
+      "fresh_scan": true,
+      "records": 3,
+      "complete": true
+    }
+  ]
+}

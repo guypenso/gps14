@@ -31,7 +31,7 @@ def main(argv=None):
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--check',action='store_true',help='Check config and boundary offline; no provider calls')
     group.add_argument('--scheduled',action='store_true',help='Explicit collector run in the Israel 08:00 window; requires API approval')
-    group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
+    group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel report; legacy stored-only, unified mode may run approved discovery/enrichment')
     group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
     group.add_argument('--prepare-test-email',action='store_true',help='Prepare a delivery test without sending or consuming property events')
     group.add_argument('--inspect-email',metavar='OUTBOX_ID',help='Inspect sanitized stored request and rejection; no send')
@@ -52,6 +52,8 @@ def main(argv=None):
     settings=Settings.from_env()
     from .realscout_config import RealScoutSettings
     rs_settings=RealScoutSettings.from_env()
+    from .discovery.config import DiscoverySettings
+    discovery_settings=DiscoverySettings.from_env()
     if args.check:
         exists=Path(settings.boundary_file).is_file()
         if exists:load_boundary(settings.boundary_file)
@@ -97,6 +99,10 @@ def main(argv=None):
         if args.realscout_worker_once:
             from .realscout_worker import run_once
             event('realscout_worker_result',**run_once(store,rs_settings));return
+        if settings.discovery_source=='unified' and (args.scheduled or args.scheduled_email):
+            if not (discovery_settings.enabled and discovery_settings.daily_enabled):event('unified_daily_disabled');return
+            from .discovery.runtime import daily
+            event('unified_daily_result',**daily(store,boundary,settings,day,cfg=discovery_settings));return
         if settings.discovery_source=='realscout' and (args.scheduled or args.scheduled_email):
             if not rs_settings.daily_enabled:event('realscout_daily_disabled');return
             from .realscout_runtime import daily
@@ -124,7 +130,7 @@ def main(argv=None):
             return
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
-        if settings.discovery_source=='realscout':raise PermissionError('Bulk discovery is disabled in RealScout mode')
+        if settings.discovery_source in {'realscout','unified'}:raise PermissionError('Use the explicitly enabled source-aware daily pipeline')
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
         store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203','15204'],tax_add=100,tax_strict_max=2000))

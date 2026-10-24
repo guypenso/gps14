@@ -30,9 +30,15 @@ class Settings:
     boundary_file: str = 'data/pittsburgh.geojson'
     discovery_source: str = 'rentcast'
     selective_status_verification: bool = False
+    discovery_cap:int=8
+    enrichment_cap:int=22
+    verification_reserve:int=10
+    rent_estimates_enabled:bool=False
 
     def __post_init__(self):
-        if self.discovery_source not in {'rentcast','realscout'}:raise ValueError('Invalid DISCOVERY_SOURCE')
+        if self.discovery_source not in {'rentcast','realscout','unified'}:raise ValueError('Invalid DISCOVERY_SOURCE')
+        if self.discovery_source=='unified' and self.per_month>50:raise ValueError('Unified RentCast ceiling cannot exceed included50')
+        if min(self.discovery_cap,self.enrichment_cap,self.verification_reserve)<0:raise ValueError('Invalid purpose budgets')
         for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout','listing_requests_per_day','negative_tax_cache_hours'):
             if getattr(self,name) <= 0: raise ValueError(f'{name} must be positive')
         if self.approval_mode not in {'one_time','rolling_32_days','billing_cycle'}:raise ValueError('Invalid API approval mode')
@@ -48,7 +54,7 @@ class Settings:
 
     @classmethod
     def from_env(cls):
-        mapping={'discovery_source':'DISCOVERY_SOURCE','approval_mode':'API_APPROVAL_MODE','approval_id':'API_APPROVAL_ID','approved_requests':'APPROVED_API_REQUESTS',
+        mapping={'discovery_cap':'RENTCAST_DISCOVERY_CAP','enrichment_cap':'RENTCAST_ENRICHMENT_CAP','verification_reserve':'RENTCAST_VERIFICATION_RESERVE','discovery_source':'DISCOVERY_SOURCE','approval_mode':'API_APPROVAL_MODE','approval_id':'API_APPROVAL_ID','approved_requests':'APPROVED_API_REQUESTS',
           'per_run':'MAX_API_REQUESTS_PER_RUN','per_day':'MAX_API_REQUESTS_PER_DAY',
           'per_month':'MAX_API_REQUESTS_PER_MONTH','page_size':'LISTING_LIMIT',
           'max_pages':'MAX_LISTING_PAGES','tax_cache_hours':'TAX_CACHE_HOURS',
@@ -61,7 +67,7 @@ class Settings:
         for field,env in mapping.items():
             default=getattr(defaults,field)
             values[field]=int(os.environ[env]) if isinstance(default,int) and env in os.environ else os.getenv(env,default)
-        return cls(**values,enabled=os.getenv('ENABLE_RENTCAST')=='true',email_enabled=os.getenv('ENABLE_EMAIL')=='true',selective_status_verification=os.getenv('ENABLE_REALSCOUT_STATUS_VERIFICATION')=='true')
+        return cls(**values,enabled=os.getenv('ENABLE_RENTCAST')=='true',email_enabled=os.getenv('ENABLE_EMAIL')=='true',selective_status_verification=os.getenv('ENABLE_REALSCOUT_STATUS_VERIFICATION')=='true',rent_estimates_enabled=os.getenv('ENABLE_UNIFIED_RENT_ESTIMATES')=='true')
 
     def public(self):
         data=asdict(self)

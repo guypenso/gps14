@@ -275,3 +275,19 @@ def test_committed_crypto_evidence_recovers_ack_without_private_refetch(store,cl
         def get(self,*a):raise AssertionError('Committed authenticated messages must not be retrieved again')
     assert run_once(store,config,clock=clock,client=NeverFetch())['processed']==1
     assert store.execute('SELECT first_seen,last_seen,version FROM realscout_candidates').fetchone()==original
+
+@pytest.mark.parametrize('dkim_result,dmarc_result,retry',[('fail','pass',False),('pass','fail',False),('processing_failed','pass',True)])
+def test_receiver_generated_negative_evidence_vetoes_valid_raw_dkim(store,clock,rsa_keys,source,dkim_result,dmarc_result,retry):
+    from rentalsourcing.realscout_auth import ProviderAuthentication
+    raw,data=make_message(clock,rsa_keys)
+    data['_receiver_authentication']=ProviderAuthentication(data['id'],'pass',dkim_result,dmarc_result)
+    with pytest.raises(AuthFailure) as error:verifier(store,clock,rsa_keys).verify_bytes(raw,data,source)
+    assert error.value.retryable==retry
+
+
+def test_forwarded_spf_failure_does_not_override_valid_original_dkim(store,clock,rsa_keys,source):
+    from rentalsourcing.realscout_auth import ProviderAuthentication
+    raw,data=make_message(clock,rsa_keys)
+    data['_receiver_authentication']=ProviderAuthentication(data['id'],'fail','pass','pass')
+    assert verifier(store,clock,rsa_keys).verify_bytes(raw,data,source).sender=='agent@sender.example'
+    with pytest.raises(AuthFailure):verifier(store,clock,rsa_keys).verify_bytes(raw.replace(b'$175,000',b'$100,000'),data,source)

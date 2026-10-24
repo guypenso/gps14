@@ -13,7 +13,7 @@ TABLES=('usage','observations','notifications','scheduled_days','runs','settings
         'scan_tasks','deal_events','outbox','operations','email_errors','api_attempts',
         'realscout_messages','realscout_candidates','realscout_observations','realscout_links',
         'realscout_inbound_jobs','realscout_evidence','realscout_status_evidence','realscout_reports',
-        'realscout_report_items','realscout_health','realscout_dkim_keys','realscout_auth_evidence')
+        'realscout_report_items','realscout_health','realscout_dkim_keys','realscout_auth_evidence','discovery_sources','discovery_entities','discovery_records','discovery_observations','discovery_reports','discovery_api_ledger','discovery_benchmarks','discovery_export_events','discovery_source_metrics')
 
 
 def transfer(source,target):

@@ -1,0 +1,61 @@
+RentalSourcing | 2026-10-24
+SYNTHETIC OFFLINE DEMONSTRATION — NOT REAL INVESTMENTS
+No authorized real MLS benchmark has been measured. Incremental checks and alert events are not full-inventory scans.
+Newly discovered properties: 5 (source observation dates remain authoritative).
+Evaluated: 5 | Qualified original screening + complete unlevered model: 1 | Pending: 3 | Price reductions: 1 | New recommendations: 1
+Investment score = modeled annual unlevered after-reserve yield percentage points. No minimum ROI threshold was recovered or invented.
+Configured MLS feed returned current data (not a licensing/coverage acceptance decision): False
+Source synthetic_mls (mls): last successful data check/export=2026-10-24T10:00:00+00:00; current error=none; mode=licensed_feed_or_export; stale=False
+Source synthetic_rentcast (rentcast): last successful data check/export=never; current error=none; mode=provider_or_record_evidence; stale=True
+Discovery run: no discovery attempt recorded
+NEW + PRICE REDUCTION | 101 Fixture St, Pittsburgh, PA 15212 | $140000.0 | Qualified
+3.0 beds / 1.0 baths / 1200.0 sqft / SingleFamilyResidence
+Discovered 2026-10-24T10:00:00+00:00; latest evidence 2026-10-24T12:00:00+00:00; sources synthetic_mls, synthetic_rentcast
+Investment score 7.2699 | Completeness 100.0% | Evidence indicator 96.57% (not a probability) | Financial confidence: modeled_with_assumptions_or_estimates
+Financial metrics: {"cash_flow_before_debt_monthly": 936.0, "cash_flow_monthly": 936.0, "cash_on_cash_pct": 7.269903, "debt_service_monthly": 0.0, "gross_yield_pct": 12.857143, "net_yield_pct": 7.269903, "noi_annual": 12132.0}
+Inputs/provenance: {"annual_insurance": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 1200}, "annual_tax": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 1500.0}, "capex_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "closing_cost": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 4500}, "hoa_monthly": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 0.0}, "maintenance_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "management_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.08}, "monthly_rent": {"approval_id": "", "kind": "third_party_estimate", "source": "synthetic_rentcast", "value": 1500}, "renovation_budget": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 10000}, "vacancy_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}}
+Reasons: Original hard rules passed; financial model complete; assumptions/estimates are not guarantees.
+Risks: no_profitability_cutoff_approved
+Next research: Confirm rent comparables, physical condition and modeled assumptions before an offer
+synthetic_mls: https://listing.example.invalid/MLS-1001
+Provider rental comparisons (not independent verification): [{"correlation": 0.9, "distance": 0.4, "formattedAddress": "909 Fiction St, Pittsburgh, PA 15212", "id": "fictional-comp", "price": 1525}]
+NEW | 505 Sample St, Pittsburgh, PA 15212 | $165000.0 | Pending Verification
+3.0 beds / 1.0 baths / 1200.0 sqft / Single Family
+Discovered 2026-10-24T12:00:00+00:00; latest evidence 2026-10-24T12:00:00+00:00; sources synthetic_rentcast
+Investment score None | Completeness 85.71% | Evidence indicator 68.57% (not a probability) | Financial confidence: incomplete
+Financial metrics: {"cash_flow_monthly": null, "cash_on_cash_pct": null, "debt_service_monthly": null, "gross_yield_pct": null, "net_yield_pct": null, "noi_annual": null}
+Inputs/provenance: {"annual_insurance": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 1200}, "annual_tax": {"approval_id": "", "kind": "verified_source", "source": "synthetic_rentcast", "value": 1600}, "capex_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "closing_cost": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 4500}, "maintenance_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "management_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.08}, "renovation_budget": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 10000}, "vacancy_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}}
+Reasons: financial_missing_hoa_monthly, financial_missing_monthly_rent
+Risks: no_profitability_cutoff_approved
+Next research: Resolve: financial_missing_hoa_monthly, financial_missing_monthly_rent
+Listing URL not supplied; use source listing identifiers in the private report.
+NEW | 404 Fiction Rd, Pittsburgh, PA 15212 | $140000.0 | Pending Verification
+3.0 beds / 1.0 baths / 1300.0 sqft / SingleFamilyResidence
+Discovered 2026-10-24T10:00:00+00:00; latest evidence 2026-10-24T10:00:00+00:00; sources synthetic_mls
+Investment score None | Completeness 78.57% | Evidence indicator 78.57% (not a probability) | Financial confidence: incomplete
+Financial metrics: {"cash_flow_monthly": null, "cash_on_cash_pct": null, "debt_service_monthly": null, "gross_yield_pct": null, "net_yield_pct": null, "noi_annual": null}
+Inputs/provenance: {"annual_insurance": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 1200}, "capex_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "closing_cost": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 4500}, "hoa_monthly": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 0.0}, "maintenance_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "management_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.08}, "renovation_budget": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 10000}, "vacancy_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}}
+Reasons: annual_tax_and_year_required, financial_missing_annual_tax, financial_missing_monthly_rent
+Risks: no_profitability_cutoff_approved
+Next research: Resolve: annual_tax_and_year_required, financial_missing_annual_tax, financial_missing_monthly_rent
+synthetic_mls: https://listing.example.invalid/MLS-1004
+NEW | 202 Sample Ave, Pittsburgh, PA 15212 | $160000.0 | Pending Verification
+3.0 beds / 2.0 baths / 1400.0 sqft / SingleFamilyResidence
+Discovered 2026-10-24T10:00:00+00:00; latest evidence 2026-10-24T10:00:00+00:00; sources synthetic_mls
+Investment score None | Completeness 92.86% | Evidence indicator 92.86% (not a probability) | Financial confidence: incomplete
+Financial metrics: {"cash_flow_monthly": null, "cash_on_cash_pct": null, "debt_service_monthly": null, "gross_yield_pct": null, "net_yield_pct": null, "noi_annual": null}
+Inputs/provenance: {"annual_insurance": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 1200}, "annual_tax": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 1899.99}, "capex_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "closing_cost": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 4500}, "hoa_monthly": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 0.0}, "maintenance_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "management_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.08}, "renovation_budget": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 10000}, "vacancy_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}}
+Reasons: financial_missing_monthly_rent
+Risks: no_profitability_cutoff_approved
+Next research: Resolve: financial_missing_monthly_rent
+synthetic_mls: https://listing.example.invalid/MLS-1002
+NEW | 303 Example St, Pittsburgh, PA 15203 | $120000.0 | Rejected
+3.0 beds / 1.0 baths / 1200.0 sqft / SingleFamilyResidence
+Discovered 2026-10-24T10:00:00+00:00; latest evidence 2026-10-24T10:00:00+00:00; sources synthetic_mls
+Investment score None | Completeness 92.86% | Evidence indicator 92.86% (not a probability) | Financial confidence: incomplete
+Financial metrics: {"cash_flow_monthly": null, "cash_on_cash_pct": null, "debt_service_monthly": null, "gross_yield_pct": null, "net_yield_pct": null, "noi_annual": null}
+Inputs/provenance: {"annual_insurance": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 1200}, "annual_tax": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 1500.0}, "capex_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "closing_cost": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 4500}, "hoa_monthly": {"approval_id": "", "kind": "verified_source", "source": "synthetic_mls", "value": 0.0}, "maintenance_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}, "management_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.08}, "renovation_budget": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 10000}, "vacancy_rate": {"approval_id": "SYNTHETIC-NOT-OWNER-POLICY", "kind": "assumption", "source": "explicit fictional scenario", "value": 0.05}}
+Reasons: excluded_zip, financial_missing_monthly_rent
+Risks: no_profitability_cutoff_approved
+Next research: Resolve: excluded_zip, financial_missing_monthly_rent
+synthetic_mls: https://listing.example.invalid/MLS-1003

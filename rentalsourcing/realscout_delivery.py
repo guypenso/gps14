@@ -22,6 +22,7 @@ def prepare(store,boundary,settings,rs_settings,day,now,*,enrichment_stats=None)
         snapshot['enrichment_requests_this_run']=(enrichment_stats or {}).get('requests',0)
         body=render_preview(snapshot,preview=False)
         body.update({'from':settings.email_from,'to':[settings.email_to]})
+        snapshot['outbox_payload_sha256']=hashlib.sha256(json.dumps(body).encode()).hexdigest()
         if old:
             for event_id in json.loads(old[3]):
                 store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(event_id,))

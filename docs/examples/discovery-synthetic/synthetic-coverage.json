@@ -1,0 +1,65 @@
+{
+  "reference_authorized": true,
+  "reference_relevant_count": 4,
+  "sources": {
+    "synthetic_mls": {
+      "total_records": 5,
+      "unique_properties": 4,
+      "repeated_property_observations": 1,
+      "duplicate_records": 0,
+      "unique_to_source": [
+        "property:9c51c0e424907e9a6c0ea3a2f8e865ee8100839cd6556316b4d8aa944a63ca38",
+        "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd",
+        "property:fe2306ea5ef727ff5f167c7635895bae09dbf7a7a1790d41ba2ed635af198750"
+      ],
+      "relevant_found": 3,
+      "missed": [
+        "property:21d3766075919731efbdbba697d7f40edd544fe2fabfe45578eaa0d2d1e2166e"
+      ],
+      "coverage_pct": 75.0,
+      "median_discovery_delay_hours": 2.0,
+      "reference_within24h_coverage_pct": 75.0,
+      "found_within24h_pct": 100.0,
+      "status_accuracy_pct": 100.0,
+      "status_comparable_count": 3,
+      "delay_comparable_count": 3,
+      "missing_financial_count": 4,
+      "geographic_gaps": {
+        "15212": 1
+      }
+    },
+    "synthetic_rentcast": {
+      "total_records": 2,
+      "unique_properties": 2,
+      "repeated_property_observations": 0,
+      "duplicate_records": 0,
+      "unique_to_source": [
+        "property:21d3766075919731efbdbba697d7f40edd544fe2fabfe45578eaa0d2d1e2166e"
+      ],
+      "relevant_found": 2,
+      "missed": [
+        "property:9c51c0e424907e9a6c0ea3a2f8e865ee8100839cd6556316b4d8aa944a63ca38",
+        "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd"
+      ],
+      "coverage_pct": 50.0,
+      "median_discovery_delay_hours": 2.0,
+      "reference_within24h_coverage_pct": 50.0,
+      "found_within24h_pct": 100.0,
+      "status_accuracy_pct": 100.0,
+      "status_comparable_count": 2,
+      "delay_comparable_count": 2,
+      "missing_financial_count": 2,
+      "geographic_gaps": {
+        "15212": 2
+      }
+    }
+  },
+  "union_coverage_pct": 100.0,
+  "targets": {
+    "coverage_pct": 95,
+    "delay_hours": 24,
+    "status": "proposed_not_demonstrated_by_fixture_tests"
+  },
+  "limitation": "Coverage is only against the supplied authorized cohort, never a claim of all MLS inventory.",
+  "synthetic": true
+}

@@ -10,7 +10,7 @@ from uuid import UUID,uuid4
 from .request import NoRedirect
 from .realscout_store import LinkVault,instant
 from .realscout_inbound import process_received
-from .realscout_auth import RawDkimVerifier,AuthFailure
+from .realscout_auth import RawDkimVerifier,AuthFailure,ProviderAuthentication
 from .telemetry import event
 
 
@@ -51,7 +51,12 @@ class ReceivingClient:
             except (ValueError,UnicodeError):raise RetrievalFailure('unsupported_html_encoding',False) from None
         # Always normalize at the trusted transport boundary, never trust an
         # undocumented/sender-supplied top-level authentication object.
-        data['authentication']={}
+        auth=data.pop('authentication',None)
+        data.pop('_receiver_authentication',None)
+        allowed={'pass','fail','gray','processing_failed','unknown'}
+        if isinstance(auth,dict) and all(auth.get(k) in allowed for k in ('spf','dkim','dmarc')):
+            data['_receiver_authentication']=ProviderAuthentication(identity,auth['spf'],auth['dkim'],auth['dmarc'])
+        data['authentication']={}  # Untrusted caller dictionaries still never cross process_received.
         return data
 
 
