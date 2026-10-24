@@ -2,7 +2,7 @@
 from dataclasses import dataclass,field
 import json,os
 from .models import Source
-from .finance import Input
+from .finance import Input,ALLOWED,underwriting
 
 
 def flag(name):
@@ -32,6 +32,13 @@ class DiscoverySettings:
         if self.enabled and not self.approval_id:raise PermissionError('Unified processing permission required')
         if not 1<=self.rentcast_interval_days<=31 or not 0<=self.max_candidates<=20 or not 0<=self.reverify_limit<=20:raise ValueError('Bounded discovery settings required')
         if self.financing not in (None,'cash','loan'):raise ValueError('Unknown financing mode')
+        if set(self.assumptions)-ALLOWED or any(not isinstance(v,Input) for v in self.assumptions.values()):raise ValueError('Invalid underwriting configuration')
+        underwriting(1,self.assumptions,financing=self.financing)  # Validate units/rates before startup.
+        transports={'mls':{'reso','trestle','csv_file','csv_webhook'},'rentcast':{'rentcast'},'realscout':{'realscout'},'public_records':{'wprdc'}}
+        for profile in self.sources:
+            if profile.get('transport') not in transports[profile['source'].kind]:raise ValueError('Source kind/transport mismatch')
+            if profile['transport']=='csv_file' and not all(profile.get(k) for k in ('export_path','manifest_path')):raise ValueError('CSV file and snapshot manifest required')
+            if profile['transport']=='csv_webhook' and not profile.get('secret_env'):raise ValueError('CSV signing-secret environment reference required')
         if len({p['source'].name for p in self.sources})!=len(self.sources):raise ValueError('Duplicate source name')
     @classmethod
     def from_env(cls):

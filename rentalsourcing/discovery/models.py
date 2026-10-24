@@ -77,6 +77,7 @@ class Listing:
         if self.source.kind=='public_records' and set(self.fields)&MARKET:raise ValueError('Public assessments do not establish active listing status/price')
         for k,v in self.fields.items():
             if k not in {'status','state','zipCode','propertyType','parcel_id','county'} and v is not None:numeric(v,signed=k in {'latitude','longitude'})
+        if self.fields.get('tax_year') is not None and self.fields['tax_year']!=int(self.fields['tax_year']):raise ValueError('Tax year must be an integer')
         public_url(self.url)
     @property
     def key(self):return address_key(self.street,self.city,self.state,self.zipcode)

@@ -1,0 +1,1341 @@
+{
+  "all_states": {
+    "property:b983d4da61a61dc57952df396264f37c40890200b6b6a95aa82152d8bb1ff50d": "Qualified",
+    "property:9c51c0e424907e9a6c0ea3a2f8e865ee8100839cd6556316b4d8aa944a63ca38": "Pending Verification",
+    "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd": "Pending Verification",
+    "property:fe2306ea5ef727ff5f167c7635895bae09dbf7a7a1790d41ba2ed635af198750": "Rejected"
+  },
+  "day": "2026-10-24",
+  "since": "2026-10-23T21:00:00+00:00",
+  "cutoff": "2026-10-24T12:20:00+00:00",
+  "properties": [
+    {
+      "id": "property:b983d4da61a61dc57952df396264f37c40890200b6b6a95aa82152d8bb1ff50d",
+      "address": "101 Fixture St, Pittsburgh, PA 15212",
+      "version": 4,
+      "discovered_at": "2026-10-24T11:50:00+00:00",
+      "fields": {
+        "price": 140000.0,
+        "latitude": 40.45,
+        "monthly_rent": 1500,
+        "hoa_monthly": 0.0,
+        "squareFootage": 1200.0,
+        "propertyType": "SingleFamilyResidence",
+        "state": "PA",
+        "bedrooms": 3.0,
+        "status": "Active",
+        "longitude": -80.0,
+        "bathrooms": 1.0,
+        "zipCode": "15212",
+        "tax_year": 2025.0,
+        "annual_tax": 1500.0
+      },
+      "status": "Qualified",
+      "original_screening": "Qualified",
+      "reasons": [],
+      "tax": {
+        "year": 2025,
+        "annual": 1500.0,
+        "adjusted": 1600.0
+      },
+      "financial": {
+        "complete": true,
+        "missing": [],
+        "metrics": {
+          "gross_yield_pct": 12.857143,
+          "net_yield_pct": 7.269903,
+          "noi_annual": 12132.0,
+          "cash_flow_monthly": 936.0,
+          "cash_on_cash_pct": 7.269903,
+          "debt_service_monthly": 0.0,
+          "cash_flow_before_debt_monthly": 936.0
+        },
+        "inputs": {
+          "annual_insurance": {
+            "value": 1200,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "vacancy_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "maintenance_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "capex_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "management_rate": {
+            "value": 0.08,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "closing_cost": {
+            "value": 4500,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "renovation_budget": {
+            "value": 10000,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "monthly_rent": {
+            "value": 1500,
+            "kind": "third_party_estimate",
+            "source": "fixture_rentcast",
+            "approval_id": ""
+          },
+          "annual_tax": {
+            "value": 1500.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          },
+          "hoa_monthly": {
+            "value": 0.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          }
+        },
+        "score": 7.269902912621359,
+        "score_units": "Annual unlevered after-reserve yield percentage points; no ROI pass threshold invented",
+        "assumptions": [
+          "annual_insurance",
+          "vacancy_rate",
+          "maintenance_rate",
+          "capex_rate",
+          "management_rate",
+          "closing_cost",
+          "renovation_budget"
+        ],
+        "estimates": [
+          "monthly_rent"
+        ]
+      },
+      "investment_score": 7.2699,
+      "data_completeness_pct": 100.0,
+      "evidence_confidence_pct": 96.57,
+      "financial_confidence": "modeled_with_assumptions_or_estimates",
+      "latest_verification": "2026-10-24T12:00:00+00:00",
+      "provenance": {
+        "price": {
+          "value": 140000.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "monthly_rent": {
+          "value": 1500,
+          "source": "fixture_rentcast",
+          "kind": "third_party_estimate",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 70,
+          "source_kind": "rentcast",
+          "synthetic": false,
+          "record_id": "rent:fixture-101"
+        },
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-1"
+        },
+        "annual_tax": {
+          "value": 1500.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-1",
+          "synthetic": false
+        },
+        "tax_year": {
+          "value": 2025.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-1",
+          "synthetic": false
+        }
+      },
+      "conflicts": {
+        "propertyType": [
+          {
+            "value": "SingleFamilyResidence",
+            "source": "fixture_mls",
+            "kind": "verified_source",
+            "observed_at": "2026-10-24T12:00:00+00:00",
+            "priority": 100,
+            "source_kind": "mls",
+            "synthetic": false,
+            "record_id": "fixture-1"
+          },
+          {
+            "value": "Single Family",
+            "source": "fixture_rentcast",
+            "kind": "verified_source",
+            "observed_at": "2026-10-24T12:00:00+00:00",
+            "priority": 70,
+            "source_kind": "rentcast",
+            "synthetic": false,
+            "record_id": "fixture-101"
+          }
+        ]
+      },
+      "stale_evidence": [],
+      "sources": [
+        "fixture_mls",
+        "fixture_rentcast"
+      ],
+      "synthetic": false,
+      "risks": [
+        "no_profitability_cutoff_approved"
+      ],
+      "next_research": "Confirm rent comparables, physical condition and modeled assumptions before an offer",
+      "new": true,
+      "price_reduction": true,
+      "changed": true,
+      "seen_this_window": true,
+      "newly_qualified": true,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fixture_mls",
+          "url": "https://listing.example.invalid/MLS-1001"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fixture_mls",
+          "record_id": "fixture-1",
+          "mls_id": "MLS-1001",
+          "mls_system": null
+        },
+        {
+          "source": "fixture_rentcast",
+          "record_id": "fixture-101",
+          "mls_id": null,
+          "mls_system": null
+        },
+        {
+          "source": "fixture_rentcast",
+          "record_id": "rent:fixture-101",
+          "mls_id": null,
+          "mls_system": null
+        }
+      ],
+      "rental_comparables": [
+        {
+          "distance": 0.3,
+          "id": "fictional-comp",
+          "price": 1500
+        }
+      ],
+      "recommendation": true
+    },
+    {
+      "id": "property:9c51c0e424907e9a6c0ea3a2f8e865ee8100839cd6556316b4d8aa944a63ca38",
+      "address": "404 Fiction Rd, Pittsburgh, PA 15212",
+      "version": 3,
+      "discovered_at": "2026-10-24T11:50:00+00:00",
+      "fields": {
+        "price": 140000.0,
+        "latitude": 40.45,
+        "monthly_rent": 1500,
+        "hoa_monthly": 0.0,
+        "squareFootage": 1300.0,
+        "propertyType": "SingleFamilyResidence",
+        "state": "PA",
+        "bedrooms": 3.0,
+        "status": "Active",
+        "longitude": -80.0,
+        "bathrooms": 1.0,
+        "zipCode": "15212"
+      },
+      "status": "Pending Verification",
+      "original_screening": "Candidate",
+      "reasons": [
+        "annual_tax_and_year_required",
+        "financial_missing_annual_tax"
+      ],
+      "tax": null,
+      "financial": {
+        "complete": false,
+        "missing": [
+          "annual_tax"
+        ],
+        "metrics": {
+          "gross_yield_pct": 12.857143,
+          "net_yield_pct": null,
+          "noi_annual": null,
+          "cash_flow_monthly": null,
+          "cash_on_cash_pct": null,
+          "debt_service_monthly": null
+        },
+        "inputs": {
+          "annual_insurance": {
+            "value": 1200,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "vacancy_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "maintenance_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "capex_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "management_rate": {
+            "value": 0.08,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "closing_cost": {
+            "value": 4500,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "renovation_budget": {
+            "value": 10000,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "monthly_rent": {
+            "value": 1500,
+            "kind": "third_party_estimate",
+            "source": "fixture_rentcast",
+            "approval_id": ""
+          },
+          "hoa_monthly": {
+            "value": 0.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          }
+        },
+        "score": null,
+        "score_units": "Annual unlevered after-reserve yield percentage points; no ROI pass threshold invented",
+        "assumptions": [
+          "annual_insurance",
+          "vacancy_rate",
+          "maintenance_rate",
+          "capex_rate",
+          "management_rate",
+          "closing_cost",
+          "renovation_budget"
+        ],
+        "estimates": [
+          "monthly_rent"
+        ]
+      },
+      "investment_score": null,
+      "data_completeness_pct": 85.71,
+      "evidence_confidence_pct": 82.29,
+      "financial_confidence": "incomplete",
+      "latest_verification": "2026-10-24T12:00:00+00:00",
+      "provenance": {
+        "price": {
+          "value": 140000.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "monthly_rent": {
+          "value": 1500,
+          "source": "fixture_rentcast",
+          "kind": "third_party_estimate",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 70,
+          "source_kind": "rentcast",
+          "synthetic": false,
+          "record_id": "rent:fixture-404"
+        },
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "squareFootage": {
+          "value": 1300.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-4"
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fixture_mls",
+        "fixture_rentcast"
+      ],
+      "synthetic": false,
+      "risks": [
+        "no_profitability_cutoff_approved"
+      ],
+      "next_research": "Resolve: annual_tax_and_year_required, financial_missing_annual_tax",
+      "new": true,
+      "price_reduction": false,
+      "changed": false,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fixture_mls",
+          "url": "https://listing.example.invalid/MLS-1004"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fixture_mls",
+          "record_id": "fixture-4",
+          "mls_id": "MLS-1004",
+          "mls_system": "FictionalMLS"
+        },
+        {
+          "source": "fixture_rentcast",
+          "record_id": "property:fixture-404",
+          "mls_id": null,
+          "mls_system": null
+        },
+        {
+          "source": "fixture_rentcast",
+          "record_id": "rent:fixture-404",
+          "mls_id": null,
+          "mls_system": null
+        }
+      ],
+      "rental_comparables": [
+        {
+          "distance": 0.3,
+          "id": "fictional-comp",
+          "price": 1500
+        }
+      ],
+      "recommendation": false
+    },
+    {
+      "id": "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd",
+      "address": "202 Sample Ave, Pittsburgh, PA 15212",
+      "version": 1,
+      "discovered_at": "2026-10-24T11:50:00+00:00",
+      "fields": {
+        "price": 160000.0,
+        "latitude": 40.45,
+        "hoa_monthly": 0.0,
+        "squareFootage": 1400.0,
+        "propertyType": "SingleFamilyResidence",
+        "state": "PA",
+        "bedrooms": 3.0,
+        "status": "Active",
+        "longitude": -80.0,
+        "bathrooms": 2.0,
+        "zipCode": "15212",
+        "tax_year": 2025.0,
+        "annual_tax": 1899.99
+      },
+      "status": "Pending Verification",
+      "original_screening": "Qualified",
+      "reasons": [
+        "financial_missing_monthly_rent"
+      ],
+      "tax": {
+        "year": 2025,
+        "annual": 1899.99,
+        "adjusted": 1999.99
+      },
+      "financial": {
+        "complete": false,
+        "missing": [
+          "monthly_rent"
+        ],
+        "metrics": {
+          "gross_yield_pct": null,
+          "net_yield_pct": null,
+          "noi_annual": null,
+          "cash_flow_monthly": null,
+          "cash_on_cash_pct": null,
+          "debt_service_monthly": null
+        },
+        "inputs": {
+          "annual_insurance": {
+            "value": 1200,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "vacancy_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "maintenance_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "capex_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "management_rate": {
+            "value": 0.08,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "closing_cost": {
+            "value": 4500,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "renovation_budget": {
+            "value": 10000,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "annual_tax": {
+            "value": 1899.99,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          },
+          "hoa_monthly": {
+            "value": 0.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          }
+        },
+        "score": null,
+        "score_units": "Annual unlevered after-reserve yield percentage points; no ROI pass threshold invented",
+        "assumptions": [
+          "annual_insurance",
+          "vacancy_rate",
+          "maintenance_rate",
+          "capex_rate",
+          "management_rate",
+          "closing_cost",
+          "renovation_budget"
+        ],
+        "estimates": []
+      },
+      "investment_score": null,
+      "data_completeness_pct": 92.86,
+      "evidence_confidence_pct": 92.86,
+      "financial_confidence": "incomplete",
+      "latest_verification": "2026-10-24T11:50:00+00:00",
+      "provenance": {
+        "price": {
+          "value": 160000.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "squareFootage": {
+          "value": 1400.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "bathrooms": {
+          "value": 2.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "zipCode": {
+          "value": "15212",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-2"
+        },
+        "annual_tax": {
+          "value": 1899.99,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-2",
+          "synthetic": false
+        },
+        "tax_year": {
+          "value": 2025.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-2",
+          "synthetic": false
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fixture_mls"
+      ],
+      "synthetic": false,
+      "risks": [
+        "no_profitability_cutoff_approved"
+      ],
+      "next_research": "Resolve: financial_missing_monthly_rent",
+      "new": true,
+      "price_reduction": false,
+      "changed": false,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fixture_mls",
+          "url": "https://listing.example.invalid/MLS-1002"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fixture_mls",
+          "record_id": "fixture-2",
+          "mls_id": "MLS-1002",
+          "mls_system": "FictionalMLS"
+        }
+      ],
+      "rental_comparables": [],
+      "recommendation": false
+    },
+    {
+      "id": "property:fe2306ea5ef727ff5f167c7635895bae09dbf7a7a1790d41ba2ed635af198750",
+      "address": "303 Example St, Pittsburgh, PA 15203",
+      "version": 1,
+      "discovered_at": "2026-10-24T11:50:00+00:00",
+      "fields": {
+        "price": 120000.0,
+        "latitude": 40.45,
+        "hoa_monthly": 0.0,
+        "squareFootage": 1200.0,
+        "propertyType": "SingleFamilyResidence",
+        "state": "PA",
+        "bedrooms": 3.0,
+        "status": "Active",
+        "longitude": -80.0,
+        "bathrooms": 1.0,
+        "zipCode": "15203",
+        "tax_year": 2025.0,
+        "annual_tax": 1500.0
+      },
+      "status": "Rejected",
+      "original_screening": "Rejected",
+      "reasons": [
+        "excluded_zip",
+        "financial_missing_monthly_rent"
+      ],
+      "tax": {
+        "year": 2025,
+        "annual": 1500.0,
+        "adjusted": 1600.0
+      },
+      "financial": {
+        "complete": false,
+        "missing": [
+          "monthly_rent"
+        ],
+        "metrics": {
+          "gross_yield_pct": null,
+          "net_yield_pct": null,
+          "noi_annual": null,
+          "cash_flow_monthly": null,
+          "cash_on_cash_pct": null,
+          "debt_service_monthly": null
+        },
+        "inputs": {
+          "annual_insurance": {
+            "value": 1200,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "vacancy_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "maintenance_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "capex_rate": {
+            "value": 0.05,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "management_rate": {
+            "value": 0.08,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "closing_cost": {
+            "value": 4500,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "renovation_budget": {
+            "value": 10000,
+            "kind": "assumption",
+            "source": "fictional scenario",
+            "approval_id": "FIXTURE-NOT-OWNER-APPROVAL"
+          },
+          "annual_tax": {
+            "value": 1500.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          },
+          "hoa_monthly": {
+            "value": 0.0,
+            "kind": "verified_source",
+            "source": "fixture_mls",
+            "approval_id": ""
+          }
+        },
+        "score": null,
+        "score_units": "Annual unlevered after-reserve yield percentage points; no ROI pass threshold invented",
+        "assumptions": [
+          "annual_insurance",
+          "vacancy_rate",
+          "maintenance_rate",
+          "capex_rate",
+          "management_rate",
+          "closing_cost",
+          "renovation_budget"
+        ],
+        "estimates": []
+      },
+      "investment_score": null,
+      "data_completeness_pct": 92.86,
+      "evidence_confidence_pct": 92.86,
+      "financial_confidence": "incomplete",
+      "latest_verification": "2026-10-24T11:50:00+00:00",
+      "provenance": {
+        "price": {
+          "value": 120000.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "latitude": {
+          "value": 40.45,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "state": {
+          "value": "PA",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "status": {
+          "value": "Active",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "longitude": {
+          "value": -80.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "bathrooms": {
+          "value": 1.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "zipCode": {
+          "value": "15203",
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": false,
+          "record_id": "fixture-3"
+        },
+        "annual_tax": {
+          "value": 1500.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-3",
+          "synthetic": false
+        },
+        "tax_year": {
+          "value": 2025.0,
+          "source": "fixture_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:50:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "record_id": "fixture-3",
+          "synthetic": false
+        }
+      },
+      "conflicts": {},
+      "stale_evidence": [],
+      "sources": [
+        "fixture_mls"
+      ],
+      "synthetic": false,
+      "risks": [
+        "no_profitability_cutoff_approved"
+      ],
+      "next_research": "Resolve: excluded_zip, financial_missing_monthly_rent",
+      "new": true,
+      "price_reduction": false,
+      "changed": false,
+      "seen_this_window": true,
+      "newly_qualified": false,
+      "previously_reported": false,
+      "links": [
+        {
+          "source": "fixture_mls",
+          "url": "https://listing.example.invalid/MLS-1003"
+        }
+      ],
+      "source_identifiers": [
+        {
+          "source": "fixture_mls",
+          "record_id": "fixture-3",
+          "mls_id": "MLS-1003",
+          "mls_system": "FictionalMLS"
+        }
+      ],
+      "rental_comparables": [],
+      "recommendation": false
+    }
+  ],
+  "omitted": 0,
+  "counts": {
+    "total": 4,
+    "new": 4,
+    "price_reductions": 1,
+    "qualified": 1,
+    "pending": 2,
+    "rejected": 1,
+    "recommendations": 1,
+    "seen_this_window": 4
+  },
+  "sources": [
+    {
+      "synthetic": false,
+      "name": "fixture_mls",
+      "kind": "mls",
+      "enabled": true,
+      "scope": "fictional purchase cohort",
+      "last_success": "2026-10-24T11:50:00+00:00",
+      "last_attempt": "2026-10-24T12:00:00+00:00",
+      "error": null,
+      "stale": false,
+      "mode": "licensed_feed_or_export"
+    },
+    {
+      "synthetic": false,
+      "name": "fixture_mls_outage",
+      "kind": "mls",
+      "enabled": true,
+      "scope": "fictional purchase cohort",
+      "last_success": null,
+      "last_attempt": "2026-10-24T12:00:00+00:00",
+      "error": "TimeoutError",
+      "stale": true,
+      "mode": "licensed_feed_or_export"
+    },
+    {
+      "synthetic": false,
+      "name": "fixture_rentcast",
+      "kind": "rentcast",
+      "enabled": true,
+      "scope": "fictional complement",
+      "last_success": "2026-10-24T12:00:00+00:00",
+      "last_attempt": "2026-10-24T12:20:00+00:00",
+      "error": "BudgetExceeded",
+      "stale": false,
+      "mode": "provider_or_record_evidence"
+    }
+  ],
+  "authorized_mls_connected": false,
+  "coverage_pct": null,
+  "coverage_statement": "No authorized real MLS benchmark has been measured. Incremental checks and alert events are not full-inventory scans.",
+  "no_new_listings": false,
+  "synthetic": true,
+  "score_policy": "Investment score = modeled annual unlevered after-reserve yield percentage points. No minimum ROI threshold was recovered or invented.",
+  "source_results": [
+    {
+      "source": "fixture_mls",
+      "mode": "licensed_api",
+      "complete": true,
+      "records": 5,
+      "requests": 1
+    },
+    {
+      "source": "fixture_mls_outage",
+      "error": "TimeoutError",
+      "fresh_scan": false
+    },
+    {
+      "source": "fixture_rentcast",
+      "records": 1,
+      "requests": 1,
+      "fresh_scan": true,
+      "mode": "provider_query_page",
+      "all_pages_consumed": true
+    },
+    {
+      "source": "fixture_rentcast",
+      "enrichment": {
+        "processed": 2,
+        "requests": 3,
+        "errors": []
+      }
+    },
+    {
+      "source": "fixture_rentcast",
+      "records": 0,
+      "requests": 0,
+      "fresh_scan": false,
+      "error": "BudgetExceeded"
+    }
+  ],
+  "scan_outcomes": [
+    {
+      "source": "fixture_mls",
+      "state": "fresh_discovery",
+      "records": 5,
+      "requests": 1
+    },
+    {
+      "source": "fixture_mls_outage",
+      "state": "source_unavailable",
+      "records": null,
+      "requests": 0
+    },
+    {
+      "source": "fixture_rentcast",
+      "state": "fresh_discovery",
+      "records": 1,
+      "requests": 1
+    },
+    {
+      "source": "fixture_rentcast",
+      "state": "verification_only",
+      "records": null,
+      "requests": 3
+    },
+    {
+      "source": "fixture_rentcast",
+      "state": "internal_api_budget_exhausted",
+      "records": 0,
+      "requests": 0
+    }
+  ],
+  "api": {
+    "cycle_start": "2026-10-01T00:00:00+00:00",
+    "cycle_end": "2026-11-01T00:00:00+00:00",
+    "used": 40,
+    "remaining": 0,
+    "days_remaining": 8,
+    "warning": "API billing-cycle allowance is at least 85% consumed."
+  },
+  "outbox_payload_sha256": "fb314f913970021afca5583862d159fdd2ee7e46f0694c0d2878ed9dc7fa5c6b",
+  "dry_run": true
+}

@@ -44,7 +44,9 @@ def ingest(store,listing,now,*,authorized=False):
         meaningful=kind in {'new','additional_source','price_reduction','price_increase','facts_changed'}
         if not entity:
             address=f'{listing.street}, {listing.city}, {listing.state} {listing.zipcode}'
-            store.execute('INSERT INTO discovery_entities VALUES (?,?,?,?,?,1)',(listing.entity_id,listing.key,address,now.isoformat(),now.isoformat()))
+            # Historical inbox/cache imports retain when the system first had evidence.
+            # Import time alone must not turn yesterday's stored listing into today's NEW.
+            store.execute('INSERT INTO discovery_entities VALUES (?,?,?,?,?,1)',(listing.entity_id,listing.key,address,listing.observed_at,now.isoformat()))
         elif meaningful:store.execute('UPDATE discovery_entities SET version=version+1,last_changed=? WHERE id=?',(now.isoformat(),listing.entity_id))
         store.execute('INSERT INTO discovery_observations VALUES (?,?,?,?,?,?,?,?)',
             (oid,listing.source.name,listing.record_id,listing.entity_id,encoded,listing.observed_at,now.isoformat(),kind))

@@ -5,6 +5,7 @@ import math
 
 REQUIRED=('monthly_rent','annual_tax','annual_insurance','hoa_monthly','vacancy_rate','maintenance_rate',
           'capex_rate','management_rate','closing_cost','renovation_budget')
+ALLOWED=set(REQUIRED)|{'down_payment_rate','interest_rate','loan_years'}
 RATES={'vacancy_rate','maintenance_rate','capex_rate','management_rate','down_payment_rate','interest_rate'}
 
 
@@ -21,10 +22,13 @@ class Input:
 
 
 def underwriting(price,inputs,*,financing=None):
+    if financing not in (None,'cash','loan'):raise ValueError('Unknown financing mode')
+    if set(inputs)-ALLOWED:raise ValueError('Unknown underwriting input')
     if price is None or isinstance(price,bool) or not isinstance(price,(int,float)) or not math.isfinite(price) or price<=0:return {'complete':False,'missing':['price'],'metrics':{}}
     for name,item in inputs.items():
         if not isinstance(item,Input):raise TypeError('Every underwriting number needs provenance')
         if name in RATES and item.value>=1:raise ValueError('Rates must be fractions below1')
+        if name=='loan_years' and (item.value<=0 or item.value>100 or item.value!=int(item.value)):raise ValueError('Invalid loan term')
     missing=[name for name in REQUIRED if name not in inputs]
     values={name:Decimal(str(item.value)) for name,item in inputs.items()}
     metrics={'gross_yield_pct':float(12*values['monthly_rent']/Decimal(str(price))*100) if 'monthly_rent' in values else None,
@@ -47,6 +51,7 @@ def underwriting(price,inputs,*,financing=None):
                     loan=Decimal(str(price))*(1-values['down_payment_rate']);rate=values['interest_rate']/12;months=years*12
                     debt=loan/months if rate==0 else loan*rate/(1-(1+rate)**(-int(months)))
                     invested=Decimal(str(price))*values['down_payment_rate']+values['closing_cost']+values['renovation_budget']
+                    if invested==0:financial_missing.append('positive_initial_cash_investment_for_cash_on_cash')
                 else:
                     debt=None;invested=None
                     if financing=='loan':financial_missing.append('financing_mode_or_terms')

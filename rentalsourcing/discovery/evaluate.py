@@ -4,7 +4,7 @@ from .repository import resolution
 from .finance import Input,underwriting,REQUIRED
 from ..core import verification,tax_verification
 
-CRITICAL_CONFLICTS={'price','status','bedrooms','bathrooms','squareFootage','latitude','longitude','annual_tax','tax_year'}
+CRITICAL_CONFLICTS={'price','status','bedrooms','bathrooms','squareFootage','latitude','longitude','annual_tax','tax_year','monthly_rent','hoa_monthly'}
 
 
 def evaluate(store,entity_id,boundary,now,*,assumptions=None,financing=None):
@@ -14,11 +14,12 @@ def evaluate(store,entity_id,boundary,now,*,assumptions=None,financing=None):
     status,reasons=verification(dict(fields,id=entity_id,formattedAddress=row[0]),boundary)
     original=status;tax=None
     if fields.get('annual_tax') is not None and fields.get('tax_year') is not None:
-        if info['provenance'].get('annual_tax',{}).get('kind')!='verified_source':reasons.append('annual_tax_is_only_an_estimate')
+        tax_verified=info['provenance'].get('annual_tax',{}).get('kind')=='verified_source'
+        if not tax_verified:reasons.append('annual_tax_is_only_an_estimate')
         year=fields['tax_year'];tax_state,tax,why=tax_verification({'propertyTaxes':{str(int(year)):{'year':int(year),'total':fields['annual_tax']}}},now.date())
-        if status!='Rejected' and tax_state=='Rejected':status='Rejected';reasons.append(why)
+        if status!='Rejected' and tax_state=='Rejected' and tax_verified:status='Rejected';reasons.append(why)
         elif tax_state=='Pending Verification':reasons.append(why)
-        elif status=='Candidate':original='Qualified'
+        elif status=='Candidate' and tax_verified:original='Qualified'
     else:reasons.append('annual_tax_and_year_required')
     conflicts=CRITICAL_CONFLICTS&info['conflicts'].keys()
     if conflicts:reasons+=['conflicting_'+f for f in sorted(conflicts)]

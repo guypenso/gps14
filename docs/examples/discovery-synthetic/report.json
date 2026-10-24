@@ -14,20 +14,20 @@
       "id": "property:b983d4da61a61dc57952df396264f37c40890200b6b6a95aa82152d8bb1ff50d",
       "address": "101 Fixture St, Pittsburgh, PA 15212",
       "version": 3,
-      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "discovered_at": "2026-10-24T10:00:00+00:00",
       "fields": {
-        "state": "PA",
-        "squareFootage": 1200.0,
+        "zipCode": "15212",
+        "longitude": -80.0,
+        "status": "Active",
         "hoa_monthly": 0.0,
+        "bedrooms": 3.0,
+        "state": "PA",
         "propertyType": "SingleFamilyResidence",
         "monthly_rent": 1500,
-        "bedrooms": 3.0,
-        "longitude": -80.0,
-        "price": 140000.0,
-        "zipCode": "15212",
         "latitude": 40.45,
+        "price": 140000.0,
+        "squareFootage": 1200.0,
         "bathrooms": 1.0,
-        "status": "Active",
         "tax_year": 2025.0,
         "annual_tax": 1500.0
       },
@@ -134,8 +134,8 @@
       "financial_confidence": "modeled_with_assumptions_or_estimates",
       "latest_verification": "2026-10-24T12:00:00+00:00",
       "provenance": {
-        "state": {
-          "value": "PA",
+        "zipCode": {
+          "value": "15212",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -144,8 +144,18 @@
           "synthetic": true,
           "record_id": "fixture-1"
         },
-        "squareFootage": {
-          "value": 1200.0,
+        "longitude": {
+          "value": -80.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-1"
+        },
+        "status": {
+          "value": "Active",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -156,6 +166,26 @@
         },
         "hoa_monthly": {
           "value": 0.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-1"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T11:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-1"
+        },
+        "state": {
+          "value": "PA",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -184,18 +214,8 @@
           "synthetic": true,
           "record_id": "fictional-rent-1"
         },
-        "bedrooms": {
-          "value": 3.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T11:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-1"
-        },
-        "longitude": {
-          "value": -80.0,
+        "latitude": {
+          "value": 40.45,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -214,18 +234,8 @@
           "synthetic": true,
           "record_id": "fixture-1"
         },
-        "zipCode": {
-          "value": "15212",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T11:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-1"
-        },
-        "latitude": {
-          "value": 40.45,
+        "squareFootage": {
+          "value": 1200.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -236,16 +246,6 @@
         },
         "bathrooms": {
           "value": 1.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T11:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-1"
-        },
-        "status": {
-          "value": "Active",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T11:00:00+00:00",
@@ -329,16 +329,16 @@
       "version": 1,
       "discovered_at": "2026-10-24T12:00:00+00:00",
       "fields": {
-        "state": "PA",
-        "squareFootage": 1200.0,
-        "propertyType": "Single Family",
-        "bedrooms": 3.0,
-        "longitude": -80.0,
-        "price": 165000.0,
         "zipCode": "15212",
-        "latitude": 40.45,
-        "bathrooms": 1.0,
+        "longitude": -80.0,
         "status": "Active",
+        "bedrooms": 3.0,
+        "state": "PA",
+        "propertyType": "Single Family",
+        "latitude": 40.45,
+        "price": 165000.0,
+        "squareFootage": 1200.0,
+        "bathrooms": 1.0,
         "tax_year": 2025,
         "annual_tax": 1600
       },
@@ -436,38 +436,8 @@
       "financial_confidence": "incomplete",
       "latest_verification": "2026-10-24T12:00:00+00:00",
       "provenance": {
-        "state": {
-          "value": "PA",
-          "source": "synthetic_rentcast",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T12:00:00+00:00",
-          "priority": 70,
-          "source_kind": "rentcast",
-          "synthetic": true,
-          "record_id": "fictional-5"
-        },
-        "squareFootage": {
-          "value": 1200.0,
-          "source": "synthetic_rentcast",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T12:00:00+00:00",
-          "priority": 70,
-          "source_kind": "rentcast",
-          "synthetic": true,
-          "record_id": "fictional-5"
-        },
-        "propertyType": {
-          "value": "Single Family",
-          "source": "synthetic_rentcast",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T12:00:00+00:00",
-          "priority": 70,
-          "source_kind": "rentcast",
-          "synthetic": true,
-          "record_id": "fictional-5"
-        },
-        "bedrooms": {
-          "value": 3.0,
+        "zipCode": {
+          "value": "15212",
           "source": "synthetic_rentcast",
           "kind": "verified_source",
           "observed_at": "2026-10-24T12:00:00+00:00",
@@ -486,8 +456,8 @@
           "synthetic": true,
           "record_id": "fictional-5"
         },
-        "price": {
-          "value": 165000.0,
+        "status": {
+          "value": "Active",
           "source": "synthetic_rentcast",
           "kind": "verified_source",
           "observed_at": "2026-10-24T12:00:00+00:00",
@@ -496,8 +466,28 @@
           "synthetic": true,
           "record_id": "fictional-5"
         },
-        "zipCode": {
-          "value": "15212",
+        "bedrooms": {
+          "value": 3.0,
+          "source": "synthetic_rentcast",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 70,
+          "source_kind": "rentcast",
+          "synthetic": true,
+          "record_id": "fictional-5"
+        },
+        "state": {
+          "value": "PA",
+          "source": "synthetic_rentcast",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 70,
+          "source_kind": "rentcast",
+          "synthetic": true,
+          "record_id": "fictional-5"
+        },
+        "propertyType": {
+          "value": "Single Family",
           "source": "synthetic_rentcast",
           "kind": "verified_source",
           "observed_at": "2026-10-24T12:00:00+00:00",
@@ -516,8 +506,8 @@
           "synthetic": true,
           "record_id": "fictional-5"
         },
-        "bathrooms": {
-          "value": 1.0,
+        "price": {
+          "value": 165000.0,
           "source": "synthetic_rentcast",
           "kind": "verified_source",
           "observed_at": "2026-10-24T12:00:00+00:00",
@@ -526,8 +516,18 @@
           "synthetic": true,
           "record_id": "fictional-5"
         },
-        "status": {
-          "value": "Active",
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "synthetic_rentcast",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T12:00:00+00:00",
+          "priority": 70,
+          "source_kind": "rentcast",
+          "synthetic": true,
+          "record_id": "fictional-5"
+        },
+        "bathrooms": {
+          "value": 1.0,
           "source": "synthetic_rentcast",
           "kind": "verified_source",
           "observed_at": "2026-10-24T12:00:00+00:00",
@@ -589,19 +589,19 @@
       "id": "property:9c51c0e424907e9a6c0ea3a2f8e865ee8100839cd6556316b4d8aa944a63ca38",
       "address": "404 Fiction Rd, Pittsburgh, PA 15212",
       "version": 1,
-      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "discovered_at": "2026-10-24T10:00:00+00:00",
       "fields": {
-        "state": "PA",
-        "squareFootage": 1300.0,
-        "hoa_monthly": 0.0,
-        "propertyType": "SingleFamilyResidence",
-        "bedrooms": 3.0,
-        "longitude": -80.0,
-        "price": 140000.0,
         "zipCode": "15212",
+        "longitude": -80.0,
+        "status": "Active",
+        "hoa_monthly": 0.0,
+        "bedrooms": 3.0,
+        "state": "PA",
+        "propertyType": "SingleFamilyResidence",
         "latitude": 40.45,
-        "bathrooms": 1.0,
-        "status": "Active"
+        "price": 140000.0,
+        "squareFootage": 1300.0,
+        "bathrooms": 1.0
       },
       "status": "Pending Verification",
       "original_screening": "Candidate",
@@ -694,48 +694,8 @@
       "financial_confidence": "incomplete",
       "latest_verification": "2026-10-24T10:00:00+00:00",
       "provenance": {
-        "state": {
-          "value": "PA",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-4"
-        },
-        "squareFootage": {
-          "value": 1300.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-4"
-        },
-        "hoa_monthly": {
-          "value": 0.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-4"
-        },
-        "propertyType": {
-          "value": "SingleFamilyResidence",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-4"
-        },
-        "bedrooms": {
-          "value": 3.0,
+        "zipCode": {
+          "value": "15212",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -754,8 +714,8 @@
           "synthetic": true,
           "record_id": "fixture-4"
         },
-        "price": {
-          "value": 140000.0,
+        "status": {
+          "value": "Active",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -764,8 +724,38 @@
           "synthetic": true,
           "record_id": "fixture-4"
         },
-        "zipCode": {
-          "value": "15212",
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-4"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-4"
+        },
+        "state": {
+          "value": "PA",
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-4"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -784,8 +774,8 @@
           "synthetic": true,
           "record_id": "fixture-4"
         },
-        "bathrooms": {
-          "value": 1.0,
+        "price": {
+          "value": 140000.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -794,8 +784,18 @@
           "synthetic": true,
           "record_id": "fixture-4"
         },
-        "status": {
-          "value": "Active",
+        "squareFootage": {
+          "value": 1300.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-4"
+        },
+        "bathrooms": {
+          "value": 1.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -842,19 +842,19 @@
       "id": "property:d9bca3dc290e2f9eaafdbdec274089f87af378336d94db07a01f899da2dd40bd",
       "address": "202 Sample Ave, Pittsburgh, PA 15212",
       "version": 1,
-      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "discovered_at": "2026-10-24T10:00:00+00:00",
       "fields": {
-        "state": "PA",
-        "squareFootage": 1400.0,
-        "hoa_monthly": 0.0,
-        "propertyType": "SingleFamilyResidence",
-        "bedrooms": 3.0,
-        "longitude": -80.0,
-        "price": 160000.0,
         "zipCode": "15212",
-        "latitude": 40.45,
-        "bathrooms": 2.0,
+        "longitude": -80.0,
         "status": "Active",
+        "hoa_monthly": 0.0,
+        "bedrooms": 3.0,
+        "state": "PA",
+        "propertyType": "SingleFamilyResidence",
+        "latitude": 40.45,
+        "price": 160000.0,
+        "squareFootage": 1400.0,
+        "bathrooms": 2.0,
         "tax_year": 2025.0,
         "annual_tax": 1899.99
       },
@@ -956,48 +956,8 @@
       "financial_confidence": "incomplete",
       "latest_verification": "2026-10-24T10:00:00+00:00",
       "provenance": {
-        "state": {
-          "value": "PA",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-2"
-        },
-        "squareFootage": {
-          "value": 1400.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-2"
-        },
-        "hoa_monthly": {
-          "value": 0.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-2"
-        },
-        "propertyType": {
-          "value": "SingleFamilyResidence",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-2"
-        },
-        "bedrooms": {
-          "value": 3.0,
+        "zipCode": {
+          "value": "15212",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1016,8 +976,8 @@
           "synthetic": true,
           "record_id": "fixture-2"
         },
-        "price": {
-          "value": 160000.0,
+        "status": {
+          "value": "Active",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1026,8 +986,38 @@
           "synthetic": true,
           "record_id": "fixture-2"
         },
-        "zipCode": {
-          "value": "15212",
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-2"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-2"
+        },
+        "state": {
+          "value": "PA",
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-2"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1046,8 +1036,8 @@
           "synthetic": true,
           "record_id": "fixture-2"
         },
-        "bathrooms": {
-          "value": 2.0,
+        "price": {
+          "value": 160000.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1056,8 +1046,18 @@
           "synthetic": true,
           "record_id": "fixture-2"
         },
-        "status": {
-          "value": "Active",
+        "squareFootage": {
+          "value": 1400.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-2"
+        },
+        "bathrooms": {
+          "value": 2.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1124,19 +1124,19 @@
       "id": "property:fe2306ea5ef727ff5f167c7635895bae09dbf7a7a1790d41ba2ed635af198750",
       "address": "303 Example St, Pittsburgh, PA 15203",
       "version": 1,
-      "discovered_at": "2026-10-24T12:00:00+00:00",
+      "discovered_at": "2026-10-24T10:00:00+00:00",
       "fields": {
-        "state": "PA",
-        "squareFootage": 1200.0,
-        "hoa_monthly": 0.0,
-        "propertyType": "SingleFamilyResidence",
-        "bedrooms": 3.0,
-        "longitude": -80.0,
-        "price": 120000.0,
         "zipCode": "15203",
-        "latitude": 40.45,
-        "bathrooms": 1.0,
+        "longitude": -80.0,
         "status": "Active",
+        "hoa_monthly": 0.0,
+        "bedrooms": 3.0,
+        "state": "PA",
+        "propertyType": "SingleFamilyResidence",
+        "latitude": 40.45,
+        "price": 120000.0,
+        "squareFootage": 1200.0,
+        "bathrooms": 1.0,
         "tax_year": 2025.0,
         "annual_tax": 1500.0
       },
@@ -1239,48 +1239,8 @@
       "financial_confidence": "incomplete",
       "latest_verification": "2026-10-24T10:00:00+00:00",
       "provenance": {
-        "state": {
-          "value": "PA",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-3"
-        },
-        "squareFootage": {
-          "value": 1200.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-3"
-        },
-        "hoa_monthly": {
-          "value": 0.0,
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-3"
-        },
-        "propertyType": {
-          "value": "SingleFamilyResidence",
-          "source": "synthetic_mls",
-          "kind": "verified_source",
-          "observed_at": "2026-10-24T10:00:00+00:00",
-          "priority": 100,
-          "source_kind": "mls",
-          "synthetic": true,
-          "record_id": "fixture-3"
-        },
-        "bedrooms": {
-          "value": 3.0,
+        "zipCode": {
+          "value": "15203",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1299,8 +1259,8 @@
           "synthetic": true,
           "record_id": "fixture-3"
         },
-        "price": {
-          "value": 120000.0,
+        "status": {
+          "value": "Active",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1309,8 +1269,38 @@
           "synthetic": true,
           "record_id": "fixture-3"
         },
-        "zipCode": {
-          "value": "15203",
+        "hoa_monthly": {
+          "value": 0.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-3"
+        },
+        "bedrooms": {
+          "value": 3.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-3"
+        },
+        "state": {
+          "value": "PA",
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-3"
+        },
+        "propertyType": {
+          "value": "SingleFamilyResidence",
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1329,8 +1319,8 @@
           "synthetic": true,
           "record_id": "fixture-3"
         },
-        "bathrooms": {
-          "value": 1.0,
+        "price": {
+          "value": 120000.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",
@@ -1339,8 +1329,18 @@
           "synthetic": true,
           "record_id": "fixture-3"
         },
-        "status": {
-          "value": "Active",
+        "squareFootage": {
+          "value": 1200.0,
+          "source": "synthetic_mls",
+          "kind": "verified_source",
+          "observed_at": "2026-10-24T10:00:00+00:00",
+          "priority": 100,
+          "source_kind": "mls",
+          "synthetic": true,
+          "record_id": "fixture-3"
+        },
+        "bathrooms": {
+          "value": 1.0,
           "source": "synthetic_mls",
           "kind": "verified_source",
           "observed_at": "2026-10-24T10:00:00+00:00",

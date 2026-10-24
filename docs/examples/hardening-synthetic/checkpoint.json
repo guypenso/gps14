@@ -1,0 +1,11 @@
+{
+  "outbox_id": "daily-c8d34a21a5ef1a8833db7be8c7a3789f2cf17a0d65ced96249ae5722feb0e669",
+  "payload_sha256": "fb314f913970021afca5583862d159fdd2ee7e46f0694c0d2878ed9dc7fa5c6b",
+  "cycle": "cycle:2026-10-01T00:00:00+00:00",
+  "used": 40,
+  "entities": 4,
+  "fake_property_requests": 4,
+  "simulated_prior_account_usage_added": 36,
+  "real_provider_requests": 0,
+  "real_emails": 0
+}

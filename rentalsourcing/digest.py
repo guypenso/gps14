@@ -234,7 +234,19 @@ class Digest:
         if first and now-dt.datetime.fromisoformat(first)>=dt.timedelta(hours=23):
             self.store.operation('reconcile:'+identity,'Resend result needs manual reconciliation; no automatic retry after idempotency safety window.')
             raise ReconciliationRequired('Check this message in Resend before retrying')
-        unified=self.store.execute('SELECT 1 FROM discovery_reports WHERE outbox_id=?',(identity,)).fetchone()
+        unified=self.store.execute('SELECT snapshot FROM discovery_reports WHERE outbox_id=?',(identity,)).fetchone()
+        rs_report=self.store.execute('SELECT snapshot FROM realscout_reports WHERE outbox_id=?',(identity,)).fetchone()
+        payload_hash=hashlib.sha256(body.encode()).hexdigest()
+        unified_hash=json.loads(unified[0]).get('outbox_payload_sha256') if unified else None
+        rs_hash=json.loads(rs_report[0]).get('outbox_payload_sha256') if rs_report else None
+        if unified and rs_report:
+            # Both historical snapshots may survive an unattempted mode cutover.
+            # Validate only the snapshot cryptographically bound to the frozen body.
+            active_unified=unified_hash==payload_hash;active_rs=rs_hash==payload_hash
+            if active_unified==active_rs:raise ReconciliationRequired('Ambiguous report snapshots require review before sending')
+            unified=unified if active_unified else None;rs_report=rs_report if active_rs else None
+        elif (unified_hash and unified_hash!=payload_hash) or (rs_hash and rs_hash!=payload_hash):
+            raise ReconciliationRequired('Report snapshot does not match frozen message')
         if unified:
             from .discovery.config import DiscoverySettings
             from .discovery.report import validate_frozen
@@ -243,7 +255,6 @@ class Digest:
             if not validate_frozen(self.store,self.boundary,identity,now,config):
                 if first:raise ReconciliationRequired('Frozen unified report evidence changed; reconcile previous delivery')
                 self.store.execute("UPDATE outbox SET state='cancelled',updated_at=? WHERE id=?",(now.isoformat(),identity));return 'cancelled_stale'
-        rs_report=self.store.execute('SELECT 1 FROM realscout_reports WHERE outbox_id=?',(identity,)).fetchone()
         if rs_report:
             from .realscout_config import RealScoutSettings
             from .realscout_delivery import validate_frozen

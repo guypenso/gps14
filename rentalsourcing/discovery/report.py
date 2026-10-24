@@ -7,6 +7,26 @@ from .evaluate import evaluate
 from .models import instant
 
 
+def scan_outcomes(data):
+    """Current-run facts only; a cache hit or inbox bridge is never a fresh scan."""
+    outcomes=[]
+    for row in data.get('source_results',[]):
+        errors=[row.get('error'),row.get('enrichment_error')]+row.get('enrichment',{}).get('errors',[])
+        if any(e in {'BudgetExceeded','approved_budget_unavailable'} for e in errors):state='internal_api_budget_exhausted'
+        elif row.get('error'):state='source_unavailable' if not row.get('records') else 'partial_scan_failed'
+        elif row.get('enrichment_error') or row.get('enrichment',{}).get('errors'):state='financial_verification_incomplete'
+        elif 'enrichment' in row or 'point_verification' in row:state='verification_only'
+        elif row.get('mode')=='cached_provider_page':state='cached_results_only'
+        elif row.get('fresh_scan') or row.get('mode')=='licensed_api' and row.get('complete'):
+            state='fresh_discovery' if row.get('all_pages_consumed',True) else 'fresh_partial_discovery'
+        elif row.get('mode')=='authorized_export':state='export_imported_snapshot_time_preserved'
+        elif row.get('mode')=='ingested_alert_bridge':state='new_alerts_ingested' if row.get('records') else 'no_new_alerts'
+        else:state='scan_skipped'
+        requests=row.get('requests',row.get('enrichment',row.get('point_verification',{})).get('requests',0))
+        outcomes.append(dict(source=row.get('source','unknown'),state=state,records=row.get('records'),requests=requests))
+    return outcomes
+
+
 def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing=None,limit=200):
     day=day or now.astimezone(ISRAEL).date().isoformat()
     if since is None:
@@ -30,7 +50,10 @@ def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing
         item.update(links=links,source_identifiers=ids,rental_comparables=comps[:25])
         item['recommendation']=item['status']=='Qualified' and (item['new'] or item['price_reduction'] or item['newly_qualified'])
         properties.append(item)
-    properties.sort(key=lambda p:(not p['recommendation'],not p['price_reduction'],not(p['status']=='Pending Verification' and p['seen_this_window']),not p['changed'],not p['new'],-(p['investment_score'] if p['investment_score'] is not None else -999),p['id']))
+    def priority(p):
+        group=0 if p['recommendation'] and p['new'] else 1 if p['recommendation'] else 2 if p['status']=='Pending Verification' and p['seen_this_window'] else 3 if p['changed'] else 4
+        return group,-(p['investment_score'] if p['investment_score'] is not None else -999),p['id']
+    properties.sort(key=priority)
     sources=[]
     for name,payload,last,attempt,error,cursor in store.execute('SELECT name,payload,last_success,last_attempt,last_error,cursor FROM discovery_sources').fetchall():
         p=json.loads(payload);sources.append(dict(synthetic=p['synthetic'],name=name,kind=p['kind'],enabled=p['enabled'],scope=p['scope'],last_success=last,last_attempt=attempt,error=error,
@@ -53,13 +76,14 @@ def render(data):
         data['coverage_statement'],
         'No new listings were discovered in this report window. Stored listings below are not new scans.' if data['no_new_listings'] else f"Newly discovered properties: {data['counts']['new']} (source observation dates remain authoritative).",
         f"Evaluated: {data['counts']['total']} | Qualified original screening + complete unlevered model: {data['counts']['qualified']} | Pending: {data['counts']['pending']} | Price reductions: {data['counts']['price_reductions']} | New recommendations: {data['counts']['recommendations']}",
-        data['score_policy'], 'Authorized MLS connection verified by a successful configured feed/export: '+str(data['authorized_mls_connected'])]
+        data['score_policy'], 'Configured MLS feed returned current data (not a licensing/coverage acceptance decision): '+str(data['authorized_mls_connected'])]
     for source in data['sources']:
         lines.append(f"Source {source['name']} ({source['kind']}): last successful data check/export={source['last_success'] or 'never'}; current error={source['error'] or 'none'}; mode={source['mode']}; stale={source['stale']}")
-    if data.get('source_results'):lines.append('Actual source work this run: '+json.dumps(data['source_results'],sort_keys=True))
+    outcomes=scan_outcomes(data)
+    lines.append('Discovery run: '+('no discovery attempt recorded' if not outcomes else '; '.join(r['source']+': '+r['state'] for r in outcomes)))
     if 'api' in data:lines.append('RentCast app budget: '+json.dumps(data['api'],sort_keys=True)+'. Other applications/account usage is not observed here.')
     for p in data['properties']:
-        f=p['fields'];m=p['financial']['metrics'];category='NEW' if p['new'] else 'PRICE REDUCTION' if p['price_reduction'] else 'NEWLY QUALIFIED' if p['newly_qualified'] else 'CHANGE' if p['changed'] else 'PREVIOUSLY SEEN'
+        f=p['fields'];m=p['financial']['metrics'];category='NEW + PRICE REDUCTION' if p['new'] and p['price_reduction'] else 'NEW' if p['new'] else 'PRICE REDUCTION' if p['price_reduction'] else 'NEWLY QUALIFIED' if p['newly_qualified'] else 'CHANGE' if p['changed'] else 'PREVIOUSLY SEEN'
         lines += [f"{category} | {p['address']} | ${f.get('price')} | {p['status']}",
           f"{f.get('bedrooms')} beds / {f.get('bathrooms')} baths / {f.get('squareFootage')} sqft / {f.get('propertyType') or 'type unverified'}",
           f"Discovered {p['discovered_at']}; latest evidence {p['latest_verification']}; sources {', '.join(p['sources'])}",
@@ -73,8 +97,19 @@ def render(data):
         if p['rental_comparables']:lines.append('Provider rental comparisons (not independent verification): '+json.dumps(p['rental_comparables']))
     if data['omitted']:lines.append(f"{data['omitted']} additional records remain in the existing database/private report.")
     text='\n'.join(lines)
+    cells=[]
+    def amount(value):return f'{value:,.2f}' if isinstance(value,(int,float)) and not isinstance(value,bool) else 'Unverified'
+    for p in data['properties']:
+        m=p['financial']['metrics'];f=p['fields']
+        link=p['links'][0]['url'] if p['links'] else None
+        address=html.escape(p['address'])
+        if link:address='<a href="'+html.escape(link,quote=True)+'">'+address+'</a>'
+        activity=', '.join(label for flag,label in ((p['new'],'New'),(p['price_reduction'],'Price reduction'),(p['newly_qualified'],'Newly qualified')) if flag) or ('Changed' if p['changed'] else 'Previously seen')
+        values=[address,html.escape(activity),amount(f.get('price')),html.escape(p['status']),amount(m.get('cash_flow_monthly')),amount(p['investment_score']),amount(p['evidence_confidence_pct']),html.escape(', '.join(p['reasons']) or 'Screening passed; review assumptions')]
+        cells.append('<tr>'+''.join('<td style="padding:8px;border:1px solid #ddd">'+v+'</td>' for v in values)+'</tr>')
+    table='<table style="border-collapse:collapse"><thead><tr>'+''.join('<th>'+v+'</th>' for v in ('Property','Activity','Asking price ($)','Qualification','Monthly cash flow ($)','Net-yield score (%)','Evidence indicator (%)','Reasons / missing evidence'))+'</tr></thead><tbody>'+''.join(cells)+'</tbody></table>'
     return dict(subject=f"RentalSourcing | {data['day']} | {data['counts']['recommendations']} new investment candidates",text=text,
-        html='<html><body><pre style="white-space:pre-wrap">'+html.escape(text)+'</pre></body></html>')
+        html='<html><body><h1>RentalSourcing</h1><p>'+html.escape(lines[1])+'</p><p>'+html.escape('Discovery: '+('; '.join(r['source']+': '+r['state'] for r in outcomes) or 'no discovery attempt recorded'))+'</p>'+table+'<h2>Evidence and system status</h2><pre style="white-space:pre-wrap">'+html.escape(text)+'</pre></body></html>')
 
 
 def prepare(store,boundary,settings,cfg,day,now,*,source_results=None):
@@ -86,8 +121,10 @@ def prepare(store,boundary,settings,cfg,day,now,*,source_results=None):
         if old and (old[2] or old[1] in {'sent','failed','uncertain','sending'}):return old[0]
         data=snapshot(store,boundary,now,day=day,assumptions=cfg.assumptions,financing=cfg.financing)
         data['source_results']=source_results or []
+        data['scan_outcomes']=scan_outcomes(data)
         data['api']=store.budget_health(settings,now,record_warning=False)
         body=render(data);body.update({'from':settings.email_from,'to':[settings.email_to]})
+        data['outbox_payload_sha256']=hashlib.sha256(json.dumps(body).encode()).hexdigest()
         if old:
             for event_id in json.loads(old[3]):store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(event_id,))
         store.execute("INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state='pending',payload=excluded.payload,event_ids='[]',updated_at=excluded.updated_at WHERE outbox.first_attempt_at IS NULL AND outbox.state IN ('pending','cancelled')",
