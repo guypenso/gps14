@@ -16,7 +16,7 @@ class Input:
     source:str
     approval_id:str=''
     def __post_init__(self):
-        if self.kind not in {'verified_source','third_party_estimate','assumption'} or not self.source:raise ValueError('Financial provenance required')
+        if self.kind not in {'verified_source','third_party_estimate','assumption','hypothetical'} or not self.source:raise ValueError('Financial provenance required')
         if self.kind=='assumption' and not self.approval_id:raise PermissionError('Investment assumptions need explicit approval')
         if isinstance(self.value,bool) or not isinstance(self.value,(int,float)) or not math.isfinite(self.value) or self.value<0:raise ValueError('Invalid underwriting value')
 

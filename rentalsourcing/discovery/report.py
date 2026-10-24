@@ -27,7 +27,7 @@ def scan_outcomes(data):
     return outcomes
 
 
-def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing=None,limit=200):
+def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing=None,limit=200,dual_mode=False,loan_scenarios=None,property_inputs=None,ranking_weights=None,ranking_approval_id='',primary_financing_scenario='base',property_loan_scenarios=None):
     day=day or now.astimezone(ISRAEL).date().isoformat()
     if since is None:
         prior=store.execute("SELECT d.cutoff,d.snapshot FROM discovery_reports d JOIN outbox o ON o.id=d.outbox_id WHERE o.state='sent' AND d.day<? ORDER BY d.day DESC LIMIT 1",(day,)).fetchone()
@@ -36,7 +36,9 @@ def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing
     else:previous={}
     properties=[]
     for eid,first,version in store.execute('SELECT id,first_seen,version FROM discovery_entities').fetchall():
-        item=evaluate(store,eid,boundary,now,assumptions=assumptions,financing=financing)
+        from .dual import merge_loan_profiles
+        selected_loans=merge_loan_profiles(loan_scenarios,(property_loan_scenarios or {}).get(eid,{})) if dual_mode else loan_scenarios
+        item=evaluate(store,eid,boundary,now,assumptions=assumptions,financing=financing,dual_mode=dual_mode,loan_scenarios=selected_loans,property_inputs=(property_inputs or {}).get(eid,{}))
         events=store.execute('SELECT kind,source,payload,processed_at FROM discovery_observations WHERE entity_id=? AND processed_at>? AND processed_at<=? ORDER BY processed_at DESC,id DESC',(eid,since,now.isoformat())).fetchall()
         item.update(new=instant(since)<instant(first)<=now,price_reduction=any(e[0]=='price_reduction' for e in events),
             changed=any(e[0] in {'facts_changed','price_increase','price_reduction'} for e in events),seen_this_window=bool(events),
@@ -48,7 +50,7 @@ def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing
             ids.append({'source':p['source']['name'],'record_id':p['record_id'],'mls_id':p.get('mls_id'),'mls_system':p.get('mls_system')})
             comps+=p.get('comparables',[])
         item.update(links=links,source_identifiers=ids,rental_comparables=comps[:25])
-        item['recommendation']=item['status']=='Qualified' and (item['new'] or item['price_reduction'] or item['newly_qualified'])
+        item['recommendation']=item['status']=='Qualified' and not (dual_mode and item['synthetic']) and (item['new'] or item['price_reduction'] or item['newly_qualified'])
         properties.append(item)
     def priority(p):
         group=0 if p['recommendation'] and p['new'] else 1 if p['recommendation'] else 2 if p['status']=='Pending Verification' and p['seen_this_window'] else 3 if p['changed'] else 4
@@ -63,14 +65,19 @@ def snapshot(store,boundary,now,*,day=None,since=None,assumptions=None,financing
         rejected=sum(p['status']=='Rejected' for p in properties),recommendations=sum(p['recommendation'] for p in properties),
         seen_this_window=sum(p['seen_this_window'] for p in properties))
     mls=[s for s in sources if s['kind']=='mls' and s['enabled'] and not s['synthetic']]
-    return dict(all_states={p['id']:p['status'] for p in properties},day=day,since=since,cutoff=now.isoformat(),properties=properties[:limit],omitted=max(0,len(properties)-limit),counts=counts,sources=sources,
+    from .ranking import rank
+    rankings=rank(properties,weights=ranking_weights) if dual_mode else None
+    return dict(underwriting_version='dual-v1' if dual_mode else 'legacy-v1',rankings=rankings,ranking_approval_id=ranking_approval_id,primary_financing_scenario=primary_financing_scenario,all_states={p['id']:p['status'] for p in properties},day=day,since=since,cutoff=now.isoformat(),properties=properties[:limit],omitted=max(0,len(properties)-limit),counts=counts,sources=sources,
         authorized_mls_connected=bool(mls and any(s['last_success'] and not s['error'] and not s['stale'] for s in mls)),
         coverage_pct=None,coverage_statement='No authorized real MLS benchmark has been measured. Incremental checks and alert events are not full-inventory scans.',
         no_new_listings=not counts['new'],synthetic=any(p['synthetic'] for p in properties),
-        score_policy='Investment score = modeled annual unlevered after-reserve yield percentage points. No minimum ROI threshold was recovered or invented.')
+        score_policy='Separate cash yield/monthly-flow and financed CoC/monthly-flow cohort-percentile scores; proposed equal weights, no combined score or profitability cutoff.' if dual_mode else 'Investment score = modeled annual unlevered after-reserve yield percentage points. No minimum ROI threshold was recovered or invented.')
 
 
 def render(data):
+    if data.get('underwriting_version')=='dual-v1':
+        from .dual_report import render as render_dual
+        return render_dual(data)
     lines=[f"RentalSourcing | {data['day']}",
         'SYNTHETIC OFFLINE DEMONSTRATION — NOT REAL INVESTMENTS' if data['synthetic'] else 'Private investment screening; modeled estimates/assumptions are explicitly labeled.',
         data['coverage_statement'],
@@ -119,7 +126,7 @@ def prepare(store,boundary,settings,cfg,day,now,*,source_results=None):
         if store.pg:store.execute('SELECT pg_advisory_xact_lock(73541209)')
         old=store.execute('SELECT id,state,first_attempt_at,event_ids FROM outbox WHERE job_id=?',(key,)).fetchone()
         if old and (old[2] or old[1] in {'sent','failed','uncertain','sending'}):return old[0]
-        data=snapshot(store,boundary,now,day=day,assumptions=cfg.assumptions,financing=cfg.financing)
+        data=snapshot(store,boundary,now,day=day,assumptions=cfg.assumptions,financing=cfg.financing,dual_mode=cfg.dual_enabled,loan_scenarios=cfg.financing_scenarios,property_inputs=cfg.property_inputs,ranking_weights=cfg.ranking_weights,ranking_approval_id=cfg.ranking_approval_id,primary_financing_scenario=cfg.primary_financing_scenario,property_loan_scenarios=cfg.property_financing_scenarios)
         data['source_results']=source_results or []
         data['scan_outcomes']=scan_outcomes(data)
         data['api']=store.budget_health(settings,now,record_warning=False)
@@ -139,8 +146,11 @@ def validate_frozen(store,boundary,identity,now,cfg):
     if not row:return True
     data=json.loads(row[0])
     if data['synthetic']:raise PermissionError('Synthetic unified reports cannot be sent')
+    dual=data.get('underwriting_version')=='dual-v1'
+    if dual and (not cfg.dual_enabled or data.get('rankings',{}).get('weights')!=cfg.ranking_weights or data.get('ranking_approval_id','')!=cfg.ranking_approval_id or data.get('primary_financing_scenario')!=cfg.primary_financing_scenario):return False
     for old in data['properties']:
-        current=evaluate(store,old['id'],boundary,now,assumptions=cfg.assumptions,financing=cfg.financing)
+        current=evaluate(store,old['id'],boundary,now,assumptions=cfg.assumptions,financing=cfg.financing,dual_mode=dual,loan_scenarios=cfg.loans_for(old['id']),property_inputs=cfg.property_inputs.get(old['id'],{}))
+        if dual and (current['acquisition']!=old.get('acquisition') or current['status']!=old['status']):return False
         if current['version']!=old['version']:return False
         if old['status']=='Qualified' and (current['status']!='Qualified' or current['tax']!=old['tax'] or current['financial']!=old['financial']):return False
     return True

@@ -53,7 +53,7 @@ def complete_inputs(**changes):
     return {**assumptions(),**{k:Input(v,'verified_source','fictional-source') for k,v in values.items()}}
 
 
-def cfg(mls,**changes):return DiscoverySettings(enabled=True,daily_enabled=True,approval_id='synthetic-only',sources=({'source':mls,'transport':'reso'},),**changes)
+def cfg(mls,**changes):return DiscoverySettings(dual_enabled=False,enabled=True,daily_enabled=True,approval_id='synthetic-only',sources=({'source':mls,'transport':'reso'},),**changes)
 
 
 def unified(settings,**changes):

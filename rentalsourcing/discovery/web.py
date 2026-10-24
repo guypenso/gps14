@@ -12,7 +12,7 @@ def register(app,store_factory,settings,clock,boundary):
         if not settings.enabled:return jsonify(error='integration_disabled'),404
         if boundary is None:return jsonify(error='boundary_unavailable'),503
         store=store_factory()
-        try:return jsonify(snapshot(store,boundary,clock(),assumptions=settings.assumptions,financing=settings.financing))
+        try:return jsonify(snapshot(store,boundary,clock(),assumptions=settings.assumptions,financing=settings.financing,dual_mode=settings.dual_enabled,loan_scenarios=settings.financing_scenarios,property_inputs=settings.property_inputs,ranking_weights=settings.ranking_weights,ranking_approval_id=settings.ranking_approval_id,primary_financing_scenario=settings.primary_financing_scenario,property_loan_scenarios=settings.property_financing_scenarios))
         finally:store.close()
     @app.get('/discovery/detail/<entity_id>')
     def unified_detail(entity_id):

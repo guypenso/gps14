@@ -1,5 +1,9 @@
 # Multi-source integration — 2026-10-24
 
+## Financial-policy update
+
+New unified reports use dual-v1 cash/financed comparisons and separate balanced rankings; see DUAL_UNDERWRITING.md. Earlier single-mode financial/score descriptions below are historical compatibility behavior, not the owner's new comparison policy. No proposed expense or loan terms are auto-approved.
+
 ## Release boundary
 
 This change extends the maintained application and depends on draft PR #9. It is not a replacement application. All new behavior defaults off. No production deployment, migration, schedule, mailbox, paid request or live delivery was performed. MLS connectors are fixture-tested; **no authorized live MLS connection or real coverage measurement exists yet**.

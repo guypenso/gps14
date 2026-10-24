@@ -52,7 +52,7 @@ def configuration():
     outage=replace(mls,name='fixture_mls_outage')
     rc=Source('fixture_rentcast','rentcast','FIXTURE-NOT-API-APPROVAL','fictional complement',True)
     assumptions={k:Input(v,'assumption','fictional scenario','FIXTURE-NOT-OWNER-APPROVAL') for k,v in dict(annual_insurance=1200,vacancy_rate=.05,maintenance_rate=.05,capex_rate=.05,management_rate=.08,closing_cost=4500,renovation_budget=10000).items()}
-    cfg=DiscoverySettings(enabled=True,daily_enabled=True,approval_id='FIXTURE-ONLY',sources=({'source':mls,'transport':'reso'},{'source':outage,'transport':'reso'},{'source':rc,'transport':'rentcast'}),assumptions=assumptions,financing='cash',rentcast_discovery=True,rentcast_enrichment=True,max_candidates=2,reverify_limit=0)
+    cfg=DiscoverySettings(dual_enabled=False,enabled=True,daily_enabled=True,approval_id='FIXTURE-ONLY',sources=({'source':mls,'transport':'reso'},{'source':outage,'transport':'reso'},{'source':rc,'transport':'rentcast'}),assumptions=assumptions,financing='cash',rentcast_discovery=True,rentcast_enrichment=True,max_candidates=2,reverify_limit=0)
     settings=Settings(enabled=True,discovery_source='unified',per_run=8,per_day=10,per_month=40,approval_mode='billing_cycle',approved_requests=40,approval_id='FIXTURE-ONLY',billing_anchor='2026-10-01T00:00:00+00:00',billing_baseline=0,rent_estimates_enabled=True,email_approval_id='FIXTURE-ONLY',email_from='fixture@example.invalid',email_to='owner@example.invalid')
     return mls,outage,rc,cfg,settings
 
