@@ -125,3 +125,11 @@ def test_historical_stored_listing_import_is_not_a_new_daily_discovery(store,bou
 def test_source_summary_keeps_enrichment_request_count():
     result=scan_outcomes({'source_results':[{'source':'fixture','enrichment':{'requests':3,'errors':[]}}]})
     assert result[0]['requests']==3 and result[0]['state']=='verification_only'
+
+
+def test_scheduled_email_help_discloses_approved_unified_discovery(capsys):
+    from rentalsourcing.cloud import main
+    with pytest.raises(SystemExit) as result:main(['--help'])
+    assert result.value.code==0
+    help_text=' '.join(capsys.readouterr().out.split())
+    assert 'unified mode may run approved discovery/enrichment' in help_text

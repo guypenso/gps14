@@ -31,7 +31,7 @@ def main(argv=None):
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--check',action='store_true',help='Check config and boundary offline; no provider calls')
     group.add_argument('--scheduled',action='store_true',help='Explicit collector run in the Israel 08:00 window; requires API approval')
-    group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
+    group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel report; legacy stored-only, unified mode may run approved discovery/enrichment')
     group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
     group.add_argument('--prepare-test-email',action='store_true',help='Prepare a delivery test without sending or consuming property events')
     group.add_argument('--inspect-email',metavar='OUTBOX_ID',help='Inspect sanitized stored request and rejection; no send')
