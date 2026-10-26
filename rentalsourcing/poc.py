@@ -47,7 +47,7 @@ def report(store,boundary,job_id,stats,clock=None):
         if not p:continue
         row=p['payload'];basic,reasons=verification(row,boundary)
         detail=dict(id=identity,address=row.get('formattedAddress'),price=row.get('price'),reasons=reasons,listing_url=safe_listing_link(row))
-        for name,codes in {'status':{'status'},'price':{'price'},'bedrooms':{'bedrooms'},'bathrooms':{'bathrooms'},'square_feet':{'squareFootage'},'zip':{'zipCode','excluded_zip'},'municipal_boundary':{'coordinates','outside_city_or_boundary','state'}}.items():
+        for name,codes in {'residential_type':{'non_residential'},'status':{'status'},'price':{'price'},'bedrooms':{'bedrooms'},'bathrooms':{'bathrooms'},'square_feet':{'squareFootage'},'zip':{'zipCode','excluded_zip'},'municipal_boundary':{'coordinates','outside_city_or_boundary','state'}}.items():
             filter_counts[name]=filter_counts.get(name,0)+int(not set(reasons)&codes)
         if basic=='Rejected':rejected+=1;rejections.append(detail);continue
         if basic!='Candidate':missing+=1;pending_initial.append(detail);continue

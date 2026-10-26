@@ -132,3 +132,14 @@ def test_bounded_proof_command_end_to_end_no_send(store,settings,monkeypatch,tmp
     assert data['attempts_this_run']==2 and data['provider_used_upper_bound']==11
     assert 'Original listing' in (tmp_path/'report.html').read_text()
     assert not p.messages and data['no_real_emails']
+
+
+
+def test_explicit_non_residential_record_cannot_pass_using_bedroom_fields(store,boundary,settings,clock):
+    from rentalsourcing.core import verification
+    row=listing(propertyType='Land',bedrooms=3,bathrooms=3,squareFootage=1277)
+    assert verification(row,boundary)==('Rejected',['non_residential'])
+    p=Provider([row]);s=approved(settings)
+    daily_discovery(store,boundary,s,clock().date().isoformat(),clock=clock,opener=p)
+    assert store.get_property(row['id'])['state']=='Rejected' and p.tax_calls==0
+    assert 'Pending Verification —' not in p.messages[0]['text']
