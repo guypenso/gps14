@@ -94,6 +94,8 @@ def verification(row, boundary):
     """Distinguish known failures from evidence that still requires verification."""
     if demo_marked(row): return 'Rejected', ['demo_data']
     missing=[]; failed=[]
+    if str(row.get('propertyType') or '').strip().lower() in {'land','commercial','industrial'}:
+        failed.append('non_residential')
     for field,expected in [('status','Active'),('state','PA')]:
         value=row.get(field)
         if value is None or value=='': missing.append(field)

@@ -26,6 +26,35 @@ def scheduled_job(store,day):
     return old[0] if old else 'daily:'+day
 
 
+def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
+    """Existing cron + collector + outbox. Caller holds the existing scan lock."""
+    clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
+    digest=Digest(store,boundary,settings,clock,opener)
+    old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
+    if old:
+        result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
+        return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
+    stats={};failure=None;client=None
+    if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
+    elif settings.approval_mode!='billing_cycle':stats=dict(discovery_state='skipped_billing_configuration',partial=True)
+    else:
+        # Reserve before EVERY wire attempt using existing atomic DB counters.
+        effective=replace(settings,per_month=min(50,settings.per_month),retries=0,max_pages=1)
+        allowance=store.scheduled_allowance(effective,clock())
+        if allowance<=0:stats=dict(discovery_state='skipped_budget_exhausted',partial=True)
+        else:
+            effective=replace(effective,per_run=min(4,allowance))
+            client=Client(store,effective,clock,opener)
+            try:
+                stats=Engine(store,boundary,client,effective,clock).run('daily:'+day,day,first_page_only=True)
+                if stats.get('sample_truncated'):stats['partial']=True
+            except Exception as exc:
+                failure=type(exc).__name__;stats=dict(discovery_state='failed',partial=True,error_type=failure)
+    message=digest.prepare('daily:'+day,day,stats)
+    result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
+    return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='RentalSourcing daily production collector')
     group=parser.add_mutually_exclusive_group()
@@ -59,7 +88,7 @@ def main(argv=None):
     if args.scheduled or args.scheduled_email:
         day=scheduled_day()
         if day is None:event('outside_israel_schedule');return
-    administrative=args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
+    administrative=args.scheduled or args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
     validate_postgres_url(url)
@@ -97,6 +126,8 @@ def main(argv=None):
             return
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
+        if args.scheduled:
+            event('daily_discovery_result',**daily_discovery(store,boundary,settings,day));return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
         store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203','15204'],tax_add=100,tax_strict_max=2000))

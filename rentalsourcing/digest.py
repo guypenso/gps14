@@ -39,9 +39,11 @@ def listing_link(row):
 
 def render(day,items,stats,health,operations):
     failed=bool(stats.get('error_type'))
-    incomplete=failed or stats.get('partial')
+    incomplete=failed or stats.get('partial') or stats.get('sample_truncated')
     status='נכשלה / נדרשת בדיקה' if failed else ('חלקית / נדרשת השלמה' if incomplete else 'הושלמה')
     lines=[f'RentalSourcing — {day}',('מבוסס על נתונים שמורים בלבד; לא בוצעה סריקה חדשה.' if stats.get('saved_data_only') else f'מצב הסריקה: {status}')]
+    scan_labels={'previous_scan':'Previous persisted scan reused; no fresh discovery request in this run.','verification_only':'Existing listing evidence rechecked; no fresh discovery request in this run.','fresh':'Fresh listing discovery completed; filtering and tax verification follow.','cached':'Cached listing response reused; no fresh discovery request completed.','skipped_disabled':'Discovery skipped: collection disabled.','skipped_billing_configuration':'Discovery skipped: provider billing cycle/baseline not configured.','skipped_budget_exhausted':'Discovery skipped: internal API allowance exhausted.','failed':'Discovery failed; no successful fresh scan is claimed.'}
+    if stats.get('discovery_state'):lines.append(scan_labels.get(stats['discovery_state'],stats['discovery_state']))
     items=sorted(items,key=lambda item:item['kind']!='price_reduction')
     cards=[]
     for item in items:
@@ -59,7 +61,14 @@ def render(day,items,stats,health,operations):
         link=listing_link(p)
         text+='\nמודעה: '+(link or 'קישור מודעה לא הוחזר על ידי הספק')
         lines.append(text)
-        cards.append('<section style="border:1px solid #ddd;padding:16px;margin:12px 0"><pre style="white-space:pre-wrap;font:inherit">'+html.escape(text)+'</pre></section>')
+        cards.append('<section style="border:1px solid #ddd;padding:16px;margin:12px 0"><pre style="white-space:pre-wrap;font:inherit">'+html.escape(text)+'</pre>'+('<a href="'+html.escape(link,quote=True)+'">Original listing</a>' if link else '')+'</section>')
+    pending=stats.get('pending_properties',[])
+    pending_lines=['Pending Verification — NOT verified matches']
+    for entry in pending:
+        p=entry['listing'];tax=entry.get('tax')
+        tax_text=(str(tax['year'])+': '+money(tax['annual'])) if tax else 'not verified'
+        pending_lines.append(f"{p.get('formattedAddress','Address missing')} | ${p.get('price','Missing')} | {p.get('bedrooms','Missing')} beds / {p.get('bathrooms','Missing')} baths / {p.get('squareFootage','Missing')} sqft | ZIP {p.get('zipCode','Missing')} | Status {p.get('status','Missing')}\nTax/year: {tax_text} | Missing: {', '.join(entry['reasons'])}\nObserved: {entry['observed_at']} | Source: RentCast\nListing: {listing_link(p) or 'Not supplied by provider'}")
+    if pending:lines+=pending_lines
     if not items:
         lines.append('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')
     if failed:lines.append('סוג התקלה: '+str(stats['error_type']))
@@ -67,7 +76,11 @@ def render(day,items,stats,health,operations):
     lines.append(footer)
     for warning in operations:lines.append('הודעת מערכת: '+warning)
     markup='<html lang="he" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:Arial,sans-serif;max-width:680px;margin:auto;padding:16px"><h1>RentalSourcing</h1><p>'+html.escape(lines[1])+'</p>'+''.join(cards)
-    if not items:markup+='<p>'+html.escape(lines[2])+'</p>'
+    if not items:markup+='<p>'+html.escape('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')+'</p>'
+    if stats.get('discovery_state'):markup+='<p>'+html.escape(scan_labels.get(stats['discovery_state'],stats['discovery_state']))+'</p>'
+    if pending:
+        markup+='<h2>Pending Verification</h2><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape('\n\n'.join(pending_lines))+'</pre>'
+        markup+=''.join('<p><a href="'+html.escape(listing_link(entry['listing']),quote=True)+'">'+html.escape(entry['listing'].get('formattedAddress') or 'Original listing')+'</a></p>' for entry in pending if listing_link(entry['listing']))
     if failed:markup+='<p>'+html.escape('סוג התקלה: '+str(stats['error_type']))+'</p>'
     markup+='<p>'+html.escape(footer)+'</p>'+''.join('<p>'+html.escape(w)+'</p>' for w in operations)+'</body></html>'
     return '\n\n'.join(lines),markup
@@ -79,8 +92,8 @@ class Digest:
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
 
-    def prepare(self,job_id,day,stats):
-        if not self.settings.email_enabled or not self.settings.email_approval_id or not os.getenv('RESEND_API_KEY'):
+    def prepare(self,job_id,day,stats,*,preview=False):
+        if not preview and (not self.settings.email_enabled or not self.settings.email_approval_id or not os.getenv('RESEND_API_KEY')):
             return None
         digest_day='daily:'+day
         old=self.store.execute('SELECT id FROM outbox WHERE job_id=?',(digest_day,)).fetchone()
@@ -100,13 +113,25 @@ class Digest:
             if not cached or cached[1]!=LIVE or cached[0].get('id')!=property_id or demo_marked(cached[0]):continue
             state,tax,_=tax_verification(cached[0],now.date())
             if state!='Qualified' or tax!=data.get('tax'):continue
+            if stats.get('discovery_state') not in (None,'fresh'):continue
             items.append(dict(data,kind=kind,previous_price=previous));ids.append(identity)
+        stats=dict(stats);pending=[]
+        for payload,reasons,observed in self.store.execute("SELECT payload,reasons,observed_at FROM properties WHERE state='Pending Verification' AND source=? ORDER BY observed_at DESC,id LIMIT 50",(LIVE,)).fetchall():
+            listing=json.loads(payload)
+            if recent_timestamp(observed,self.clock()) and verification(listing,self.boundary)[0]!='Rejected':
+                cached=self.store.get_tax(listing.get('id'),self.clock().isoformat());tax=None
+                if cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==listing.get('id') and not demo_marked(cached[0]):
+                    tax_state,tax,_=tax_verification(cached[0],self.clock().date())
+                    if tax_state=='Rejected':continue
+                pending.append(dict(listing=listing,reasons=json.loads(reasons),observed_at=observed,tax=tax))
+        stats['pending_properties']=pending
         health=self.store.budget_health(self.settings,self.clock())
-        text,markup=render(day,items,stats,health,self.store.operations())
+        text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
         status='תקלה בסריקה' if stats.get('error_type') else ('סריקה חלקית' if stats.get('partial') else f'{len(items)} נכסים מאומתים')
         body=dict(from_=self.settings.email_from,to=[self.settings.email_to],
                   subject=f'RentalSourcing | {day} | {status}',text=text,html=markup)
         body['from']=body.pop('from_')
+        if preview:body['preview_only']=True
         outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
         with self.store.transaction():
             self.store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING',
@@ -222,6 +247,7 @@ class Digest:
         row=self.store.execute('SELECT state,payload,event_ids,first_attempt_at FROM outbox WHERE id=?',(identity,)).fetchone()
         if not row:raise ValueError('Unknown outbox message')
         state,body,event_ids,first=row
+        if json.loads(body).get('preview_only'):raise PermissionError('Offline preview cannot be sent')
         if state=='sent':return 'already_sent'
         if state=='cancelled':return 'cancelled_stale'
         if state=='failed':raise ValueError('Correct rejected email configuration; events are eligible for the next daily digest')
