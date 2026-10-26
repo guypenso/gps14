@@ -74,7 +74,8 @@ class Engine:
 
     def run(self,job_id,day,*,candidate_limit=None,first_page_only=False):
         store=self.store;job=store.job(job_id,day);stats=job['stats']
-        if job['state']=='complete':return dict(stats,already_complete=True)
+        if job['state']=='complete':return dict(stats,already_complete=True,discovery_state='previous_scan')
+        stats['discovery_state']='verification_only'
         if candidate_limit is None:
             # Preserve unfinished tax work across daily jobs. Only current revisions
             # can produce a digest; stale observations remain pending below.
@@ -95,7 +96,10 @@ class Engine:
         try:
             pages=0
             while not collection_done and pages<self.settings.max_pages:
+                before_requests=getattr(self.client,'count',0)
                 rows,total=self.client.get('/listings/sale',dict(PARAMS,limit=self.settings.page_size,offset=offset))
+                stats['discovery_state']='fresh' if getattr(self.client,'count',0)>before_requests else 'cached'
+                stats['listing_observed_at']=getattr(self.client,'last_fetched_at',None)
                 if not isinstance(rows,list):raise ValueError('Listings response must be a list')
                 total_count=int(total) if total is not None else None
                 if len(rows)>self.settings.page_size:raise ValueError('Oversized listings response')
