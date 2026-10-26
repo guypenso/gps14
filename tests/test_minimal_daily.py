@@ -33,7 +33,7 @@ def test_daily_scans_before_digest_and_duplicate_does_not_rescan_or_send(store,b
 def test_skipped_daily_still_sends_truthful_report_without_provider_request(store,boundary,settings,clock,case,expected):
     s=approved(settings);p=Provider()
     if case=='disabled':s=replace(s,enabled=False)
-    if case=='billing':s=replace(s,approval_mode='one_time')
+    if case=='billing':s=replace(s,approval_mode='rolling_32_days')
     if case=='budget':store.execute('INSERT INTO usage VALUES (?,?)',(cycle_key(s,clock()),40))
     result=daily_discovery(store,boundary,s,clock().date().isoformat(),clock=clock,opener=p)
     assert result['scan']==expected and result['requests']==0 and len(p.messages)==1

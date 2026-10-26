@@ -36,7 +36,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
     stats={};failure=None;client=None
     if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
-    elif settings.approval_mode!='billing_cycle':stats=dict(discovery_state='skipped_billing_configuration',partial=True)
+    elif settings.approval_mode not in {'billing_cycle','one_time'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     else:
         # Reserve before EVERY wire attempt using existing atomic DB counters.
         effective=replace(settings,per_month=min(50,settings.per_month),retries=0,max_pages=1)
