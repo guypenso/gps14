@@ -11,11 +11,14 @@ def test_transfer_preserves_allowance_outbox_and_pending_without_providers(store
         store.execute('INSERT INTO usage VALUES (?,?)',('approval:exhausted',4))
         store.save_property('pending',listing('pending'),'Pending Verification',['missing_tax_history'],'rentcast-live',1,store.now())
         store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?)',('message','daily:day','uncertain','{}','[]',None,store.now(),store.now()))
+        store.execute('INSERT INTO command_center_reports (outbox_id,payload,attempts) VALUES (?,?,?)',('message','{"schema_version":1}',2))
         counts=transfer(store,target)
         assert counts['usage']==1 and counts['properties']==1 and counts['outbox']==1
         assert target.count_usage('approval:exhausted')==4
         assert target.get_property('pending')['state']=='Pending Verification'
         assert target.execute('SELECT state FROM outbox').fetchone()[0]=='uncertain'
+        assert counts['command_center_reports']==1
+        assert target.execute('SELECT payload,attempts FROM command_center_reports').fetchone()==('{"schema_version":1}',2)
         with pytest.raises(ValueError,match='empty'):transfer(store,target)
         assert target.count_usage('approval:exhausted')==4
     finally:target.close()

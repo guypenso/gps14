@@ -138,6 +138,9 @@ class Digest:
             self.store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING',
                 (outbox_id,digest_day,'pending',json.dumps(body),json.dumps(ids),None,None,self.clock().isoformat()))
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
+            if not preview:
+                from .command_center import snapshot
+                snapshot(self.store,outbox_id,day,items,stats,self.clock())
         return outbox_id
 
     def prepare_stored(self,day):
@@ -177,6 +180,8 @@ class Digest:
             self.store.execute("INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state='pending',payload=excluded.payload,event_ids=excluded.event_ids,updated_at=excluded.updated_at WHERE outbox.first_attempt_at IS NULL AND outbox.state IN ('pending','cancelled')",
                 (outbox_id,digest_day,'pending',json.dumps(body),json.dumps(ids),None,None,now.isoformat()))
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
+            from .command_center import snapshot
+            snapshot(self.store,outbox_id,day,items,{'saved_data_only':True},now)
         return outbox_id
 
     def prepare_test(self):
@@ -238,9 +243,16 @@ class Digest:
 
     def send(self,identity):
         if self.store.pg:self.store.execute('SELECT pg_advisory_lock(73541211)')
-        try:return self._send(identity)
+        try:result=self._send(identity)
         finally:
             if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(73541211)')
+        if result in {'sent','already_sent'}:
+            try:
+                from .command_center import flush
+                flush(self.store,self.clock())
+            except Exception as exc:
+                event('command_center_sync_deferred',error_type=type(exc).__name__)
+        return result
 
     def _send(self,identity):
         if not self.settings.email_enabled or not self.settings.email_approval_id or self.settings.environment!='production':raise PermissionError('Production email disabled or not approved')

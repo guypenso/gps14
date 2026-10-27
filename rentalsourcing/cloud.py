@@ -78,6 +78,8 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO,format='%(message)s')
     settings=Settings.from_env()
     if args.check:
+        from .command_center import configuration
+        configuration()
         exists=Path(settings.boundary_file).is_file()
         if exists:load_boundary(settings.boundary_file)
         event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),

@@ -10,7 +10,7 @@ from .storage import Store
 
 TABLES=('usage','observations','notifications','scheduled_days','runs','settings',
         'properties','price_history','tax_history','response_cache','scan_jobs',
-        'scan_tasks','deal_events','outbox','operations')
+        'scan_tasks','deal_events','outbox','operations','command_center_reports')
 
 
 def transfer(source,target):
@@ -26,6 +26,9 @@ def transfer(source,target):
                 raise ValueError('Target must be empty; existing application state was preserved')
             counts={}
             for table in TABLES:
+                if table=='command_center_reports' and not source.execute('SELECT version FROM schema_versions WHERE version=3').fetchone():
+                    counts[table]=0
+                    continue
                 cursor=source.execute('SELECT * FROM '+table)
                 columns=[c[0] for c in cursor.description]
                 expected=[c[0] for c in target.execute('SELECT * FROM '+table+' LIMIT 0').description]
