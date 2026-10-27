@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from .provenance import demo_marked
 
-EXCLUDED_ZIPS=frozenset({'15210','15203','15204'})
+EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
 
 def number(value):

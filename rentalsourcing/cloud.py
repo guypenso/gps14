@@ -15,6 +15,7 @@ from .engine import Engine
 from .request import diagnose
 from .schedule import scheduled_day,ISRAEL
 from .storage import Store
+from .core import EXCLUDED_ZIPS
 from .database import validate_postgres_url
 from .telemetry import event
 
@@ -130,7 +131,7 @@ def main(argv=None):
             event('daily_discovery_result',**daily_discovery(store,boundary,settings,day));return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=['15210','15203','15204'],tax_add=100,tax_strict_max=2000))
+        store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()

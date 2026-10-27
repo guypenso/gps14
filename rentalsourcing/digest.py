@@ -3,13 +3,14 @@ import datetime as dt
 import hashlib
 import html
 import json
+import re
 import os
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from .collector import LIVE
-from .core import demo_marked,verification,tax_verification,historical_reduction,number
+from .core import demo_marked,verification,tax_verification,historical_reduction,number,EXCLUDED_ZIPS
 from .request import NoRedirect
 from .telemetry import event
 
@@ -44,7 +45,7 @@ def render(day,items,stats,health,operations):
     lines=[f'RentalSourcing — {day}',('מבוסס על נתונים שמורים בלבד; לא בוצעה סריקה חדשה.' if stats.get('saved_data_only') else f'מצב הסריקה: {status}')]
     scan_labels={'previous_scan':'Previous persisted scan reused; no fresh discovery request in this run.','verification_only':'Existing listing evidence rechecked; no fresh discovery request in this run.','fresh':'Fresh listing discovery completed; filtering and tax verification follow.','cached':'Cached listing response reused; no fresh discovery request completed.','skipped_disabled':'Discovery skipped: collection disabled.','skipped_billing_configuration':'Discovery skipped: provider billing cycle/baseline not configured.','skipped_budget_exhausted':'Discovery skipped: internal API allowance exhausted.','failed':'Discovery failed; no successful fresh scan is claimed.'}
     if stats.get('discovery_state'):lines.append(scan_labels.get(stats['discovery_state'],stats['discovery_state']))
-    items=sorted(items,key=lambda item:item['kind']!='price_reduction')
+    items=sorted((item for item in items if str(item['listing'].get('zipCode','')).split('-')[0] not in EXCLUDED_ZIPS),key=lambda item:item['kind']!='price_reduction')
     cards=[]
     for item in items:
         p=item['listing'];t=item['tax'];previous=item.get('previous_price')
@@ -62,7 +63,7 @@ def render(day,items,stats,health,operations):
         text+='\nמודעה: '+(link or 'קישור מודעה לא הוחזר על ידי הספק')
         lines.append(text)
         cards.append('<section style="border:1px solid #ddd;padding:16px;margin:12px 0"><pre style="white-space:pre-wrap;font:inherit">'+html.escape(text)+'</pre>'+('<a href="'+html.escape(link,quote=True)+'">Original listing</a>' if link else '')+'</section>')
-    pending=stats.get('pending_properties',[])
+    pending=[item for item in stats.get('pending_properties',[]) if str(item['listing'].get('zipCode','')).split('-')[0] not in EXCLUDED_ZIPS]
     pending_lines=['Pending Verification — NOT verified matches']
     for entry in pending:
         p=entry['listing'];tax=entry.get('tax')
@@ -258,6 +259,17 @@ class Digest:
         envelope=json.loads(body)
         if envelope.get('from')!=self.settings.email_from or envelope.get('to')!=[self.settings.email_to]:
             raise PermissionError('Frozen email sender/recipient differ from approved configuration; prepare again before sending')
+        # Older frozen bodies may contain pending cards with no deal_event entry.
+        # Never rewrite an attempted message or send a now-excluded frozen card.
+        excluded_pattern=r'(?i)\b(?:ZIP(?:\s*code)?\s*:?\s*|PA[\s,]*)(?:'+'|'.join(sorted(EXCLUDED_ZIPS))+r')(?!\d)'
+        if any(re.search(excluded_pattern,envelope.get(part,'') or '') for part in ('text','html')):
+            if first:raise ReconciliationRequired('Frozen email includes an excluded ZIP; reconcile previous delivery before proceeding')
+            with self.store.transaction():
+                self.store.execute("UPDATE outbox SET state='cancelled',updated_at=? WHERE id=?",(now.isoformat(),identity))
+                for event_id in json.loads(event_ids):
+                    self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(event_id,))
+            self.store.operation('stale-email:'+identity,'Prepared digest contains an excluded ZIP; cancelled before sending.')
+            return 'cancelled_stale'
         # Criteria apply on every attempt, including uncertain-delivery retries.
         for event_id in json.loads(event_ids):
             ev=self.store.execute('SELECT property_id,revision,price FROM deal_events WHERE id=?',(event_id,)).fetchone()
