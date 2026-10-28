@@ -71,7 +71,7 @@ def test_proxy_error_retains_reason_without_secret(monkeypatch):
 
 def test_atomic_migrations_are_repeatable(store):
     store.migrate();store.migrate()
-    assert store.execute('SELECT COUNT(*) FROM schema_versions').fetchone()[0]==1
+    assert [r[0] for r in store.execute('SELECT version FROM schema_versions ORDER BY version').fetchall()]==[2,3]
 
 
 def test_offline_cost_arithmetic():

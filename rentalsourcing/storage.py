@@ -86,6 +86,7 @@ class Store:
           'CREATE TABLE IF NOT EXISTS deal_events (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, kind TEXT NOT NULL, price DOUBLE PRECISION NOT NULL, previous_price DOUBLE PRECISION, revision INTEGER NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL)',
           'CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, payload TEXT NOT NULL, event_ids TEXT NOT NULL, provider_id TEXT, first_attempt_at TEXT, updated_at TEXT NOT NULL)',
           'CREATE TABLE IF NOT EXISTS email_errors (outbox_id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
+          'CREATE TABLE IF NOT EXISTS command_center_reports (outbox_id TEXT PRIMARY KEY REFERENCES outbox(id), payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_attempt_at TEXT, synced_at TEXT, error_type TEXT)',
           'CREATE TABLE IF NOT EXISTS api_attempts (request_key TEXT PRIMARY KEY, state TEXT NOT NULL, attempted_at TEXT NOT NULL, retry_after TEXT NOT NULL)',
           'CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, message TEXT NOT NULL, created_at TEXT NOT NULL)',
           'CREATE INDEX IF NOT EXISTS scan_tasks_pending ON scan_tasks(job_id,done,priority)',
@@ -93,6 +94,7 @@ class Store:
         with self.transaction():
             for statement in statements:self.execute(statement)
             self.execute('INSERT INTO schema_versions VALUES (2,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
+            self.execute('INSERT INTO schema_versions VALUES (3,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
 
     @staticmethod
     def now():return dt.datetime.now(dt.timezone.utc).isoformat()
