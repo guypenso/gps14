@@ -4,7 +4,7 @@ No scanners, email sender, migrations, source updates or schedule/config mutatio
 Default is dry-run. --execute requires the exact verified report hashes below.
 No production records or credentials are embedded in this source file.
 """
-import argparse,datetime,getpass,gzip,hashlib,hmac,html,json,os,pathlib,re,sys,time,urllib.request,urllib.error,warnings,zlib
+import argparse,math,datetime,getpass,gzip,hashlib,hmac,html,json,os,pathlib,re,sys,time,urllib.request,urllib.error,warnings,zlib
 sys.path.insert(0,str(pathlib.Path.cwd()))
 import rentalsourcing.digest as digest
 from rentalsourcing.request import NoRedirect
@@ -77,10 +77,23 @@ def load_evidence():
    return dict(reports=reports,selected_events=events)
   finally:db.execute('ROLLBACK')
 
+def canonical_relational_number(value):
+ """Match pg_dump JSON's representation of relational float8 values only.
+
+ Numbers inside the original frozen JSON must retain their original spelling.
+ This adapter is applied solely to previous_price, read from a float8 column.
+ No rounding, tolerance, numeric-string conversion or expected-hash replacement.
+ """
+ if isinstance(value,float):
+  if not math.isfinite(value):raise BackfillValidationError('Non-finite report number')
+  return int(value) if value.is_integer() else value
+ return value
+
 def frozen_bodies(evidence):
  reports,summary=reconstruct(evidence)
+ reports=[dict(report,opportunities=[dict(item,previous_price=canonical_relational_number(item.get('previous_price'))) for item in report['opportunities']]) for report in reports]
  if [r['report_date'] for r in reports]!=list(DAYS):raise BackfillValidationError('Wrong historical dates')
- bodies=[json.dumps(r,ensure_ascii=False,sort_keys=True,separators=(',',':')) for r in reports]
+ bodies=[json.dumps(r,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False) for r in reports]
  for report,body in zip(reports,bodies):
   if hashlib.sha256(body.encode()).hexdigest()!=EXPECTED_REPORT_SHA256[report['report_date']]:raise BackfillValidationError('Frozen report differs from verified export: '+report['report_date'])
  return reports,bodies,summary

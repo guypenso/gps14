@@ -37,6 +37,20 @@ class BackfillRunnerTests(unittest.TestCase):
   with patch.object(m,'reconstruct',return_value=(reports,[])),patch.object(m,'EXPECTED_REPORT_SHA256',expected):
    m.frozen_bodies({});reports[0]['opportunities'].append({'changed':True})
    with self.assertRaises(m.BackfillValidationError):m.frozen_bodies({})
+ def test_float8_integral_values_match_export_without_replacing_hashes(self):
+  expected_reports=[dict(report_date=d,opportunities=[dict(previous_price=120000,annual_tax=1200.0)]) for d in m.DAYS]
+  expected={r['report_date']:hashlib.sha256(json.dumps(r,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest() for r in expected_reports}
+  driver_reports=copy.deepcopy(expected_reports)
+  for r in driver_reports:r['opportunities'][0]['previous_price']=120000.0
+  with patch.object(m,'reconstruct',return_value=(driver_reports,[])),patch.object(m,'EXPECTED_REPORT_SHA256',expected):
+   restored,bodies,_=m.frozen_bodies({});self.assertEqual(restored,expected_reports)
+   self.assertTrue(all('120000.0' not in body for body in bodies))
+   driver_reports[0]['opportunities'][0]['previous_price']=120000.01
+   with self.assertRaises(m.BackfillValidationError):m.frozen_bodies({})
+ def test_canonicalization_does_not_round_or_convert_strings(self):
+  self.assertEqual([m.canonical_relational_number(v) for v in [1.0,1.25,'1.0',None,True]],[1,1.25,'1.0',None,True])
+  for value in [float('nan'),float('inf'),float('-inf')]:
+   with self.assertRaises(m.BackfillValidationError):m.canonical_relational_number(value)
  def run_execution(self,replies):
   reports=[dict(report_date=d,report_id='fixture-'+d,opportunities=[]) for d in m.DAYS];bodies=['fixture27','fixture28'];token='t'*64
   output=io.StringIO()
