@@ -86,7 +86,7 @@ def flush(store, now=None, opener=None):
             'X-RentalSourcing-Signature': 'v1=' + signature,
             'OAI-Sites-Authorization': 'Bearer ' + service_token})
         try:
-            with opener.open(req, timeout=5) as response:
+            with opener.open(req, timeout=20) as response:
                 result = json.loads(response.read(4096))
                 if response.status != 200 or result.get('report_id') != identity or result.get('accepted') is not True:
                     raise ValueError('Invalid synchronization receipt')
