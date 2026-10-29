@@ -27,7 +27,7 @@ class Receiver:
     def __init__(self,fail=False):self.requests=[];self.fail=fail
     def open(self,request,timeout):
         self.requests.append(request)
-        assert timeout==5
+        assert timeout==20
         if self.fail:raise TimeoutError('secret or message content must not be logged')
         return Response({'accepted':True,'report_id':json.loads(request.data)['report_id']})
 
