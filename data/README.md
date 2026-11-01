@@ -49,3 +49,19 @@ no new real-data coverage claim is made.
 
 Refresh deliberately with `python scripts/fetch_regions.py`, review source/checksum
 and geometry changes, and commit only the verified public assets.
+
+## Sheraden exclusion (2026-11-01)
+
+`sheraden.geojson` is the complete official City of Pittsburgh neighborhood polygon,
+retrieved through the same verified downloader (`hood='Sheraden'`, WGS84). Its
+`.source.json` records exact source/query, timestamp and SHA256. The production
+loader requires and verifies this file alongside the previous geographic assets.
+
+Every coordinate inside Sheraden, including an exact polygon edge, is rejected
+regardless of reported ZIP/neighborhood name. ZIP 15205 remains eligible elsewhere
+under the existing Pittsburgh/Bellevue and investment rules. Missing geographic
+proof never produces a qualifying/reportable opportunity. The discovery circle,
+request count, query filters and pagination limits are unchanged.
+
+To refresh only this polygon: `python scripts/fetch_regions.py data sheraden`.
+Review and commit verified public geometry; production never fetches GIS data.

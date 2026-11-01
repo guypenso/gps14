@@ -1,0 +1,9 @@
+{
+  "source": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0",
+  "endpoint": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query",
+  "field": "hood",
+  "name": "Sheraden",
+  "download_url": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query?where=hood%3D%27Sheraden%27&outFields=hood&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-01T13:24:36.789491+00:00",
+  "sha256": "45ba1a1143228e8ebcc3aa4e36139fb8f0a91b2a3885500a4b794fa673278fe3"
+}

@@ -2,7 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
-from .core import Boundary
+from .core import Boundary,number
 
 SOURCE='https://data.wprdc.org/dataset/pittsburgh-city-boundary'
 DOWNLOAD_PREFIX='https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/CityBoundary/FeatureServer/0/query?'
@@ -16,10 +16,11 @@ def load_city_boundary(path):
         raise ValueError('City boundary checksum mismatch')
     return Boundary(path)
 
-POLICY='pittsburgh-bellevue-brighton-types-v1'
+POLICY='pittsburgh-bellevue-brighton-sheraden-types-v2'
 REGION_SOURCES={
  'bellevue':('https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries','https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/AlleghenyCountyMunicipalBoundaries/FeatureServer/0/query','NAME','Bellevue'),
- 'brighton-heights':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Brighton Heights')}
+ 'brighton-heights':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Brighton Heights'),
+ 'sheraden':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Sheraden')}
 
 def load_region(folder,slug):
     import urllib.parse
@@ -33,10 +34,15 @@ def load_region(folder,slug):
     return Boundary(path)
 
 class EligibilityBoundary:
-    def __init__(self,city,brighton,bellevue):
-        self.city=city;self.brighton=brighton;self.bellevue=bellevue
+    def __init__(self,city,brighton,bellevue,sheraden):
+        self.city=city;self.brighton=brighton;self.bellevue=bellevue;self.sheraden=sheraden
         self.geometry=city.geometry.union(bellevue.geometry)
     def evaluate(self,row):
+        from shapely.geometry import Point
+        x,y=row.get('longitude'),row.get('latitude')
+        if not number(x) or not number(y) or not -180<=x<=180 or not -90<=y<=90:return 'Pending Verification','coordinates'
+        # covers also rejects exact boundary points; postal labels cannot override location.
+        if self.sheraden.geometry.covers(Point(x,y)):return 'Rejected','sheraden_neighborhood'
         if self.bellevue.contains(row):return 'Candidate',None
         if not self.city.contains(row):return 'Rejected','outside_city_or_boundary'
         if str(row.get('zipCode') or '').split('-')[0]=='15212' and not self.brighton.contains(row):return 'Rejected','outside_brighton_heights_15212'
@@ -52,4 +58,4 @@ class EligibilityBoundary:
         return dict(latitude=round(lat,7),longitude=round(lon,7),radius=radius)
 
 def load_boundary(path):
-    return EligibilityBoundary(load_city_boundary(path),load_region(Path(path).parent,'brighton-heights'),load_region(Path(path).parent,'bellevue'))
+    return EligibilityBoundary(load_city_boundary(path),load_region(Path(path).parent,'brighton-heights'),load_region(Path(path).parent,'bellevue'),load_region(Path(path).parent,'sheraden'))

@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from .config import Settings
 from .collector import Client
-from .geography import load_boundary
+from .geography import load_boundary,POLICY
 from .digest import Digest
 from .engine import Engine
 from .request import diagnose
@@ -84,7 +84,7 @@ def main(argv=None):
         if exists:
             boundary=load_boundary(settings.boundary_file)
             from .request import listing_parameters
-            event('geographic_policy',policy='pittsburgh-bellevue-brighton-types-v1',municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhood='Brighton Heights',query=listing_parameters(boundary))
+            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhood='Brighton Heights',excluded_neighborhoods=['Sheraden'],query=listing_parameters(boundary))
         event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
               configured=settings.public(),database_configured=bool(os.getenv('DATABASE_URL')),
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
@@ -136,7 +136,7 @@ def main(argv=None):
             event('daily_discovery_result',**daily_discovery(store,boundary,settings,day));return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhood='Brighton Heights',excluded_property_types=['Townhouse','Townhome','Rowhouse'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
+        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhood='Brighton Heights',excluded_neighborhoods=['Sheraden'],excluded_property_types=['Townhouse','Townhome','Rowhouse'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()

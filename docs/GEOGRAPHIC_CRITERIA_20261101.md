@@ -45,3 +45,15 @@ Rollback: redeploy the previous application SHA; database/history remain intact.
 That also restores the former selection policy, so use only for a release failure,
 not as a way to send an otherwise disallowed property. No data restore/reset or
 counter/outbox alteration is part of this release.
+
+## Additional authorized Sheraden rule
+
+The shared geographic verifier now rejects verified Sheraden membership for every
+postal label, explicitly including mislabeled 15205 listings. It does not blacklist
+15205. This applies before new/reduction/pending email and sync selection, including
+stored re-evaluation and the existing frozen-unsent safety check. Original property
+records, price/tax history, sent outbox bodies, PENTEN review decisions, inspections,
+files and discussions remain preserved. No schema or sync-contract change exists.
+Official Sheraden geometry is bundled and verified; missing/tampered geography
+fails closed. Border points are conservatively excluded. All previous geographic,
+townhouse, numeric, tax and excluded-ZIP requirements remain unchanged.
