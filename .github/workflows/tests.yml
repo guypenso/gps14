@@ -24,4 +24,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
+      - run: python scripts/fetch_regions.py /tmp/verified-sheraden sheraden
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-sheraden
+          path: /tmp/verified-sheraden/*.json
       - run: python -m pytest -q
