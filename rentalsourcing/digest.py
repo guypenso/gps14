@@ -140,9 +140,12 @@ class Digest:
             for card in previous.get('opportunities',[]):
                 identity=card.get('source_id')
                 if identity:shown[identity]=max(shown.get(identity,''),previous['report_date'])
+        from .tax_backlog import review_key,previous_price,RESEARCH
         stats['pending_total']=len(pending)
-        pending.sort(key=lambda entry:(shown.get(entry['listing'].get('id'),''),entry['listing'].get('id','')))
+        pending.sort(key=lambda entry:(shown.get(entry['listing'].get('id'),''),review_key(entry['listing'],self.boundary,entry['observed_at'],self.clock(),previous_price(self.store,entry['listing'].get('id'),entry['listing'].get('price')))))
         pending=pending[:50]
+        for entry in pending:
+            entry['reasons']=list(dict.fromkeys(entry['reasons']+[RESEARCH]))
         stats['pending_properties']=pending
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
