@@ -68,3 +68,24 @@ def test_price_reduction_priority_and_old_queue_fairness(store,boundary,settings
     assert store.get_property('new')['state']=='Pending Verification'
     a=listing('reduced',price=110000);b=listing('cheap',price=100000)
     assert review_key(a,boundary,clock().isoformat(),clock(),150000)<review_key(b,boundary,clock().isoformat(),clock())
+
+
+def test_confirmed_owner_rejection_defers_paid_lookup_without_deleting_or_reclassifying(store,boundary,settings,clock,monkeypatch):
+    rejected='a-owner-rejected';kept='b-owner-kept'
+    monkeypatch.setenv('TAX_REVIEW_DEFERRED_SOURCE_HASHES',json.dumps([hashlib.sha256(rejected.encode()).hexdigest()]))
+    provider=Provider([listing(rejected),listing(kept)])
+    s=replace(settings,page_size=20,per_run=2,max_pages=1)
+    Engine(store,boundary,Client(store,s,clock,provider,lambda _:None),s,clock).run('fixture-owner-review','2026-10-16')
+    assert provider.tax_calls==1
+    assert store.get_property(rejected)['state']=='Pending Verification'
+    assert store.get_property(rejected)['reasons']==['owner_review_deferred_no_paid_tax_lookup']
+    assert store.get_property(kept)['state']=='Qualified'
+    assert store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]==2
+    assert priorities(store,boundary,clock())==[]
+    assert store.count_usage('approval:'+s.approval_id)==2
+
+
+def test_invalid_private_deferral_configuration_fails_closed(monkeypatch):
+    from rentalsourcing.tax_backlog import review_deferrals
+    monkeypatch.setenv('TAX_REVIEW_DEFERRED_SOURCE_HASHES','["not-a-source-hash"]')
+    with pytest.raises(ValueError,match='Invalid private'):review_deferrals()

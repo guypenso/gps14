@@ -87,6 +87,8 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO,format='%(message)s')
     settings=Settings.from_env()
     if args.check:
+        from .tax_backlog import review_deferrals
+        event('tax_review_deferrals',count=len(review_deferrals()))
         from .command_center import configuration
         configuration()
         exists=Path(settings.boundary_file).is_file()

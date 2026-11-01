@@ -69,3 +69,20 @@ No schema migration, budget, schedule, credentials or synchronization contract
 change. Deploy same reviewed merge to dashboard then cron. Existing startup
 lock protects cache recovery and reevaluation. Roll back code if needed while
 retaining recovered evidence/history. Do not reset counters or resend outbox.
+
+## Confirmed permanent owner rejections
+
+`TAX_REVIEW_DEFERRED_SOURCE_HASHES` is a private server-side JSON array of SHA-256
+RentCast source IDs copied from verified PENTEN permanent rejection tombstones.
+It skips paid tax requests and excludes those records from actionable review
+rankings. It does not change geographic/property eligibility, delete records,
+mark taxes verified, change saved classifications or alter the sync contract.
+Valid cached evidence still costs zero and may be reused.
+
+The initial production snapshot contains 38 confirmed rejections. No identities
+are committed to GitHub or sent to the frontend. Values are merged into only
+this environment key on the existing dashboard and cron, leaving other settings
+unchanged. Clearing the list does not restore anything in PENTEN; its permanent
+tombstones remain authoritative. New future rejections are not automatically
+mirrored by the existing one-way synchronization; snapshot refresh remains a
+limitation. No reverse integration or new receiver permission was introduced.
