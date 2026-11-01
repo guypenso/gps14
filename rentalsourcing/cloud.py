@@ -58,8 +58,8 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
                 stats.update(partial=True,error_type=failure,error_phase='verification' if stats.get('discovery_state')=='fresh' else 'discovery')
                 if stats.get('discovery_state') not in {'fresh','cached'}:stats['discovery_state']='failed'
                 stats['requests_consumed']=client.count
-    from .diagnostics import funnel
-    stats['funnel']=funnel(store,boundary,clock())
+    from .diagnostics import funnel,safe_read
+    stats['funnel']=safe_read(funnel,store,boundary,clock())
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
@@ -117,9 +117,9 @@ def main(argv=None):
         from .criteria import reevaluate
         changed=reevaluate(store,boundary,dt.datetime.now(dt.timezone.utc))
         event('stored_criteria_rechecked',changed=changed)
-        from .diagnostics import funnel,sync_health
-        event('pipeline_funnel',**funnel(store,boundary,dt.datetime.now(dt.timezone.utc)))
-        event('command_center_health',**sync_health(store))
+        from .diagnostics import funnel,sync_health,safe_read
+        event('pipeline_funnel',**safe_read(funnel,store,boundary,dt.datetime.now(dt.timezone.utc)))
+        event('command_center_health',**safe_read(sync_health,store))
         event('allowance_health',**store.budget_health(settings,record_warning=False))
         if args.migrate:event('migrations_complete');return
         if args.status:

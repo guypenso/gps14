@@ -63,3 +63,9 @@ def test_target_auth_probe_distinguishes_receiver_and_gateway_without_writes(clo
         verify_auth(config,clock(),Probe(401,b'{"error":"Invalid synchronization authentication"}'))
     with pytest.raises(ValueError,match='gateway_or_non_json'):
         verify_auth(config,clock(),Probe(401,b'fixture gateway rejection'))
+
+
+def test_optional_diagnostics_failure_does_not_interrupt_delivery():
+    from rentalsourcing.diagnostics import safe_read
+    def broken():raise ValueError('private detail that must not be logged')
+    assert safe_read(broken)=={'counts':{},'diagnostic_error':'ValueError'}
