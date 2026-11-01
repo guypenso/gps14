@@ -11,12 +11,22 @@ PARAMS = dict(city='Pittsburgh', state='PA', status='Active', bedrooms='3:*',
               limit=20, offset=0, includeTotalCount='true')
 
 
+def listing_parameters(boundary):
+    params=dict(PARAMS)
+    if hasattr(boundary,'search_parameters'):
+        params.pop('city',None);params.update(boundary.search_parameters())
+    return params
+
+
 def build_request():
     key = os.environ.get('RENTCAST_API_KEY')
     if not key:
         raise RuntimeError('RENTCAST_API_KEY is not configured')
+    from .config import Settings
+    from .geography import load_boundary
+    params=listing_parameters(load_boundary(Settings.from_env().boundary_file))
     return urllib.request.Request(
-        'https://api.rentcast.io/v1/listings/sale?' + urllib.parse.urlencode(PARAMS),
+        'https://api.rentcast.io/v1/listings/sale?' + urllib.parse.urlencode(params),
         headers={'X-Api-Key': key, 'Accept': 'application/json'}, method='GET')
 
 

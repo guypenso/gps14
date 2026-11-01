@@ -43,7 +43,11 @@ def boundary(tmp_path):
     p.write_text(json.dumps(dict(type='Polygon',coordinates=[
       [[-80.1,40.4],[-79.9,40.4],[-79.9,40.6],[-80.1,40.6],[-80.1,40.4]],
       [[-80.05,40.5],[-79.95,40.5],[-79.95,40.55],[-80.05,40.55],[-80.05,40.5]]])))
-    return Boundary(p)
+    from rentalsourcing.geography import EligibilityBoundary
+    city=Boundary(p)
+    other=tmp_path/'fixture-bellevue.geojson'
+    other.write_text(json.dumps(dict(type='Polygon',coordinates=[[[-80.2,40.6],[-80.15,40.6],[-80.15,40.65],[-80.2,40.65],[-80.2,40.6]]])))
+    return EligibilityBoundary(city,city,Boundary(other))
 
 class Clock:
     def __init__(self):self.value=dt.datetime(2026,10,16,12,tzinfo=dt.timezone.utc)
@@ -61,7 +65,7 @@ def settings():
 
 def listing(identity='fixture-property',**changes):
     return dict(dict(id=identity,formattedAddress='FICTIONAL TEST ADDRESS',city='Pittsburgh',state='PA',zipCode='15212',
-      status='Active',bedrooms=3,bathrooms=1,squareFootage=1000,price=180000,latitude=40.45,longitude=-80,
+      propertyType='Single Family',status='Active',bedrooms=3,bathrooms=1,squareFootage=1000,price=180000,latitude=40.45,longitude=-80,
       listedDate='2026-10-01T00:00:00.000Z'),**changes)
 
 

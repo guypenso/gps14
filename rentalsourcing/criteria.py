@@ -21,5 +21,5 @@ def reevaluate(store,boundary,now):
                     state,_,reason=tax_verification(cached[0],now.date());reasons=[reason] if reason else []
             if state!=old_state or reasons!=json.loads(old_reasons):
                 store.set_verification(identity,state,reasons);changed+=1
-        store.save_setting('criteria',dict(city='Pittsburgh',state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
+        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhood='Brighton Heights',excluded_property_types=['Townhouse','Townhome','Rowhouse'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
     return changed

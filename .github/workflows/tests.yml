@@ -24,11 +24,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
-      - run: python scripts/fetch_regions.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: verified-geography
-          path: |
-            data/bellevue.*json
-            data/brighton-heights.*json
       - run: python -m pytest -q

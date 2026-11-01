@@ -1,0 +1,9 @@
+{
+  "source": "https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries",
+  "endpoint": "https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/AlleghenyCountyMunicipalBoundaries/FeatureServer/0/query",
+  "field": "NAME",
+  "name": "Bellevue",
+  "download_url": "https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/AlleghenyCountyMunicipalBoundaries/FeatureServer/0/query?where=NAME%3D%27Bellevue%27&outFields=NAME&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-01T12:31:35.882079+00:00",
+  "sha256": "6566b164cfc987f933c06e8d4ef94c84185b1c30015cb307f1de8427bb554405"
+}

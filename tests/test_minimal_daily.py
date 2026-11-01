@@ -58,8 +58,8 @@ def test_missing_tax_shown_separately_with_original_link(store,boundary,settings
 
 def test_cached_response_never_becomes_a_fresh_or_new_recommendation(store,boundary,settings,clock):
     s=approved(settings);p=Provider();client=Client(store,s,clock,p,lambda _:None)
-    from rentalsourcing.request import PARAMS
-    client.get('/listings/sale',dict(PARAMS,limit=s.page_size,offset=0))
+    from rentalsourcing.request import listing_parameters
+    client.get('/listings/sale',dict(listing_parameters(boundary),limit=s.page_size,offset=0))
     result=daily_discovery(store,boundary,s,clock().date().isoformat(),clock=clock,opener=p)
     assert result['scan']=='cached' and 'Cached listing response' in p.messages[0]['text']
     assert 'נכס חדש שאומת:' not in p.messages[0]['text']
@@ -122,7 +122,7 @@ def test_bounded_proof_command_end_to_end_no_send(store,settings,monkeypatch,tmp
     if not store.pg:pytest.skip('Proof CLI requires isolated PostgreSQL')
     from rentalsourcing.poc import main
     now=dt.datetime.now(dt.timezone.utc)
-    p=Provider([listing(listingUrl='https://listing.example.invalid/proof')])
+    p=Provider([listing(listingUrl='https://listing.example.invalid/proof',longitude=-80.03736761863567,latitude=40.48147247605465)])
     for name,value in {'DATABASE_URL':store.test_url,'ENABLE_RENTCAST':'true','ENABLE_EMAIL':'false','API_APPROVAL_MODE':'one_time','API_APPROVAL_ID':'fixture-proof','APPROVED_API_REQUESTS':'4','MAX_API_REQUESTS_PER_RUN':'4','MAX_API_REQUESTS_PER_DAY':'4','MAX_API_REQUESTS_PER_MONTH':'40'}.items():monkeypatch.setenv(name,value)
     monkeypatch.setattr('urllib.request.build_opener',lambda *args:p)
     monkeypatch.setattr('rentalsourcing.collector.time.sleep',lambda *args:None)

@@ -30,14 +30,21 @@ def configuration():
     return url, secret, service_token
 
 
-def snapshot(store, identity, day, items, stats, now):
+def snapshot(store, identity, day, items, stats, now, boundary=None):
     """Called inside the SAME transaction that freezes the email selection."""
     from .digest import listing_link
     opportunities = []
+    if boundary is None and (items or stats.get('pending_properties')):
+        from .config import Settings
+        from .geography import load_boundary
+        boundary=load_boundary(Settings.from_env().boundary_file)
     for entry, section in [(x, x['kind']) for x in items] + [(x, 'pending_verification') for x in stats.get('pending_properties', [])]:
         p = entry['listing']
         if str(p.get('zipCode', '')).split('-')[0] in EXCLUDED_ZIPS:
             continue
+        if boundary is not None:
+            from .core import report_eligible
+            if not report_eligible(p,boundary):continue
         tax = entry.get('tax')
         first = store.execute('SELECT MIN(observed_at) FROM price_history WHERE property_id=?', (p.get('id'),)).fetchone()[0]
         observed = entry.get('listing_observed_at') or entry.get('observed_at') or entry.get('verified_at')

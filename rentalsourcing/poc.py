@@ -9,7 +9,7 @@ import urllib.parse
 from pathlib import Path
 from dataclasses import replace
 from .config import Settings
-from .request import PARAMS
+from .request import PARAMS,listing_parameters
 from .collector import Client,LIVE
 from .engine import Engine
 from .storage import Store
@@ -19,9 +19,10 @@ from .core import verification,tax_verification
 PARAMETERS=dict(PARAMS,limit=100,offset=0)
 
 def plan():
+    parameters=dict(listing_parameters(load_boundary(Settings.from_env().boundary_file)),limit=100,offset=0)
     return dict(mode='plan_only_no_requests',method='GET',
-      url='https://api.rentcast.io/v1/listings/sale?'+urllib.parse.urlencode(sorted(PARAMETERS.items())),
-      parameters=PARAMETERS,max_listing_requests=1,max_tax_candidates=3,max_total_attempts=4,
+      url='https://api.rentcast.io/v1/listings/sale?'+urllib.parse.urlencode(sorted(parameters.items())),
+      parameters=parameters,max_listing_requests=1,max_tax_candidates=3,max_total_attempts=4,
       retries=0,additional_pages=False,emails=False,isolated_database_required=True,fresh_usage_snapshot_required=True,
       tax_endpoint='/v1/properties/{URL-encoded RentCast property id}',
       required_approval='Explicit user approval of up to four attempts; configure a dedicated API_APPROVAL_ID and APPROVED_API_REQUESTS only after approval.')

@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from .collector import LIVE
-from .core import demo_marked,verification,tax_verification,historical_reduction,number,EXCLUDED_ZIPS
+from .core import demo_marked,verification,tax_verification,historical_reduction,number,EXCLUDED_ZIPS,report_eligible
 from .request import NoRedirect
 from .telemetry import event
 
@@ -117,14 +117,15 @@ class Digest:
             if stats.get('discovery_state') not in (None,'fresh'):continue
             items.append(dict(data,kind=kind,previous_price=previous));ids.append(identity)
         stats=dict(stats);pending=[]
-        for payload,reasons,observed in self.store.execute("SELECT payload,reasons,observed_at FROM properties WHERE state='Pending Verification' AND source=? ORDER BY observed_at DESC,id LIMIT 50",(LIVE,)).fetchall():
+        for payload,reasons,observed in self.store.execute("SELECT payload,reasons,observed_at FROM properties WHERE state='Pending Verification' AND source=? ORDER BY observed_at DESC,id",(LIVE,)).fetchall():
             listing=json.loads(payload)
-            if recent_timestamp(observed,self.clock()) and verification(listing,self.boundary)[0]!='Rejected':
+            if recent_timestamp(observed,self.clock()) and report_eligible(listing,self.boundary):
                 cached=self.store.get_tax(listing.get('id'),self.clock().isoformat());tax=None
                 if cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==listing.get('id') and not demo_marked(cached[0]):
                     tax_state,tax,_=tax_verification(cached[0],self.clock().date())
                     if tax_state=='Rejected':continue
                 pending.append(dict(listing=listing,reasons=json.loads(reasons),observed_at=observed,tax=tax))
+                if len(pending)>=50:break
         stats['pending_properties']=pending
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
@@ -140,7 +141,7 @@ class Digest:
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
             if not preview:
                 from .command_center import snapshot
-                snapshot(self.store,outbox_id,day,items,stats,self.clock())
+                snapshot(self.store,outbox_id,day,items,stats,self.clock(),boundary=self.boundary)
         return outbox_id
 
     def prepare_stored(self,day):
@@ -181,7 +182,7 @@ class Digest:
                 (outbox_id,digest_day,'pending',json.dumps(body),json.dumps(ids),None,None,now.isoformat()))
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
             from .command_center import snapshot
-            snapshot(self.store,outbox_id,day,items,{'saved_data_only':True},now)
+            snapshot(self.store,outbox_id,day,items,{'saved_data_only':True},now,boundary=self.boundary)
         return outbox_id
 
     def prepare_test(self):
@@ -281,6 +282,23 @@ class Digest:
                 for event_id in json.loads(event_ids):
                     self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(event_id,))
             self.store.operation('stale-email:'+identity,'Prepared digest contains an excluded ZIP; cancelled before sending.')
+            return 'cancelled_stale'
+        frozen=self.store.execute('SELECT payload FROM command_center_reports WHERE outbox_id=?',(identity,)).fetchone()
+        invalid=False
+        if frozen:
+            for card in json.loads(frozen[0]).get('opportunities',[]):
+                current=self.store.get_property(card.get('source_id')) if card.get('source_id') else None
+                if not current or not report_eligible(current['payload'],self.boundary):invalid=True;break
+        elif 'Pending Verification — NOT verified matches' in (envelope.get('text') or ''):
+            # Legacy pending cards have no event IDs. Without their saved identities,
+            # a frozen body cannot safely prove current geographic/type eligibility.
+            invalid=True
+        if invalid:
+            if first:raise ReconciliationRequired('Frozen selection no longer meets current geographic/type criteria; reconcile previous delivery')
+            with self.store.transaction():
+                self.store.execute("UPDATE outbox SET state='cancelled',updated_at=? WHERE id=?",(now.isoformat(),identity))
+                for event_id in json.loads(event_ids):self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(event_id,))
+            self.store.operation('stale-email:'+identity,'Frozen geographic/type selection no longer meets criteria; cancelled before sending.')
             return 'cancelled_stale'
         # Criteria apply on every attempt, including uncertain-delivery retries.
         for event_id in json.loads(event_ids):
