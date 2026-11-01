@@ -69,6 +69,17 @@ def snapshot(store, identity, day, items, stats, now, boundary=None):
     store.execute('INSERT INTO command_center_reports (outbox_id,payload,attempts) VALUES (?,?,0) ON CONFLICT(outbox_id) DO UPDATE SET payload=excluded.payload WHERE command_center_reports.synced_at IS NULL', (identity, body))
 
 
+def signed_request(config,body,now):
+    """One authentication implementation for daily delivery and owner recovery."""
+    url,secret,service_token=config
+    stamp=str(int(now.timestamp()))
+    signature=hmac.new(secret.encode(),stamp.encode()+b'.'+body,hashlib.sha256).hexdigest()
+    return urllib.request.Request(url,data=body,method='POST',headers={
+        'Content-Type':'application/json','X-RentalSourcing-Timestamp':stamp,
+        'X-RentalSourcing-Signature':'v1='+signature,
+        'OAI-Sites-Authorization':'Bearer '+service_token})
+
+
 def flush(store, now=None, opener=None):
     """At most three pending deliveries; retry on a later existing daily run.
 
@@ -85,13 +96,8 @@ def flush(store, now=None, opener=None):
     accepted = 0
     for identity, payload in rows:
         body = payload.encode('utf-8')
-        timestamp = str(int(now.timestamp()))
-        signature = hmac.new(secret.encode(), timestamp.encode() + b'.' + body, hashlib.sha256).hexdigest()
         store.execute('UPDATE command_center_reports SET attempts=attempts+1,last_attempt_at=? WHERE outbox_id=?', (now.isoformat(), identity))
-        req = urllib.request.Request(url, data=body, method='POST', headers={
-            'Content-Type': 'application/json', 'X-RentalSourcing-Timestamp': timestamp,
-            'X-RentalSourcing-Signature': 'v1=' + signature,
-            'OAI-Sites-Authorization': 'Bearer ' + service_token})
+        req = signed_request(config,body,now)
         try:
             with opener.open(req, timeout=20) as response:
                 result = json.loads(response.read(4096))

@@ -75,7 +75,7 @@ class Engine:
     def run(self,job_id,day,*,candidate_limit=None,first_page_only=False):
         store=self.store;job=store.job(job_id,day);stats=job['stats']
         if job['state']=='complete':return dict(stats,already_complete=True,discovery_state='previous_scan')
-        stats['discovery_state']='verification_only'
+        stats['discovery_state']='verification_only';stats['received_this_run']=0
         if candidate_limit is None:
             # Preserve unfinished tax work across daily jobs. Only current revisions
             # can produce a digest; stale observations remain pending below.
@@ -113,7 +113,7 @@ class Engine:
                 with store.transaction():
                     for row in rows:
                         if self.ingest(job_id,row):stats['tax_cache_hits']+=1
-                    stats['received']+=len(rows)
+                    stats['received']+=len(rows);stats['received_this_run']=stats.get('received_this_run',0)+len(rows)
                     store.checkpoint(job_id,new_offset,collection_done,stats)
                 offset=new_offset;pages+=1
                 # Leave room for enrichment before another page can exhaust the
@@ -121,10 +121,23 @@ class Engine:
                 if candidate_limit is None and not collection_done and self.client.count>=max(1,self.settings.per_run-1):
                     if store.execute('SELECT 1 FROM scan_tasks WHERE job_id=? AND done=0 LIMIT 1',(job_id,)).fetchone():break
             if not collection_done:
+                stats['discovery_partial']=True
                 stats['partial']=True;store.operation('pagination:'+job_id,'Listing collection paused at the run or page allowance; the next scheduled run resumes this cursor.')
+            stats['discovery_complete']=collection_done and not stats.get('sample_truncated',False)
             tasks=store.execute('''SELECT t.property_id,t.event_id FROM scan_tasks t WHERE t.job_id=? AND t.done=0
-              ORDER BY t.priority,(SELECT MIN(j.day) FROM scan_tasks older JOIN scan_jobs j ON j.id=older.job_id
-                        WHERE older.property_id=t.property_id AND older.done=0),t.property_id''',(job_id,)).fetchall()
+              ORDER BY (SELECT MIN(j.day) FROM scan_tasks older JOIN scan_jobs j ON j.id=older.job_id
+                        WHERE older.property_id=t.property_id AND older.done=0),t.priority,t.property_id''',(job_id,)).fetchall()
+            # Untouched candidates first, then least recently attempted. Retained
+            # negative/failed checks cannot monopolize every morning's first slot.
+            rank={task:i for i,task in enumerate(tasks)}
+            def fairness(task):
+                identity=task[0]
+                attempted=store.execute('SELECT payload FROM settings WHERE name=?',('tax_attempt:'+identity,)).fetchone()
+                old=store.execute('SELECT fetched_at FROM tax_history WHERE property_id=?',(identity,)).fetchone()
+                at=json.loads(attempted[0])['at'] if attempted else (old[0] if old else None)
+                return (at is not None,at or '',rank[task])
+            ordered=[(fairness(task),task) for task in tasks]
+            tasks=[task for _,task in sorted(ordered)]
             if candidate_limit is not None:
                 if not 0<=candidate_limit<=3:raise ValueError('POC supports at most three tax candidates')
                 key='poc_selection:'+job_id
@@ -153,6 +166,7 @@ class Engine:
                     store.set_verification(identity,'Pending Verification',['tax_refresh_not_needed_no_new_event'])
                     store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
                 else:
+                    before_attempt=self.client.count
                     try:record,_=self.client.get('/properties/'+urllib.parse.quote(identity,safe=''))
                     except RequestDeferred:
                         store.set_verification(identity,'Pending Verification',['request_deferred'])
@@ -161,6 +175,8 @@ class Engine:
                         if isinstance(exc,urllib.error.HTTPError) and exc.code in {401,403}:raise
                         store.set_verification(identity,'Pending Verification',['tax_provider_unavailable'])
                         continue
+                    finally:
+                        if self.client.count>before_attempt:store.save_setting('tax_attempt:'+identity,{'at':self.clock().isoformat()})
                     stats['tax_checked']+=1;source=getattr(self.client,'source','fixture');fetched=getattr(self.client,'last_fetched_at',None) or self.clock().isoformat()
                     if not isinstance(record,dict) or record.get('id')!=identity or demo_marked(record):
                         store.set_verification(identity,'Pending Verification',['tax_identity_or_source_mismatch'])

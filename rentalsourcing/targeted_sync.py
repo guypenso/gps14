@@ -14,7 +14,7 @@ import os
 import re
 import urllib.request
 
-from .command_center import snapshot, configuration
+from .command_center import snapshot, configuration, signed_request
 from .config import Settings
 from .core import verification, tax_verification
 from .collector import LIVE
@@ -87,10 +87,9 @@ def run(store,boundary,now,execute=False,config=None,opener=None):
     print('TARGET_DRY_RUN_VERIFIED count=1 qualification='+card['qualification']+' tax_status='+card['tax_status']+' report_id='+IDENTITY)
     if not execute:return
     if not config:raise ValueError('Private synchronization configuration unavailable')
-    url,secret,service=config;body=ledger['payload'].encode();stamp=str(int(now.timestamp()))
-    signature=hmac.new(secret.encode(),stamp.encode()+b'.'+body,hashlib.sha256).hexdigest()
+    body=ledger['payload'].encode()
     ledger['attempts']+=1;store.save_setting(JOB,ledger)
-    request=urllib.request.Request(url,data=body,method='POST',headers={'Content-Type':'application/json','X-RentalSourcing-Timestamp':stamp,'X-RentalSourcing-Signature':'v1='+signature,'OAI-Sites-Authorization':'Bearer '+service})
+    request=signed_request(config,body,now)
     try:
         with (opener or urllib.request.build_opener(NoRedirect)).open(request,timeout=20) as response:
             receipt=json.loads(response.read(4096))
@@ -100,8 +99,32 @@ def run(store,boundary,now,execute=False,config=None,opener=None):
         store.set_verification(SOURCE_ID,'Qualified' if card['qualification']=='verified' else 'Pending Verification',reasons)
         print('TARGET_SYNC_ACCEPTED count=1 report_id='+IDENTITY+' duplicate='+str(receipt.get('duplicate',False)).lower())
     except Exception as exc:
+        category='unknown'
+        if hasattr(exc,'read'):
+            try:
+                error=json.loads(exc.read(4096)).get('error','')
+                if error=='Invalid synchronization authentication':category='receiver_hmac_or_timestamp'
+                elif getattr(exc,'code',None) in {401,403}:category='gateway_or_unrecognized_authentication'
+            except Exception:category='gateway_or_non_json_response'
         ledger['error_type']=type(exc).__name__;store.save_setting(JOB,ledger)
-        raise ValueError('Synchronization failed: '+type(exc).__name__+(' HTTP '+str(exc.code) if hasattr(exc,'code') else '')) from None
+        raise ValueError('Synchronization failed: '+type(exc).__name__+(' HTTP '+str(exc.code) if hasattr(exc,'code') else '')+' category='+category) from None
+
+
+def verify_auth(config,now,opener=None):
+    """Signed invalid-schema probe: receiver rejects before any database write."""
+    import urllib.error
+    request=signed_request(config,b'{}',now)
+    try:
+        with (opener or urllib.request.build_opener(NoRedirect)).open(request,timeout=20):pass
+    except urllib.error.HTTPError as exc:
+        try:error=json.loads(exc.read(4096)).get('error','')
+        except Exception:error=''
+        if exc.code==400 and error=='Unsupported report':
+            print('SYNC_AUTHENTICATION_VERIFIED');return
+        if exc.code==401 and error=='Invalid synchronization authentication':
+            raise ValueError('Receiver rejected HMAC/timestamp: use the existing cron signing secret, not the Sites service token; credentials were not changed') from None
+        raise ValueError('Authentication probe rejected: HTTP '+str(exc.code)+' '+('receiver' if error else 'gateway_or_non_json')) from None
+    raise ValueError('Unexpected authentication probe response')
 
 
 def main():
@@ -113,10 +136,12 @@ def main():
         if args.execute:
             # Dashboard does not hold cron-only secrets. Never echo or log them.
             for key in ('COMMAND_CENTER_SYNC_SECRET','COMMAND_CENTER_SERVICE_TOKEN'):
-                if not os.getenv(key):os.environ[key]=getpass.getpass(key+' (hidden): ')
+                if not os.getenv(key):os.environ[key]=getpass.getpass(key+' (hidden): ').strip().strip('\"').strip("'")
             os.environ['ENABLE_COMMAND_CENTER_SYNC']='true'
-            os.environ.setdefault('COMMAND_CENTER_SYNC_URL','https://inspection-command-windows-20261017.roundmesa2.chatgpt.site/api/rentalsourcing/sync')
+            if not os.getenv('COMMAND_CENTER_SYNC_URL'):
+                os.environ['COMMAND_CENTER_SYNC_URL']='https://inspection-command-windows-20261017.roundmesa2.chatgpt.site/api/rentalsourcing/sync'
             config=configuration()
+            verify_auth(config,dt.datetime.now(dt.timezone.utc))
         store=Store(url,initialize=False)
         run(store,load_boundary(settings.boundary_file),dt.datetime.now(dt.timezone.utc),args.execute,config)
     except Exception as exc:

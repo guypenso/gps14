@@ -32,12 +32,12 @@ def cycle_key(settings, now=None):
 
 
 def future_listing_days(now,end):
-    """Future 08:00 Pittsburgh slots strictly before provider renewal."""
-    from .schedule import PITTSBURGH
-    day=now.astimezone(PITTSBURGH).date()+dt.timedelta(days=1)
+    """Future 08:00 Israel slots strictly before provider renewal."""
+    from .schedule import ISRAEL
+    day=now.astimezone(ISRAEL).date()+dt.timedelta(days=1)
     count=0
-    while day<=end.astimezone(PITTSBURGH).date():
-        slot=dt.datetime.combine(day,dt.time(8),tzinfo=PITTSBURGH)
+    while day<=end.astimezone(ISRAEL).date():
+        slot=dt.datetime.combine(day,dt.time(8),tzinfo=ISRAEL)
         if slot<end:count+=1
         day+=dt.timedelta(days=1)
     return count

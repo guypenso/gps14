@@ -41,7 +41,7 @@ def test_missing_tax_is_not_completed_and_retries_after_negative_cache(store,bou
     assert store.get_property('pending')['state']=='Qualified'
 
 
-def test_new_day_prioritizes_new_listing_over_old_backlog(store,boundary,settings,clock):
+def test_old_untouched_candidate_is_not_starved_by_new_listings(store,boundary,settings,clock):
     provider=Provider([listing('z-old')])
     run(store,boundary,replace(settings,per_run=1),clock,provider,'daily:first')
     clock.advance(days=1)
@@ -49,9 +49,13 @@ def test_new_day_prioritizes_new_listing_over_old_backlog(store,boundary,setting
     provider.records['a-new']=taxes('a-new')
     run(store,boundary,replace(settings,per_run=2),clock,provider,'daily:second')
     assert provider.tax_calls==1
+    assert store.get_property('z-old')['state']=='Qualified'
+    assert store.get_property('a-new')['state']=='Pending Verification'
+    clock.advance(days=1)
+    run(store,boundary,replace(settings,per_run=2),clock,provider,'daily:third')
     assert store.get_property('a-new')['state']=='Qualified'
-    assert store.get_property('z-old')['state']=='Pending Verification'
-    assert store.execute('SELECT done FROM scan_tasks WHERE job_id=? AND property_id=?',('daily:first','z-old')).fetchone()[0]==0
+    assert provider.tax_calls==2
+    assert store.execute('SELECT done FROM scan_tasks WHERE job_id=? AND property_id=?',('daily:first','z-old')).fetchone()[0]==1
 
 
 def test_unseen_stale_backlog_remains_pending_and_never_qualifies(store,boundary,settings,clock):

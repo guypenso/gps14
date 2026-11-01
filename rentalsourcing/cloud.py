@@ -47,11 +47,20 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             effective=replace(effective,per_run=min(4,allowance))
             client=Client(store,effective,clock,opener)
             try:
-                stats=Engine(store,boundary,client,effective,clock).run('daily:'+day,day,first_page_only=True)
+                scan_job=scheduled_job(store,day)
+                stats=Engine(store,boundary,client,effective,clock).run(scan_job,day)
+                stats['requests_consumed']=client.count
                 if stats.get('sample_truncated'):stats['partial']=True
             except Exception as exc:
-                failure=type(exc).__name__;stats=dict(discovery_state='failed',partial=True,error_type=failure)
-    message=digest.prepare('daily:'+day,day,stats)
+                failure=type(exc).__name__
+                saved=store.execute('SELECT stats FROM scan_jobs WHERE id=?',(scan_job,)).fetchone()
+                stats=json.loads(saved[0]) if saved else {}
+                stats.update(partial=True,error_type=failure,error_phase='verification' if stats.get('discovery_state')=='fresh' else 'discovery')
+                if stats.get('discovery_state') not in {'fresh','cached'}:stats['discovery_state']='failed'
+                stats['requests_consumed']=client.count
+    from .diagnostics import funnel
+    stats['funnel']=funnel(store,boundary,clock())
+    message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
 
@@ -108,6 +117,10 @@ def main(argv=None):
         from .criteria import reevaluate
         changed=reevaluate(store,boundary,dt.datetime.now(dt.timezone.utc))
         event('stored_criteria_rechecked',changed=changed)
+        from .diagnostics import funnel,sync_health
+        event('pipeline_funnel',**funnel(store,boundary,dt.datetime.now(dt.timezone.utc)))
+        event('command_center_health',**sync_health(store))
+        event('allowance_health',**store.budget_health(settings,record_warning=False))
         if args.migrate:event('migrations_complete');return
         if args.status:
             event('status',budget=store.budget_health(settings),

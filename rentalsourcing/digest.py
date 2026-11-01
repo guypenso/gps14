@@ -44,6 +44,12 @@ def render(day,items,stats,health,operations):
     status='נכשלה / נדרשת בדיקה' if failed else ('חלקית / נדרשת השלמה' if incomplete else 'הושלמה')
     lines=[f'RentalSourcing — {day}',('מבוסס על נתונים שמורים בלבד; לא בוצעה סריקה חדשה.' if stats.get('saved_data_only') else f'מצב הסריקה: {status}')]
     scan_labels={'previous_scan':'Previous persisted scan reused; no fresh discovery request in this run.','verification_only':'Existing listing evidence rechecked; no fresh discovery request in this run.','fresh':'Fresh listing discovery completed; filtering and tax verification follow.','cached':'Cached listing response reused; no fresh discovery request completed.','skipped_disabled':'Discovery skipped: collection disabled.','skipped_billing_configuration':'Discovery skipped: provider billing cycle/baseline not configured.','skipped_budget_exhausted':'Discovery skipped: internal API allowance exhausted.','failed':'Discovery failed; no successful fresh scan is claimed.'}
+    zero_message=('הגילוי הצליח; אימות המס חלקי ולכן עדיין לא ניתן לקבוע שאין עסקאות מתאימות.' if stats.get('discovery_state')=='fresh' and incomplete else ('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.'))
+    summary=None
+    if stats.get('funnel'):
+        counts=stats['funnel']['counts']
+        summary=f"Discovery: {stats.get('discovery_state','unknown')}; page records: {stats.get('received_this_run',stats.get('received',0))}; collection complete: {stats.get('discovery_complete',False)}; non-tax eligible stored: {counts.get('non_tax_pass',0)}; tax cache usable: {counts.get('valid_tax_cache',0)}; uncached tax backlog: {counts.get('tax_uncached_backlog',0)}; verified opportunities in this report: {len(items)}; requests this run: {stats.get('requests_consumed',0)}; pending shown: {len(stats.get('pending_properties',[]))}/{stats.get('pending_total',len(stats.get('pending_properties',[])))}."
+        lines.append(summary)
     if stats.get('discovery_state'):lines.append(scan_labels.get(stats['discovery_state'],stats['discovery_state']))
     items=sorted((item for item in items if str(item['listing'].get('zipCode','')).split('-')[0] not in EXCLUDED_ZIPS),key=lambda item:item['kind']!='price_reduction')
     cards=[]
@@ -71,17 +77,18 @@ def render(day,items,stats,health,operations):
         pending_lines.append(f"{p.get('formattedAddress','Address missing')} | ${p.get('price','Missing')} | {p.get('bedrooms','Missing')} beds / {p.get('bathrooms','Missing')} baths / {p.get('squareFootage','Missing')} sqft | ZIP {p.get('zipCode','Missing')} | Status {p.get('status','Missing')}\nTax/year: {tax_text} | Missing: {', '.join(entry['reasons'])}\nObserved: {entry['observed_at']} | Source: RentCast\nListing: {listing_link(p) or 'Not supplied by provider'}")
     if pending:lines+=pending_lines
     if not items:
-        lines.append('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')
+        lines.append(zero_message)
     if failed:lines.append('סוג התקלה: '+str(stats['error_type']))
     footer=f"ניסיונות API שנותרו באישור ובמחזור: {health.get('remaining',0)}. נכסים שחסר להם מידע נשארים Pending Verification. שנת המס היא האחרונה הזמינה מהספק."
     lines.append(footer)
     for warning in operations:lines.append('הודעת מערכת: '+warning)
     markup='<html lang="he" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:Arial,sans-serif;max-width:680px;margin:auto;padding:16px"><h1>RentalSourcing</h1><p>'+html.escape(lines[1])+'</p>'+''.join(cards)
-    if not items:markup+='<p>'+html.escape('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.')+'</p>'
+    if not items:markup+='<p>'+html.escape(zero_message)+'</p>'
     if stats.get('discovery_state'):markup+='<p>'+html.escape(scan_labels.get(stats['discovery_state'],stats['discovery_state']))+'</p>'
     if pending:
         markup+='<h2>Pending Verification</h2><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape('\n\n'.join(pending_lines))+'</pre>'
         markup+=''.join('<p><a href="'+html.escape(listing_link(entry['listing']),quote=True)+'">'+html.escape(entry['listing'].get('formattedAddress') or 'Original listing')+'</a></p>' for entry in pending if listing_link(entry['listing']))
+    if summary:markup+='<p>'+html.escape(summary)+'</p>'
     if failed:markup+='<p>'+html.escape('סוג התקלה: '+str(stats['error_type']))+'</p>'
     markup+='<p>'+html.escape(footer)+'</p>'+''.join('<p>'+html.escape(w)+'</p>' for w in operations)+'</body></html>'
     return '\n\n'.join(lines),markup
@@ -125,7 +132,17 @@ class Digest:
                     tax_state,tax,_=tax_verification(cached[0],self.clock().date())
                     if tax_state=='Rejected':continue
                 pending.append(dict(listing=listing,reasons=json.loads(reasons),observed_at=observed,tax=tax))
-                if len(pending)>=50:break
+        # Rotate the capped pending section: unseen candidates are not hidden
+        # indefinitely behind the same alphabetical first fifty.
+        shown={}
+        for body, in self.store.execute("SELECT r.payload FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent'").fetchall():
+            previous=json.loads(body)
+            for card in previous.get('opportunities',[]):
+                identity=card.get('source_id')
+                if identity:shown[identity]=max(shown.get(identity,''),previous['report_date'])
+        stats['pending_total']=len(pending)
+        pending.sort(key=lambda entry:(shown.get(entry['listing'].get('id'),''),entry['listing'].get('id','')))
+        pending=pending[:50]
         stats['pending_properties']=pending
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
