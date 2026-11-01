@@ -19,7 +19,10 @@ def funnel(store,boundary,now):
         counts['non_tax_pass']+=1
         cached=store.get_tax(identity,now.isoformat())
         if not cached or cached[1]!=LIVE or not isinstance(cached[0],dict) or cached[0].get('id')!=identity or demo_marked(cached[0]):
-            counts['tax_uncached_backlog']+=1;continue
+            counts['tax_uncached_backlog']+=1
+            from .tax_backlog import review_deferred
+            if review_deferred(identity):counts['owner_review_deferred']+=1
+            continue
         counts['valid_tax_cache']+=1
         tax_state,_,_=tax_verification(cached[0],now.date())
         counts[{'Qualified':'tax_qualified','Rejected':'tax_rejected','Pending Verification':'tax_pending_cached'}[tax_state]]+=1

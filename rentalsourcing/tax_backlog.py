@@ -10,6 +10,20 @@ from .provenance import demo_marked
 RESEARCH='Tax research: https://realestate.alleghenycounty.us/search — verify latest annual county, municipal and school bills; assessed values are not tax bills.'
 
 
+def review_deferrals():
+    """Private snapshot of confirmed permanent PENTEN rejections; paid-work only."""
+    import os,re
+    try:
+        values=json.loads(os.getenv('TAX_REVIEW_DEFERRED_SOURCE_HASHES','[]'))
+        if not isinstance(values,list) or len(values)>20000 or any(not isinstance(v,str) or not re.fullmatch(r'[a-f0-9]{64}',v) for v in values):raise ValueError
+        return frozenset(values)
+    except (ValueError,TypeError):raise ValueError('Invalid private tax-review deferral configuration') from None
+
+
+def review_deferred(identity):
+    return hashlib.sha256(str(identity).encode()).hexdigest() in review_deferrals()
+
+
 def recent(value,now):
     try:
         when=dt.datetime.fromisoformat(value.replace('Z','+00:00'))
@@ -62,7 +76,7 @@ def priorities(store,boundary,now):
     records=[]
     for identity,raw,state,source,observed in store.execute('SELECT id,payload,state,source,observed_at FROM properties').fetchall():
         row=json.loads(raw)
-        if source!=LIVE or verification(row,boundary)[0]!='Candidate':continue
+        if source!=LIVE or verification(row,boundary)[0]!='Candidate' or review_deferred(identity):continue
         cached=store.get_tax(identity,now.isoformat())
         valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
         if valid and tax_verification(cached[0],now.date())[0]!='Pending Verification':continue

@@ -149,7 +149,8 @@ class Engine:
                 identities=json.loads(selected[0]) if selected else [r[0] for r in tasks[:candidate_limit]]
                 if not selected:store.save_setting(key,identities)
                 tasks=[r for r in tasks if r[0] in identities]
-            needed=sum(1 for identity,event_id in tasks if event_id and not store.get_tax(identity,self.clock().isoformat()))
+            from .tax_backlog import review_deferred
+            needed=sum(1 for identity,event_id in tasks if event_id and not review_deferred(identity) and not store.get_tax(identity,self.clock().isoformat()))
             health=store.budget_health(self.settings,self.clock())
             if needed+health['days_remaining']>health['remaining']:
                 store.operation('forecast:'+job_id,'Current tax-verification backlog may exceed the allowance after reserving one listing request per remaining day.')
@@ -170,6 +171,10 @@ class Engine:
                     store.set_verification(identity,'Pending Verification',['tax_refresh_not_needed_no_new_event'])
                     store.execute('UPDATE scan_tasks SET done=1 WHERE job_id=? AND property_id=?',(job_id,identity));continue
                 else:
+                    from .tax_backlog import review_deferred
+                    if review_deferred(identity):
+                        store.set_verification(identity,'Pending Verification',['owner_review_deferred_no_paid_tax_lookup'])
+                        continue
                     before_attempt=self.client.count
                     try:record,_=self.client.get('/properties/'+urllib.parse.quote(identity,safe=''))
                     except RequestDeferred:
