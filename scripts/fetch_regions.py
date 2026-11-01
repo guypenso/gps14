@@ -16,6 +16,9 @@ REGIONS={
  'brighton-heights':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
   endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
   field='hood',name='Brighton Heights'),
+ 'spring-hill-city-view':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
+  endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
+  field='hood',name='Spring Hill-City View'),
  'sheraden':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
   endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
   field='hood',name='Sheraden')}

@@ -24,4 +24,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
+      - run: python scripts/fetch_regions.py /tmp/verified-spring-hill spring-hill-city-view
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-spring-hill
+          path: /tmp/verified-spring-hill/
       - run: python -m pytest -q
