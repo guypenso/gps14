@@ -129,13 +129,17 @@ class Engine:
                         WHERE older.property_id=t.property_id AND older.done=0),t.priority,t.property_id''',(job_id,)).fetchall()
             # Untouched candidates first, then least recently attempted. Retained
             # negative/failed checks cannot monopolize every morning's first slot.
+            from .tax_backlog import review_key,previous_price
             rank={task:i for i,task in enumerate(tasks)}
             def fairness(task):
                 identity=task[0]
                 attempted=store.execute('SELECT payload FROM settings WHERE name=?',('tax_attempt:'+identity,)).fetchone()
                 old=store.execute('SELECT fetched_at FROM tax_history WHERE property_id=?',(identity,)).fetchone()
                 at=json.loads(attempted[0])['at'] if attempted else (old[0] if old else None)
-                return (at is not None,at or '',rank[task])
+                first=store.execute('SELECT MIN(j.day) FROM scan_tasks t JOIN scan_jobs j ON j.id=t.job_id WHERE t.property_id=? AND t.done=0',(identity,)).fetchone()[0] or ''
+                p=store.get_property(identity)
+                factual=review_key(p['payload'],self.boundary,p['observed_at'],self.clock(),previous_price(store,identity,p['payload'].get('price')))
+                return (at is not None,at or first,factual,rank[task])
             ordered=[(fairness(task),task) for task in tasks]
             tasks=[task for _,task in sorted(ordered)]
             if candidate_limit is not None:

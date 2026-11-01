@@ -114,6 +114,8 @@ def main(argv=None):
             event('scan_already_running');return
         store.migrate()
         boundary=load_boundary(settings.boundary_file)
+        from .tax_backlog import reconcile
+        event('tax_cache_recovery',**reconcile(store,settings,dt.datetime.now(dt.timezone.utc)))
         from .criteria import reevaluate
         changed=reevaluate(store,boundary,dt.datetime.now(dt.timezone.utc))
         event('stored_criteria_rechecked',changed=changed)

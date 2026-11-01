@@ -33,12 +33,17 @@ def funnel(store,boundary,now):
         data=latest['data'];ids=[p.get('id') for p in data if isinstance(p,dict) and p.get('id')]
         states=Counter(verification(p,boundary)[0] for p in data if isinstance(p,dict))
         discovery=dict(observed_at=latest['fetched_at'],received=len(data),unique_ids=len(set(ids)),duplicate_ids=len(ids)-len(set(ids)),provider_total=latest.get('total'),non_tax_pass=states['Candidate'],non_tax_pending=states['Pending Verification'],rejected=states['Rejected'])
+    from .tax_backlog import priorities
+    ranked=priorities(store,boundary,now)
+    backlog=dict(total=len(ranked),fresh=sum(p['fresh'] for p in ranked),stale=sum(not p['fresh'] for p in ranked),top_source_hashes=[__import__('hashlib').sha256(p['source_id'].encode()).hexdigest() for p in ranked[:10]])
+    # Approval identifiers are bookkeeping references, never API credentials.
+    approvals={period.split(':',1)[1]:used for period,used in store.execute("SELECT period,used FROM usage WHERE period LIKE ?",('approval:%',)).fetchall()}
     target=store.get_property('2106-Rockledge-St,-Pittsburgh,-PA-15212')
     targeted=None
     if target:
         p=target['payload'];geographic=boundary.evaluate(p)
         targeted=dict(state=target['state'],reasons=target['reasons'],listing_status=p.get('status'),observed_at=target['observed_at'],geography=geographic[0],property_type=p.get('propertyType'))
-    return dict(targeted_recovery=targeted,counts=dict(counts),primary_rejections=dict(primary),rejection_reasons=dict(rejections),missing_reasons=dict(missing),latest_discovery=discovery)
+    return dict(approval_usage=approvals,prioritized_tax_backlog=backlog,targeted_recovery=targeted,counts=dict(counts),primary_rejections=dict(primary),rejection_reasons=dict(rejections),missing_reasons=dict(missing),latest_discovery=discovery)
 
 
 def sync_health(store):
