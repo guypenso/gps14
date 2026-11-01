@@ -22,7 +22,8 @@ the same visibility bucket. A historical reduction followed by an increase is
 not reported as a current observed reduction.
 
 The existing email snapshot remains PENTEN's source. Pending properties stay
-pending and receive an official research link/reason; no receiver schema change.
+pending; the email supplies official research guidance without altering snapshot
+fields or reasons. No receiver schema change.
 Review status, rejection tombstones, discussions and inspection records are not
 modified. All candidates remain in storage even when outside the 50-card report.
 

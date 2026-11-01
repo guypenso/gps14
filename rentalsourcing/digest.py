@@ -70,7 +70,8 @@ def render(day,items,stats,health,operations):
         lines.append(text)
         cards.append('<section style="border:1px solid #ddd;padding:16px;margin:12px 0"><pre style="white-space:pre-wrap;font:inherit">'+html.escape(text)+'</pre>'+('<a href="'+html.escape(link,quote=True)+'">Original listing</a>' if link else '')+'</section>')
     pending=[item for item in stats.get('pending_properties',[]) if str(item['listing'].get('zipCode','')).split('-')[0] not in EXCLUDED_ZIPS]
-    pending_lines=['Pending Verification — NOT verified matches']
+    from .tax_backlog import RESEARCH
+    pending_lines=['Pending Verification — NOT verified matches',RESEARCH]
     for entry in pending:
         p=entry['listing'];tax=entry.get('tax')
         tax_text=(str(tax['year'])+': '+money(tax['annual'])) if tax else 'not verified'
@@ -140,12 +141,10 @@ class Digest:
             for card in previous.get('opportunities',[]):
                 identity=card.get('source_id')
                 if identity:shown[identity]=max(shown.get(identity,''),previous['report_date'])
-        from .tax_backlog import review_key,previous_price,RESEARCH
+        from .tax_backlog import review_key,previous_price
         stats['pending_total']=len(pending)
         pending.sort(key=lambda entry:(shown.get(entry['listing'].get('id'),''),review_key(entry['listing'],self.boundary,entry['observed_at'],self.clock(),previous_price(self.store,entry['listing'].get('id'),entry['listing'].get('price')))))
         pending=pending[:50]
-        for entry in pending:
-            entry['reasons']=list(dict.fromkeys(entry['reasons']+[RESEARCH]))
         stats['pending_properties']=pending
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
