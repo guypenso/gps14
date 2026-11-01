@@ -31,7 +31,7 @@ def geographic_verification(row,boundary):
     if hasattr(boundary,'evaluate'):return boundary.evaluate(row)
     if not boundary.contains(row):return 'Rejected','outside_city_or_boundary'
     if str(row.get('zipCode') or '').split('-')[0]=='15212':return 'Pending Verification','brighton_heights_boundary_unavailable'
-    return 'Candidate',None
+    return 'Pending Verification','neighborhood_boundaries_unavailable'
 
 
 def report_eligible(row,boundary):

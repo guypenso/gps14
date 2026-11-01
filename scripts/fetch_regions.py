@@ -15,11 +15,15 @@ REGIONS={
   field='NAME',name='Bellevue'),
  'brighton-heights':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
   endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
-  field='hood',name='Brighton Heights')}
+  field='hood',name='Brighton Heights'),
+ 'sheraden':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
+  endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
+  field='hood',name='Sheraden')}
 
-def install(folder='data',opener=None):
+def install(folder='data',opener=None,regions=None):
  opener=opener or urllib.request.build_opener()
- for slug,source in REGIONS.items():
+ for slug in regions or REGIONS:
+  source=REGIONS[slug]
   params=dict(where=f"{source['field']}='{source['name']}'",outFields=source['field'],outSR=4326,returnGeometry='true',f='geojson')
   url=source['endpoint']+'?'+urllib.parse.urlencode(params)
   with opener.open(url,timeout=60) as response:raw=response.read(8*1024*1024+1)
@@ -36,4 +40,4 @@ def install(folder='data',opener=None):
   temporary.replace(path)
   path.with_suffix('.source.json').write_text(json.dumps(dict(**source,download_url=url,retrieved_at=dt.datetime.now(dt.timezone.utc).isoformat(),sha256=hashlib.sha256(raw).hexdigest()),indent=2)+'\n')
   print(slug,'verified:',len(raw),'bytes; SHA256',hashlib.sha256(raw).hexdigest())
-if __name__=='__main__':install(sys.argv[1] if len(sys.argv)>1 else 'data')
+if __name__=='__main__':install(sys.argv[1] if len(sys.argv)>1 else 'data',regions=sys.argv[2:] or None)
