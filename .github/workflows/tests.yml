@@ -28,5 +28,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: verified-sheraden
-          path: /tmp/verified-sheraden/*.json
+          path: /tmp/verified-sheraden/
       - run: python -m pytest -q
