@@ -8,7 +8,7 @@ import uuid
 from .core import verification,tax_verification,historical_reduction,number
 from .collector import LIVE, RequestDeferred, tax_expiry
 from .provenance import demo_marked
-from .request import PARAMS
+from .request import listing_parameters
 from .storage import BudgetExceeded
 from .telemetry import event
 
@@ -97,7 +97,7 @@ class Engine:
             pages=0
             while not collection_done and pages<self.settings.max_pages:
                 before_requests=getattr(self.client,'count',0)
-                rows,total=self.client.get('/listings/sale',dict(PARAMS,limit=self.settings.page_size,offset=offset))
+                rows,total=self.client.get('/listings/sale',dict(listing_parameters(self.boundary),limit=self.settings.page_size,offset=offset))
                 stats['discovery_state']='fresh' if getattr(self.client,'count',0)>before_requests else 'cached'
                 stats['listing_observed_at']=getattr(self.client,'last_fetched_at',None)
                 if not isinstance(rows,list):raise ValueError('Listings response must be a list')

@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import math
+import re
 from pathlib import Path
 from .provenance import demo_marked
 
@@ -11,6 +12,33 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def property_type_verification(row):
+    """Structured use/attachment evidence only; architectural style is not a property type."""
+    fields=('propertyType','propertySubType','propertySubtype','structureType','dwellingType')
+    values=[re.sub(r'[^a-z0-9]+','',str(row[k]).lower()) for k in fields if row.get(k)]
+    town={'townhouse','townhome','townhouses','townhomes','attachedtownhouse','attachedtownhome','rowhouse','rowhome','rowhouses','rowhomes','singlefamilyattached','attachedsinglefamily','singlefamilyresidenceattached','terracedhouse','terracedhome','terracehouse','attachedrowhouse'}
+    if any(v in town or v.startswith(('townhouse','townhome')) or v.endswith(('townhouse','townhome','rowhouse','rowhome','terracedhouse')) for v in values):return 'Rejected','townhouse'
+    if any(v in {'land','commercial','industrial'} for v in values):return 'Rejected','non_residential'
+    residential={'singlefamily','singlefamilyresidence','singlefamilydetached','detachedsinglefamily','singlefamilyhome','detached','condo','condominium','multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome','singlefamilyresidential','singlefamilyresidencedetached','detachedsinglefamilyresidence','sfh','sfr'}
+    if row.get('propertyType') and re.sub(r'[^a-z0-9]+','',str(row['propertyType']).lower()) in residential:
+        if row.get('attached') is True or row.get('isAttached') is True or any(v in {'attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome'} for v in values):
+            return 'Pending Verification','attached_property_type_unverified'
+        return 'Candidate',None
+    return 'Pending Verification','property_type_unverified'
+
+
+def geographic_verification(row,boundary):
+    if hasattr(boundary,'evaluate'):return boundary.evaluate(row)
+    if not boundary.contains(row):return 'Rejected','outside_city_or_boundary'
+    if str(row.get('zipCode') or '').split('-')[0]=='15212':return 'Pending Verification','brighton_heights_boundary_unavailable'
+    return 'Candidate',None
+
+
+def report_eligible(row,boundary):
+    """Pending tax/type evidence is allowed; geographic inclusion must be proved."""
+    return verification(row,boundary)[0]!='Rejected' and geographic_verification(row,boundary)[0]=='Candidate'
+
+
 def basic_rejection(row):
     if demo_marked(row): return 'demo_data'
     if row.get('status') != 'Active': return 'inactive'
@@ -18,6 +46,7 @@ def basic_rejection(row):
     zipcode = str(row.get('zipCode', '')).split('-')[0]
     if len(zipcode) != 5 or not zipcode.isdigit(): return 'missing_zip'
     if zipcode in EXCLUDED_ZIPS: return 'excluded_zip'
+    if property_type_verification(row)[0]=='Rejected':return property_type_verification(row)[1]
     for field, low, high in [('bedrooms', 3, math.inf), ('bathrooms', 1, math.inf),
                               ('squareFootage', 1000, math.inf), ('price', 0.01, 200000)]:
         value = row.get(field)
@@ -94,8 +123,9 @@ def verification(row, boundary):
     """Distinguish known failures from evidence that still requires verification."""
     if demo_marked(row): return 'Rejected', ['demo_data']
     missing=[]; failed=[]
-    if str(row.get('propertyType') or '').strip().lower() in {'land','commercial','industrial'}:
-        failed.append('non_residential')
+    type_state,type_reason=property_type_verification(row)
+    if type_state=='Rejected':failed.append(type_reason)
+    elif type_state=='Pending Verification':missing.append(type_reason)
     for field,expected in [('status','Active'),('state','PA')]:
         value=row.get(field)
         if value is None or value=='': missing.append(field)
@@ -112,7 +142,10 @@ def verification(row, boundary):
     x,y=row.get('longitude'),row.get('latitude')
     if not number(x) or not number(y) or not -180<=x<=180 or not -90<=y<=90:
         missing.append('coordinates')
-    elif not boundary.contains(row): failed.append('outside_city_or_boundary')
+    else:
+        geo_state,geo_reason=geographic_verification(row,boundary)
+        if geo_state=='Rejected':failed.append(geo_reason)
+        elif geo_state=='Pending Verification':missing.append(geo_reason)
     if failed: return 'Rejected',failed+missing
     if missing: return 'Pending Verification',missing
     return 'Candidate',[]
@@ -121,6 +154,9 @@ def verification(row, boundary):
 def tax_verification(record, today=None):
     from decimal import Decimal, InvalidOperation
     today=today or dt.date.today()
+    type_state,type_reason=property_type_verification(record)
+    type_evidence=any(record.get(k) for k in ('propertyType','propertySubType','propertySubtype','structureType','dwellingType','attached','isAttached'))
+    if type_evidence and type_state=='Rejected':return 'Rejected',None,type_reason
     taxes=record.get('propertyTaxes')
     if not isinstance(taxes,dict) or not taxes:
         return 'Pending Verification',None,'missing_tax_history'
@@ -131,7 +167,9 @@ def tax_verification(record, today=None):
         return 'Pending Verification',None,'invalid_latest_tax_amount'
     amount=Decimal(str(entry['total']));adjusted=amount+Decimal('100')
     tax={'year':year,'annual':float(amount),'adjusted':float(adjusted)}
-    return ('Qualified',tax,None) if adjusted<Decimal('2000') else ('Rejected',tax,'annual_tax_too_high')
+    if adjusted>=Decimal('2000'):return 'Rejected',tax,'annual_tax_too_high'
+    if type_evidence and type_state=='Pending Verification':return 'Pending Verification',tax,type_reason
+    return 'Qualified',tax,None
 
 
 def historical_reduction(row):

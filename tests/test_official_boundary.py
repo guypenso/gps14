@@ -2,13 +2,13 @@
 import json
 from pathlib import Path
 import pytest
-from rentalsourcing.geography import load_boundary
+from rentalsourcing.geography import load_boundary,load_city_boundary
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_official_city_contains_downtown_but_excludes_neighboring_municipalities():
-    boundary = load_boundary(ROOT / 'data/pittsburgh.geojson')
+    boundary = load_city_boundary(ROOT / 'data/pittsburgh.geojson')
     for longitude, latitude in [(-79.9961, 40.4406), (-79.953, 40.444)]:
         assert boundary.contains(dict(longitude=longitude, latitude=latitude))
     for longitude, latitude in [(-80.0395, 40.4965), (-80.066, 40.39), (-79.886, 40.442)]:
