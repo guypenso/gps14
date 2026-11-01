@@ -44,4 +44,11 @@ def funnel(store,boundary,now):
 def sync_health(store):
     rows=store.execute("SELECT r.synced_at,r.last_attempt_at,r.error_type,r.payload FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent'").fetchall()
     accepted=[r[0] for r in rows if r[0]];failed=[r[1] for r in rows if not r[0] and r[2] and r[1]]
-    return dict(accepted_reports=len(accepted),pending_reports=sum(not r[0] for r in rows),last_success_at=max(accepted,default=None),last_unresolved_failure_at=max(failed,default=None),error_types=dict(Counter(r[2] for r in rows if not r[0] and r[2])),selected_cards=sum(len(json.loads(r[3]).get('opportunities',[])) for r in rows))
+    reports=[];identities=set()
+    for synced,last_attempt,error,raw in rows:
+        report=json.loads(raw);cards=report.get('opportunities',[])
+        if synced:identities.update(p['source_id'] for p in cards if p.get('source_id'))
+        reports.append(dict(report_id=report['report_id'],report_date=report['report_date'],selected_cards=len(cards),synced_at=synced,error_type=error))
+    targeted=store.execute('SELECT payload FROM settings WHERE name=?',('targeted-sync:rockledge:2026-10-28:v1',)).fetchone()
+    recovery=json.loads(targeted[0]) if targeted else {}
+    return dict(accepted_reports=len(accepted),pending_reports=sum(not r[0] for r in rows),last_success_at=max(accepted,default=None),last_unresolved_failure_at=max(failed,default=None),error_types=dict(Counter(r[2] for r in rows if not r[0] and r[2])),selected_cards=sum(len(json.loads(r[3]).get('opportunities',[])) for r in rows),accepted_distinct_source_ids=len(identities),reports=reports[-10:],targeted_recovery={k:recovery.get(k) for k in ['attempts','synced_at','error_type']})
