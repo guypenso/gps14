@@ -27,7 +27,7 @@ def test_official_brighton_and_bellevue_and_postal_labels(policy):
   assert not policy.city.contains(row)
   assert verification(row,policy)==('Candidate',[])
  assert verification(listing(longitude=-79.9961,latitude=40.4406,zipCode='15212'),policy)[0]=='Rejected'
- assert 'outside_brighton_heights_15212' in verification(listing(longitude=-79.9961,latitude=40.4406),policy)[1]
+ assert 'outside_approved_neighborhoods_15212' in verification(listing(longitude=-79.9961,latitude=40.4406),policy)[1]
  assert verification(listing(longitude=-79.9961,latitude=40.4406,zipCode='15222'),policy)==('Candidate',[])
 
 def test_postal_15202_never_substitutes_for_municipality(policy):
@@ -41,7 +41,7 @@ def test_postal_15202_never_substitutes_for_municipality(policy):
 
 @pytest.mark.parametrize('kind',['Townhouse','Townhome','Town House','Town-Home','Row House','Single Family Attached','Single Family - Townhouse','Terraced House'])
 def test_townhouse_exclusion_everywhere(policy,kind):
- for region,zip in [(policy.brighton,'15212'),(policy.bellevue,'15202'),(policy.city,'15222')]:
+ for region,zip in [(policy.spring_hill,'15212'),(policy.brighton,'15212'),(policy.bellevue,'15202'),(policy.city,'15222')]:
   row=at(region,zipCode=zip,propertyType=kind)
   assert verification(row,policy)[0]=='Rejected'
   assert not report_eligible(row,policy)
@@ -77,15 +77,15 @@ def test_region_checksum_and_missing_polygon_fail_closed(tmp_path):
  with pytest.raises(FileNotFoundError):load_region(tmp_path,'brighton-heights')
 
 def test_pipeline_email_and_sync_same_selection_with_no_extra_discovery(store,settings,clock,policy):
- rows=[at(policy.brighton,id='brighton',formattedAddress='FICTIONAL BRIGHTON FIXTURE'),at(policy.bellevue,id='bellevue',zipCode='15202',formattedAddress='FICTIONAL BELLEVUE FIXTURE'),at(policy.bellevue,id='tax-pending',zipCode='15202',formattedAddress='FICTIONAL PENDING FIXTURE'),at(policy.bellevue,id='townhouse',zipCode='15202',propertyType='Townhouse'),listing('other-15212',longitude=-79.9961,latitude=40.4406),listing('not-bellevue',longitude=-80.0953,latitude=40.510,zipCode='15202'),at(policy.bellevue,id='type-pending',zipCode='15202',propertyType=None),at(policy.bellevue,id='geo-pending',zipCode='15202',longitude=None)]
+ rows=[at(policy.spring_hill,id='spring-hill',formattedAddress='FICTIONAL SPRING HILL FIXTURE'),at(policy.brighton,id='brighton',formattedAddress='FICTIONAL BRIGHTON FIXTURE'),at(policy.bellevue,id='bellevue',zipCode='15202',formattedAddress='FICTIONAL BELLEVUE FIXTURE'),at(policy.bellevue,id='tax-pending',zipCode='15202',formattedAddress='FICTIONAL PENDING FIXTURE'),at(policy.bellevue,id='townhouse',zipCode='15202',propertyType='Townhouse'),listing('other-15212',longitude=-79.9961,latitude=40.4406),listing('not-bellevue',longitude=-80.0953,latitude=40.510,zipCode='15202'),at(policy.bellevue,id='type-pending',zipCode='15202',propertyType=None),at(policy.bellevue,id='geo-pending',zipCode='15202',longitude=None)]
  provider=Provider(rows);provider.records.pop('tax-pending');s=replace(settings,page_size=100,per_run=4)
  result=daily_discovery(store,policy,s,clock().date().isoformat(),clock=clock,opener=provider)
  assert result['status']=='sent'
  listings=[r for r in provider.calls if '/listings/sale?' in r.full_url];assert len(listings)==1
  params=parse_qs(urlsplit(listings[0].full_url).query);assert 'city' not in params and 'latitude' in params
  report=json.loads(store.execute('SELECT payload FROM command_center_reports WHERE outbox_id=?',(result['outbox_id'],)).fetchone()[0]);ids={p['source_id'] for p in report['opportunities']}
- assert ids=={'brighton','bellevue','tax-pending','type-pending'}
- assert {p['source_id'] for p in report['opportunities'] if p['qualification']=='verified'}=={'brighton','bellevue'}
+ assert ids=={'spring-hill','brighton','bellevue','tax-pending','type-pending'}
+ assert {p['source_id'] for p in report['opportunities'] if p['qualification']=='verified'}=={'spring-hill','brighton','bellevue'}
  assert len(provider.calls)-len(provider.messages)<=4
  text=provider.messages[0]['text'];assert 'FICTIONAL BELLEVUE FIXTURE' in text and 'FICTIONAL BRIGHTON FIXTURE' in text
  for id in ['townhouse','other-15212','not-bellevue']:assert store.get_property(id)['state']=='Rejected'

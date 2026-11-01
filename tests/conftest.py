@@ -49,7 +49,7 @@ def boundary(tmp_path):
     other.write_text(json.dumps(dict(type='Polygon',coordinates=[[[-80.2,40.6],[-80.15,40.6],[-80.15,40.65],[-80.2,40.65],[-80.2,40.6]]])))
     excluded=tmp_path/'fixture-sheraden.geojson'
     excluded.write_text(json.dumps(dict(type='Polygon',coordinates=[[[-80.3,40.3],[-80.25,40.3],[-80.25,40.35],[-80.3,40.35],[-80.3,40.3]]])))
-    return EligibilityBoundary(city,city,Boundary(other),Boundary(excluded))
+    return EligibilityBoundary(city,city,Boundary(other),Boundary(excluded),city)
 
 class Clock:
     def __init__(self):self.value=dt.datetime(2026,10,16,12,tzinfo=dt.timezone.utc)
