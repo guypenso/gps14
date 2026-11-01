@@ -16,10 +16,11 @@ def load_city_boundary(path):
         raise ValueError('City boundary checksum mismatch')
     return Boundary(path)
 
-POLICY='pittsburgh-bellevue-brighton-sheraden-types-v2'
+POLICY='pittsburgh-bellevue-brighton-spring-hill-sheraden-types-v3'
 REGION_SOURCES={
  'bellevue':('https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries','https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/AlleghenyCountyMunicipalBoundaries/FeatureServer/0/query','NAME','Bellevue'),
  'brighton-heights':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Brighton Heights'),
+ 'spring-hill-city-view':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Spring Hill-City View'),
  'sheraden':('https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0','https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query','hood','Sheraden')}
 
 def load_region(folder,slug):
@@ -34,8 +35,8 @@ def load_region(folder,slug):
     return Boundary(path)
 
 class EligibilityBoundary:
-    def __init__(self,city,brighton,bellevue,sheraden):
-        self.city=city;self.brighton=brighton;self.bellevue=bellevue;self.sheraden=sheraden
+    def __init__(self,city,brighton,bellevue,sheraden,spring_hill):
+        self.city=city;self.brighton=brighton;self.bellevue=bellevue;self.sheraden=sheraden;self.spring_hill=spring_hill
         self.geometry=city.geometry.union(bellevue.geometry)
     def evaluate(self,row):
         from shapely.geometry import Point
@@ -45,7 +46,7 @@ class EligibilityBoundary:
         if self.sheraden.geometry.covers(Point(x,y)):return 'Rejected','sheraden_neighborhood'
         if self.bellevue.contains(row):return 'Candidate',None
         if not self.city.contains(row):return 'Rejected','outside_city_or_boundary'
-        if str(row.get('zipCode') or '').split('-')[0]=='15212' and not self.brighton.contains(row):return 'Rejected','outside_brighton_heights_15212'
+        if str(row.get('zipCode') or '').split('-')[0]=='15212' and not (self.brighton.contains(row) or self.spring_hill.contains(row)):return 'Rejected','outside_approved_neighborhoods_15212'
         return 'Candidate',None
     def contains(self,row):return self.evaluate(row)[0]=='Candidate'
     def search_parameters(self):
@@ -58,4 +59,4 @@ class EligibilityBoundary:
         return dict(latitude=round(lat,7),longitude=round(lon,7),radius=radius)
 
 def load_boundary(path):
-    return EligibilityBoundary(load_city_boundary(path),load_region(Path(path).parent,'brighton-heights'),load_region(Path(path).parent,'bellevue'),load_region(Path(path).parent,'sheraden'))
+    return EligibilityBoundary(load_city_boundary(path),load_region(Path(path).parent,'brighton-heights'),load_region(Path(path).parent,'bellevue'),load_region(Path(path).parent,'sheraden'),load_region(Path(path).parent,'spring-hill-city-view'))
