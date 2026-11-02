@@ -14,7 +14,7 @@ from .provenance import demo_marked
 from .review_feedback import refresh
 from .public_tax import download_and_match,unknown
 
-JOB='stored-review-inventory:2026-11-02:v1'
+JOB='stored-review-inventory:2026-11-02:bedrooms3-4:v1'
 
 
 def select(store,boundary,now):
@@ -45,7 +45,7 @@ def run(store,boundary,now,*,execute=False,download=False,config=None,opener=Non
     saved=store.execute('SELECT payload FROM settings WHERE name=?',(job_key,)).fetchone()
     if execute and saved and json.loads(saved[0]).get('synced_at'):
         print('REVIEW_INVENTORY_ALREADY_ACCEPTED');return json.loads(saved[0])
-    if execute and refresh_decisions:refresh(store,now,opener,config)
+    if execute and refresh_decisions:print('PENTEN_REVIEW_FEEDBACK '+json.dumps(refresh(store,now,opener,config),sort_keys=True))
     pairs,counts=select(store,boundary,now)
     print('STORED_REVIEW_DRY_RUN '+json.dumps(counts,sort_keys=True))
     if not execute:return counts
