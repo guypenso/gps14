@@ -11,6 +11,7 @@ from .database import validate_postgres_url
 from .telemetry import event
 
 PREFIX='price-observation:'
+BATCH_SIZE=10  # At most 32 receiver writes, leaving room for D1 read/guard queries.
 
 def money(value):
     if isinstance(value,bool) or not isinstance(value,(float,int)) or not math.isfinite(value) or value<=0:return None
@@ -56,8 +57,8 @@ def flush(store,config=None,now=None,opener=None):
         if not row.get('synced_at'):pending.append((name,row))
     pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
     sent=0;coverage=None
-    for offset in range(0,min(len(pending),900),30):
-        part=pending[offset:offset+30];payload={'observations':[r['observation'] for name,r in part]};payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest();body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
+    for offset in range(0,min(len(pending),900),BATCH_SIZE):
+        part=pending[offset:offset+BATCH_SIZE];payload={'observations':[r['observation'] for name,r in part]};payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest();body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
         for name,row in part:row['attempts']+=1;store.save_setting(name,row)
         try:
             with opener.open(signed_request((url,key,token),body,now),timeout=30) as response:
