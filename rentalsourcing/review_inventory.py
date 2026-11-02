@@ -14,7 +14,7 @@ from .provenance import demo_marked
 from .review_feedback import refresh
 from .public_tax import download_and_match,unknown
 
-JOB='stored-review-inventory:2026-11-02:bedrooms3-4:v1'
+JOB='stored-review-inventory:2026-11-02:turnkey-v1'
 
 
 def select(store,boundary,now):

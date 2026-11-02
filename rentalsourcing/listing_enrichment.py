@@ -5,7 +5,7 @@ from .database import validate_postgres_url
 from .storage import Store
 from .request import NoRedirect
 
-JOB='listing-contact-enrichment:2026-11-02:v1'
+JOB='listing-contact-enrichment:2026-11-02:turnkey-v1'
 
 def evidence(p,observed):
     a=p.get('listingAgent');office=p.get('listingOffice');agents=[]
@@ -14,7 +14,8 @@ def evidence(p,observed):
     def bounded(value,limit):return value[:limit] if isinstance(value,str) else None
     for a in agents:
         for field,limit in [('name',200),('email',254),('phone',60),('brokerage',200)]:a[field]=bounded(a[field],limit)
-    return dict(source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
+    from .turnkey import evidence as turnkey_evidence
+    return dict(turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
 
 def run(store,config,*,job_key=JOB,opener=None):
     if not config:return {'state':'disabled'}
@@ -35,7 +36,10 @@ def run(store,config,*,job_key=JOB,opener=None):
         ledger['offset']+=len(records);ledger['cursor']=result.get('next_cursor');ledger['batches']+=1;ledger['summary']=result.get('summary',{})
         ledger['done']=ledger['offset']>=len(rows) and ledger['cursor'] is None
         store.save_setting(job_key,ledger)
-        if ledger['done']:print('LISTING_ENRICHMENT_ACCEPTED '+json.dumps(dict(source_records=len(rows),**ledger['summary']),sort_keys=True));return ledger
+        if ledger['done']:
+            from .turnkey import evidence as policy,FIELDS
+            source=[json.loads(row[1]) for row in rows]
+            print('LISTING_ENRICHMENT_ACCEPTED '+json.dumps(dict(source_records=len(rows),source_turnkey=sum(policy(p)['classified'] for p in source),source_marketing_records=sum(any(isinstance(p.get(k),str) and p[k].strip() for k in FIELDS) for p in source),**ledger['summary']),sort_keys=True));return ledger
         # Once initialization is complete, do not initialize the same rows again.
         if ledger['cursor'] is None:ledger['cursor']=10000
     raise ValueError('Enrichment batch limit reached; progress preserved')
