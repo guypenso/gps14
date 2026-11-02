@@ -1,0 +1,29 @@
+{
+  "year": 2026,
+  "school_period": "2026-2027",
+  "retrieved_at": "2026-11-02T07:22:07+00:00",
+  "county_mills": "6.43",
+  "municipalities": {
+    "Pittsburgh": {
+      "municipal_mills": "9.67",
+      "school": "Pittsburgh",
+      "school_mills": "10.457",
+      "library_mills": "0.25",
+      "parks_mills": "0.50",
+      "special_levies_complete": true
+    },
+    "Bellevue": {
+      "municipal_mills": "5.89",
+      "school": "Northgate",
+      "school_mills": "31.202",
+      "library_mills": "0",
+      "parks_mills": "0",
+      "special_levies_complete": false
+    }
+  },
+  "sources": [
+    "https://alleghenycountytreasurer.us/real-estate-tax/local-and-school-district-tax-millage/",
+    "https://www.pittsburghpa.gov/City-Government/Finance-Budget/Taxes/Tax-FAQs",
+    "https://www.pittsburghpa.gov/files/assets/city/v/2/omb/documents/operating-budgets/2026-operating-budget.pdf"
+  ]
+}
