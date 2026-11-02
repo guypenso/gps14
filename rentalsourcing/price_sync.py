@@ -54,7 +54,7 @@ def flush(store,config=None,now=None,opener=None):
     for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall():
         row=json.loads(raw)
         if not row.get('synced_at'):pending.append((name,row))
-    pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],r[0]))
+    pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
     sent=0;coverage=None
     for offset in range(0,min(len(pending),900),30):
         part=pending[offset:offset+30];payload={'observations':[r['observation'] for name,r in part]};payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest();body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
