@@ -1,6 +1,6 @@
 """Deterministic current-listing marketing exclusion; not a renovation inference."""
 import re,unicodedata
-FIELDS=('description','propertyDescription','listingDescription','remarks','publicRemarks','listingRemarks','marketingRemarks','title','listingTitle','investmentType','marketingType','propertyClassification','propertySubType','propertySubtype')
+FIELDS=('description','propertyDescription','listingDescription','remarks','publicRemarks','listingRemarks','marketingRemarks','title','listingTitle','investmentType','marketingType','propertyClassification','propertyType','listingType','investmentStrategy','propertySubType','propertySubtype')
 META=('listingMetadata','marketing','classification','metadata')
 NEG=re.compile(r"\b(?:not|no|non|never|isn't|isnt|aren't|wasn't|cannot be)\s+(?:(?:a|an|fully|complete|completely|truly|really|yet|currently|quite|necessarily|considered|at|all|longer)\s+){0,6}$")
 TERM=re.compile(r'\bturn\s*key\b')
