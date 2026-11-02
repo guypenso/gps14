@@ -32,7 +32,9 @@
       "updated_at": "2026-10-16T12:00:00+00:00",
       "listing_observed_at": "2026-10-16T12:00:00+00:00",
       "verified_at": "2026-10-16T12:00:00+00:00",
-      "tax_fetched_at": "2026-10-16T12:00:00+00:00"
+      "tax_fetched_at": "2026-10-16T12:00:00+00:00",
+      "latitude": 40.45,
+      "longitude": -80
     },
     {
       "source_id": "contract-b",
@@ -63,7 +65,9 @@
       "updated_at": "2026-10-16T12:00:00+00:00",
       "listing_observed_at": "2026-10-16T12:00:00+00:00",
       "verified_at": null,
-      "tax_fetched_at": null
+      "tax_fetched_at": null,
+      "latitude": 40.45,
+      "longitude": -80
     }
   ]
 }

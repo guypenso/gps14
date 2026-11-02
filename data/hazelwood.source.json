@@ -1,0 +1,9 @@
+{
+  "source": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0",
+  "endpoint": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query",
+  "field": "hood",
+  "name": "Hazelwood",
+  "download_url": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query?where=hood%3D%27Hazelwood%27&outFields=hood&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-02T22:08:23.353254+00:00",
+  "sha256": "a5d2ef6fb40893a8833b8aae9a9a969a188a9684d4e0a37a8d7dc8a58988d84b"
+}
