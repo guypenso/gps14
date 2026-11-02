@@ -134,3 +134,33 @@ def test_unverified_geography_cannot_crowd_verified_bellevue_out_of_pending_repo
  d=Digest(store,policy,settings,clock,Provider([]));identity=d.prepare('pending-only',clock().date().isoformat(),{'discovery_state':'fresh'})
  report=json.loads(store.execute('SELECT payload FROM command_center_reports WHERE outbox_id=?',(identity,)).fetchone()[0])
  assert [p['source_id'] for p in report['opportunities']]==['zz-eligible']
+
+@pytest.mark.parametrize('region,reason',[('hazelwood','hazelwood_neighborhood'),('mount_washington','mount_washington_neighborhood')])
+def test_new_neighborhood_exclusions_use_coordinates_not_marketing_or_zip(policy,region,reason):
+ hood=getattr(policy,region)
+ for zipcode in ['15207','15219','15205','15212']:
+  row=at(hood,zipCode=zipcode,description='Perfect property',neighborhood='Different neighborhood')
+  assert verification(row,policy)[0]=='Rejected'
+  assert reason in verification(row,policy)[1]
+  assert not report_eligible(row,policy)
+ # Neighboring eligible areas retain eligibility even when marketing mentions these neighborhoods.
+ for name in ['Hazelwood','Mount Washington','Mt Washington','Mt. Washington']:
+  row=at(policy.brighton,neighborhood=name,description='Near '+name,formattedAddress='100 Mount Washington Road')
+  assert verification(row,policy)==('Candidate',[])
+ for name in ['Mt Washington','Mt. Washington','Mount Washington']:
+  assert verification(at(policy.mount_washington,zipCode='15219',neighborhood=name),policy)[0]=='Rejected'
+ row=at(hood,longitude=None,neighborhood='Mt. Washington')
+ assert verification(row,policy)[0]=='Pending Verification'
+ assert not report_eligible(row,policy)
+
+def test_new_exclusions_preserve_stored_history_and_stop_tax_work(store,settings,clock,policy):
+ rows=[at(policy.hazelwood,id='hazelwood'),at(policy.mount_washington,id='mount-washington'),at(policy.brighton,id='keep')]
+ for p in rows:store.save_property(p['id'],p,'Pending Verification',['tax_required'],LIVE,1,clock().isoformat())
+ count=store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
+ reevaluate(store,policy,clock())
+ assert store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]==count
+ for identity in ['hazelwood','mount-washington']:
+  assert store.execute('SELECT state FROM properties WHERE id=?',(identity,)).fetchone()[0]=='Rejected'
+ from rentalsourcing.review_inventory import select
+ cards,stats=select(store,policy,clock())
+ assert not set(['hazelwood','mount-washington']) & {card['source_id'] for card,p in cards}

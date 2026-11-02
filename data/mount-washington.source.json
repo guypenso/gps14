@@ -1,0 +1,9 @@
+{
+  "source": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0",
+  "endpoint": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query",
+  "field": "hood",
+  "name": "Mount Washington",
+  "download_url": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query?where=hood%3D%27Mount+Washington%27&outFields=hood&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-02T22:08:23.685880+00:00",
+  "sha256": "092d1f58a267e3cb6eb14adb00027d81b3c8b176eda9fd17d3adc3f5016ed70d"
+}

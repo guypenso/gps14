@@ -19,6 +19,8 @@ REGIONS={
  'spring-hill-city-view':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
   endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
   field='hood',name='Spring Hill-City View'),
+ 'hazelwood':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',field='hood',name='Hazelwood'),
+ 'mount-washington':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',field='hood',name='Mount Washington'),
  'sheraden':dict(source='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0',
   endpoint='https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query',
   field='hood',name='Sheraden')}

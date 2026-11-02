@@ -57,7 +57,7 @@ def snapshot(store, identity, day, items, stats, now, boundary=None):
         first = store.execute('SELECT MIN(observed_at) FROM price_history WHERE property_id=?', (p.get('id'),)).fetchone()[0]
         observed = entry.get('listing_observed_at') or entry.get('observed_at') or entry.get('verified_at')
         opportunities.append(dict(
-            source_id=p.get('id'), source='RentCast', source_label='RentCast Sale Listings',
+            latitude=p.get('latitude'),longitude=p.get('longitude'),source_id=p.get('id'), source='RentCast', source_label='RentCast Sale Listings',
             address=p.get('formattedAddress'), street_address=p.get('addressLine1'),
             unit=p.get('addressLine2'), city=p.get('city'), state=p.get('state'),
             zip_code=p.get('zipCode'), price=p.get('price'), bedrooms=p.get('bedrooms'),
