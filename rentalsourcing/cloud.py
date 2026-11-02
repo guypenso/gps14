@@ -30,12 +30,13 @@ def scheduled_job(store,day):
 def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     """Existing cron + collector + outbox. Caller holds the existing scan lock."""
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
-    from .price_sync import safe_flush
+    from .price_sync import safe_flush,safe_current_baselines
     safe_flush(store)
     digest=Digest(store,boundary,settings,clock,opener)
     old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if old:
         result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
+        if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
         return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
     stats={};failure=None;client=None
     # Human decisions are read before enrichment. Failed feedback keeps discovery
@@ -84,6 +85,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             from .listing_enrichment import run as enrich_listings
             enrich_listings(store,config,job_key='listing-contact-enrichment:'+day+':daily:v1')
     except Exception as exc:event('stored_review_sync_deferred',error_type=type(exc).__name__)
+    if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
 
 
