@@ -24,4 +24,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
+      - name: Retrieve authoritative neighborhood release data
+        if: github.ref_name == 'codex/hazelwood-mount-washington-20261103'
+        run: python scripts/fetch_regions.py data hazelwood mount-washington
+      - uses: actions/upload-artifact@v4
+        if: github.ref_name == 'codex/hazelwood-mount-washington-20261103'
+        with:
+          name: verified-neighborhood-polygons
+          path: |
+            data/hazelwood.*
+            data/mount-washington.*
       - run: python -m pytest -q
