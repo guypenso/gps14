@@ -27,6 +27,9 @@ jobs:
       - name: Retrieve authoritative neighborhood release data
         if: github.ref_name == 'codex/hazelwood-mount-washington-20261103' || github.head_ref == 'codex/hazelwood-mount-washington-20261103'
         run: python scripts/fetch_regions.py data hazelwood mount-washington
+      - name: Read validated public boundary inputs
+        if: github.head_ref == 'codex/hazelwood-mount-washington-20261103'
+        run: python -c "import pathlib,base64; [print('PUBLIC_BOUNDARY_INPUT '+p.name+' '+base64.b64encode(p.read_bytes()).decode()) for p in sorted(pathlib.Path('data').glob('*')) if p.name.startswith(('hazelwood.','mount-washington.'))]"
       - uses: actions/upload-artifact@v4
         if: github.ref_name == 'codex/hazelwood-mount-washington-20261103' || github.head_ref == 'codex/hazelwood-mount-washington-20261103'
         with:
