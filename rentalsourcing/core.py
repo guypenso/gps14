@@ -4,6 +4,7 @@ import math
 import re
 from pathlib import Path
 from .provenance import demo_marked
+from .turnkey import evidence as turnkey_evidence
 
 EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
@@ -41,6 +42,7 @@ def report_eligible(row,boundary):
 
 def basic_rejection(row):
     if demo_marked(row): return 'demo_data'
+    if turnkey_evidence(row)['classified']:return 'turnkey'
     if row.get('status') != 'Active': return 'inactive'
     if row.get('state') != 'PA': return 'state'
     zipcode = str(row.get('zipCode', '')).split('-')[0]
@@ -123,6 +125,7 @@ def verification(row, boundary):
     """Distinguish known failures from evidence that still requires verification."""
     if demo_marked(row): return 'Rejected', ['demo_data']
     missing=[]; failed=[]
+    if turnkey_evidence(row)['classified']:failed.append('turnkey')
     type_state,type_reason=property_type_verification(row)
     if type_state=='Rejected':failed.append(type_reason)
     elif type_state=='Pending Verification':missing.append(type_reason)
