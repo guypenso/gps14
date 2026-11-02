@@ -78,6 +78,8 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         if config and result in {'sent','already_sent'}:
             from .review_inventory import run
             run(store,boundary,clock(),execute=True,config=config,job_key='stored-review-inventory:'+day+':daily:v1')
+            from .listing_enrichment import run as enrich_listings
+            enrich_listings(store,config,job_key='listing-contact-enrichment:'+day+':daily:v1')
     except Exception as exc:event('stored_review_sync_deferred',error_type=type(exc).__name__)
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
 
