@@ -73,6 +73,20 @@ def flush(store,config=None,now=None,opener=None):
     event('price_sync_accepted',observations=sent,pending=max(0,len(pending)-sent),coverage=summary)
     return {'state':'accepted','sent':sent,'pending':max(0,len(pending)-sent),'coverage':summary}
 
+def safe_current_baselines(store,boundary):
+    """After report imports, establish newly tracked candidates without old alerts."""
+    try:
+        if not review_configuration():return {'state':'disabled'}
+        from .core import verification
+        for identity,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties WHERE source=?',(LIVE,)).fetchall():
+            p=json.loads(raw)
+            if verification(p,boundary)[0]=='Candidate':
+                enqueue(store,p,observed,observed,observation_id='tracked-baseline:'+identity+':'+observed,historical=True)
+        return safe_flush(store)
+    except Exception as exc:
+        event('price_baseline_deferred',error_type=type(exc).__name__)
+        return {'state':'deferred'}
+
 def safe_flush(store):
     try:return flush(store)
     except Exception as exc:event('price_sync_deferred',error_type=type(exc).__name__);return {'state':'deferred'}

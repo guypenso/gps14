@@ -57,3 +57,21 @@ def test_batches_fit_receiver_query_budget_without_losing_events(store,clock):
     assert result['sent']==23 and result['pending']==0
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+def test_post_report_baseline_replays_previously_untracked_observation_once(store,boundary,clock,monkeypatch):
+    from rentalsourcing import price_sync
+    p=listing('new-price-fixture');now=clock().isoformat()
+    store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,now)
+    enqueue(store,p,now,now,observation_id='snapshot:before-report')
+    # Its first delivery preceded creation of the PENTEN opportunity.
+    name,raw=store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchone()
+    row=json.loads(raw);row['synced_at']=now;store.save_setting(name,row)
+    monkeypatch.setattr(price_sync,'review_configuration',lambda:('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'service'))
+    monkeypatch.setattr(price_sync,'safe_flush',lambda store:{'state':'deferred'})
+    price_sync.safe_current_baselines(store,boundary);price_sync.safe_current_baselines(store,boundary)
+    pending=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall() if not json.loads(r[0]).get('synced_at')]
+    assert len(pending)==1
+    assert pending[0]['observation']['historical'] is True
+    assert pending[0]['observation']['price_cents']==money(p['price'])
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
