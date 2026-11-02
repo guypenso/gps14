@@ -18,7 +18,7 @@ from .telemetry import event
 LABELS={'Qualified':'מאומת','Pending Verification':'ממתין לאימות','Rejected':'נפסל'}
 REASONS={'excluded_zip':'מיקוד מוחרג','price':'מחיר חסר או מחוץ לתקרה','bedrooms':'מספר חדרי שינה חסר או נמוך מ־3',
  'bathrooms':'מספר אמבטיות חסר או נמוך מ־1','squareFootage':'שטח חסר או נמוך מ־1,000 sqft',
- 'outside_city_or_boundary':'מחוץ לפיטסבורג ובלוויו או על הגבול','outside_brighton_heights_15212':'מיקוד 15212 מחוץ ל־Brighton Heights','sheraden_neighborhood':'נכס בשכונת Sheraden המוחרגת','neighborhood_boundaries_unavailable':'גבולות שכונה רשמיים אינם זמינים לאימות','townhouse':'בית טורי מוחרג','property_type_unverified':'סוג הנכס דורש אימות','attached_property_type_unverified':'סוג בית צמוד דורש אימות','coordinates':'קואורדינטות חסרות או לא תקינות',
+ 'outside_city_or_boundary':'מחוץ לפיטסבורג ובלוויו או על הגבול','outside_brighton_heights_15212':'מיקוד 15212 מחוץ ל־Brighton Heights','hazelwood_neighborhood':'Hazelwood neighborhood excluded','mount_washington_neighborhood':'Mount Washington neighborhood excluded','sheraden_neighborhood':'נכס בשכונת Sheraden המוחרגת','neighborhood_boundaries_unavailable':'גבולות שכונה רשמיים אינם זמינים לאימות','townhouse':'בית טורי מוחרג','property_type_unverified':'סוג הנכס דורש אימות','attached_property_type_unverified':'סוג בית צמוד דורש אימות','coordinates':'קואורדינטות חסרות או לא תקינות',
  'annual_tax_too_high':'המס השנתי בתוספת $100 אינו נמוך מ־$2,000','missing_tax_history':'היסטוריית מס חסרה',
  'invalid_latest_tax_amount':'סכום המס האחרון חסר או לא תקין','missing_tax_year':'שנת מס חסרה',
  'tax_not_verified':'נתוני המס טרם אומתו','stale_listing':'אימות המודעה ישן מ־24 שעות',
