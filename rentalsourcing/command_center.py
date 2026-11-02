@@ -30,6 +30,14 @@ def configuration():
     return url, secret, service_token
 
 
+def review_configuration():
+    if os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()!='true':return None
+    url=os.getenv('COMMAND_CENTER_REVIEW_URL','');secret=os.getenv('COMMAND_CENTER_REVIEW_SECRET','');token=os.getenv('COMMAND_CENTER_REVIEW_SERVICE_TOKEN','')
+    parsed=urllib.parse.urlsplit(url)
+    if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path!='/api/rentalsourcing/review-sync' or len(secret)<32 or not token:raise ValueError('Invalid private review-inventory configuration')
+    return url,secret,token
+
+
 def snapshot(store, identity, day, items, stats, now, boundary=None):
     """Called inside the SAME transaction that freezes the email selection."""
     from .digest import listing_link
@@ -63,6 +71,12 @@ def snapshot(store, identity, day, items, stats, now, boundary=None):
             discovered_at=first or observed or now.isoformat(), updated_at=observed or now.isoformat(),
             listing_observed_at=observed, verified_at=entry.get('verified_at'),
             tax_fetched_at=entry.get('tax_fetched_at')))
+    # Optional official-data estimates never occupy verified annual-tax fields.
+    public=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
+    if public:
+        estimates=json.loads(public[0]).get('estimates',{})
+        for card in opportunities:
+            if card['source_id'] in estimates:card['tax_estimate']=estimates[card['source_id']]
     body = json.dumps(dict(schema_version=1, report_id=identity, report_date=day,
                           prepared_at=now.isoformat(), discovery_state=stats.get('discovery_state', 'stored' if stats.get('saved_data_only') else 'unknown'),
                           opportunities=opportunities), ensure_ascii=False, separators=(',', ':'))

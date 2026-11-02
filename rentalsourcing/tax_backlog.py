@@ -20,8 +20,12 @@ def review_deferrals():
     except (ValueError,TypeError):raise ValueError('Invalid private tax-review deferral configuration') from None
 
 
-def review_deferred(identity):
-    return hashlib.sha256(str(identity).encode()).hexdigest() in review_deferrals()
+def review_deferred(identity,store=None):
+    if hashlib.sha256(str(identity).encode()).hexdigest() in review_deferrals():return True
+    if store:
+        row=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+str(identity),)).fetchone()
+        if row and json.loads(row[0]).get('status')=='rejected':return True
+    return False
 
 
 def recent(value,now):
@@ -76,7 +80,7 @@ def priorities(store,boundary,now):
     records=[]
     for identity,raw,state,source,observed in store.execute('SELECT id,payload,state,source,observed_at FROM properties').fetchall():
         row=json.loads(raw)
-        if source!=LIVE or verification(row,boundary)[0]!='Candidate' or review_deferred(identity):continue
+        if source!=LIVE or verification(row,boundary)[0]!='Candidate' or review_deferred(identity,store):continue
         cached=store.get_tax(identity,now.isoformat())
         valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
         if valid and tax_verification(cached[0],now.date())[0]!='Pending Verification':continue

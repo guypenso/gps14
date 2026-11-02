@@ -107,9 +107,11 @@ class Digest:
         digest_day='daily:'+day
         old=self.store.execute('SELECT id FROM outbox WHERE job_id=?',(digest_day,)).fetchone()
         if old:return old[0]
+        from .tax_backlog import review_deferred
         items=[];ids=[]
         rows=self.store.execute("SELECT e.id,e.property_id,e.kind,e.previous_price,e.payload,e.price,e.revision FROM deal_events e JOIN scan_tasks t ON e.id=t.event_id WHERE t.job_id=? AND e.state='ready' ORDER BY t.priority,e.created_at,e.id",(job_id,)).fetchall()
         for identity,property_id,kind,previous,payload,price,revision in rows:
+            if review_deferred(property_id,self.store):continue
             data=json.loads(payload);p=self.store.get_property(property_id)
             if not data or not p or p['state']!='Qualified' or p['source']!=LIVE or data.get('source')!=LIVE or data.get('tax_source')!=LIVE:continue
             row=data.get('listing',{})
@@ -127,6 +129,7 @@ class Digest:
         stats=dict(stats);pending=[]
         for payload,reasons,observed in self.store.execute("SELECT payload,reasons,observed_at FROM properties WHERE state='Pending Verification' AND source=? ORDER BY observed_at DESC,id",(LIVE,)).fetchall():
             listing=json.loads(payload)
+            if review_deferred(listing.get('id'),self.store):continue
             if recent_timestamp(observed,self.clock()) and report_eligible(listing,self.boundary):
                 cached=self.store.get_tax(listing.get('id'),self.clock().isoformat());tax=None
                 if cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==listing.get('id') and not demo_marked(cached[0]):

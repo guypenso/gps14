@@ -36,6 +36,16 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
         return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
     stats={};failure=None;client=None
+    # Human decisions are read before enrichment. Failed feedback keeps discovery
+    # available while deferring paid tax work conservatively.
+    from .command_center import configuration
+    if configuration() and os.getenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK','false')=='true':
+        from .review_feedback import refresh
+        try:event('penten_review_feedback',**refresh(store,clock()))
+        except Exception as exc:
+            event('penten_review_feedback_failed',error_type=type(exc).__name__)
+            settings=replace(settings,per_run=1)
+
     if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
     elif settings.approval_mode not in {'billing_cycle','one_time'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     else:
@@ -62,6 +72,13 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     stats['funnel']=safe_read(funnel,store,boundary,clock())
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
+    from .command_center import review_configuration
+    try:
+        config=review_configuration()
+        if config and result in {'sent','already_sent'}:
+            from .review_inventory import run
+            run(store,boundary,clock(),execute=True,config=config,job_key='stored-review-inventory:'+day+':daily:v1')
+    except Exception as exc:event('stored_review_sync_deferred',error_type=type(exc).__name__)
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
 
 
@@ -91,6 +108,8 @@ def main(argv=None):
         event('tax_review_deferrals',count=len(review_deferrals()))
         from .command_center import configuration
         configuration()
+        from .command_center import review_configuration
+        review_configuration()
         exists=Path(settings.boundary_file).is_file()
         if exists:
             boundary=load_boundary(settings.boundary_file)
