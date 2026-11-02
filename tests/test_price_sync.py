@@ -37,3 +37,23 @@ def test_bootstrap_existing_history_is_historical_and_idempotent(store,boundary,
     seed(store,boundary,clock());seed(store,boundary,clock())
     rows=store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall()
     assert len(rows)==2 and all(json.loads(r[0])['observation']['historical'] for r in rows)
+
+def test_batches_fit_receiver_query_budget_without_losing_events(store,clock):
+    now=clock().isoformat()
+    for i in range(23):assert enqueue(store,listing(f'price-{i}'),now,now,observation_id=f'history:{i}')
+    sizes=[]
+    class Response:
+        status=200
+        def __init__(self,req):self.payload=json.loads(req.data)
+        def read(self,n):return json.dumps({'accepted':True,'batch_id':self.payload['batch_id']}).encode()
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+    class Opener:
+        def open(self,req,timeout):
+            sizes.append(len(json.loads(req.data)['observations']))
+            return Response(req)
+    result=flush(store,('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'service'),clock(),Opener())
+    assert sizes==[10,10,3]
+    assert result['sent']==23 and result['pending']==0
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
