@@ -1,7 +1,7 @@
 """Durable price observations using stored history, existing settings and signed sync.
 Never calls RentCast, sends email or changes an investment criterion.
 """
-import datetime as dt,hashlib,json,math,os,urllib.request
+import datetime as dt,hashlib,json,math,os,urllib.request,logging
 from decimal import Decimal,InvalidOperation
 from .command_center import review_configuration,signed_request
 from .request import NoRedirect
@@ -67,7 +67,7 @@ def flush(store,config=None,now=None,opener=None):
             sent+=len(part);coverage=result.get('coverage')
         except Exception as exc:
             for name,row in part:row['error_type']=type(exc).__name__;store.save_setting(name,row)
-            event('price_sync_deferred',error_type=type(exc).__name__,pending=len(pending)-sent);return {'state':'deferred','sent':sent,'pending':len(pending)-sent}
+            event('price_sync_deferred',error_type=type(exc).__name__,http_status=getattr(exc,'code',None),pending=len(pending)-sent);return {'state':'deferred','sent':sent,'pending':len(pending)-sent}
     summary={k:v for k,v in (coverage or {}).items() if k!='properties'}
     event('price_sync_accepted',observations=sent,pending=max(0,len(pending)-sent),coverage=summary)
     return {'state':'accepted','sent':sent,'pending':max(0,len(pending)-sent),'coverage':summary}
@@ -77,6 +77,7 @@ def safe_flush(store):
     except Exception as exc:event('price_sync_deferred',error_type=type(exc).__name__);return {'state':'deferred'}
 
 def main():
+    logging.basicConfig(level=logging.INFO,format='%(message)s')
     store=None
     try:
         from .config import Settings
