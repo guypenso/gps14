@@ -13,8 +13,9 @@ from .storage import BudgetExceeded
 from .telemetry import event
 
 class Engine:
-    def __init__(self,store,boundary,client,settings,clock=None):
+    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None):
         self.store=store;self.boundary=boundary;self.client=client;self.settings=settings
+        self.on_discovery_complete=on_discovery_complete
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
 
     def ingest(self,job_id,row):
@@ -33,6 +34,9 @@ class Engine:
         historical=historical_reduction(row) if not old else None
         when=getattr(self.client,'last_fetched_at',None) or self.clock().isoformat()
         self.store.save_property(identity,row,'Pending Verification' if state=='Candidate' else state,['tax_not_verified'] if state=='Candidate' else reasons,source,revision,when)
+        if source==LIVE:
+            from .price_sync import enqueue
+            enqueue(self.store,row,when,self.clock().isoformat(),observation_id=('history:'+f'{identity}:{revision}') if changed else 'snapshot:'+identity+':'+when,previous=previous,kind='price_change' if changed else 'snapshot',eligible=state=='Candidate')
         if changed:
             self.store.execute('INSERT INTO price_history VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
                (f'{identity}:{revision}',identity,price,previous,int(reduced),when))
@@ -124,6 +128,7 @@ class Engine:
                 stats['discovery_partial']=True
                 stats['partial']=True;store.operation('pagination:'+job_id,'Listing collection paused at the run or page allowance; the next scheduled run resumes this cursor.')
             stats['discovery_complete']=collection_done and not stats.get('sample_truncated',False)
+            if self.on_discovery_complete:self.on_discovery_complete()
             tasks=store.execute('''SELECT t.property_id,t.event_id FROM scan_tasks t WHERE t.job_id=? AND t.done=0
               ORDER BY (SELECT MIN(j.day) FROM scan_tasks older JOIN scan_jobs j ON j.id=older.job_id
                         WHERE older.property_id=t.property_id AND older.done=0),t.priority,t.property_id''',(job_id,)).fetchall()
