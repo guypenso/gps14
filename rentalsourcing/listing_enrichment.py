@@ -39,7 +39,7 @@ def run(store,config,*,job_key=JOB,opener=None):
         if ledger['done']:
             from .turnkey import evidence as policy,FIELDS
             source=[json.loads(row[1]) for row in rows]
-            print('LISTING_ENRICHMENT_ACCEPTED '+json.dumps(dict(source_records=len(rows),source_turnkey=sum(policy(p)['classified'] for p in source),source_marketing_records=sum(any(isinstance(p.get(k),str) and p[k].strip() for k in FIELDS) for p in source),**ledger['summary']),sort_keys=True));return ledger
+            print('LISTING_ENRICHMENT_ACCEPTED '+json.dumps(dict(source_records=len(rows),source_turnkey=sum(policy(p)['classified'] for p in source),source_marketing_records=sum(any(isinstance(p.get(k),str) and p[k].strip() for k in FIELDS if k not in ('propertyType','listingType','propertySubType','propertySubtype')) for p in source),**ledger['summary']),sort_keys=True));return ledger
         # Once initialization is complete, do not initialize the same rows again.
         if ledger['cursor'] is None:ledger['cursor']=10000
     raise ValueError('Enrichment batch limit reached; progress preserved')
