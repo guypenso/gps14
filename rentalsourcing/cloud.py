@@ -30,6 +30,8 @@ def scheduled_job(store,day):
 def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     """Existing cron + collector + outbox. Caller holds the existing scan lock."""
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
+    from .price_sync import safe_flush
+    safe_flush(store)
     digest=Digest(store,boundary,settings,clock,opener)
     old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if old:
@@ -58,7 +60,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             client=Client(store,effective,clock,opener)
             try:
                 scan_job=scheduled_job(store,day)
-                stats=Engine(store,boundary,client,effective,clock).run(scan_job,day)
+                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store)).run(scan_job,day)
                 stats['requests_consumed']=client.count
                 if stats.get('sample_truncated'):stats['partial']=True
             except Exception as exc:
@@ -68,6 +70,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
                 stats.update(partial=True,error_type=failure,error_phase='verification' if stats.get('discovery_state')=='fresh' else 'discovery')
                 if stats.get('discovery_state') not in {'fresh','cached'}:stats['discovery_state']='failed'
                 stats['requests_consumed']=client.count
+    safe_flush(store)
     from .diagnostics import funnel,safe_read
     stats['funnel']=safe_read(funnel,store,boundary,clock())
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
