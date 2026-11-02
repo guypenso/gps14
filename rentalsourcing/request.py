@@ -6,7 +6,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PARAMS = dict(city='Pittsburgh', state='PA', status='Active', bedrooms='3:*',
+PARAMS = dict(city='Pittsburgh', state='PA', status='Active', bedrooms='3:4',
               bathrooms='1:*', squareFootage='1000:*', price='*:200000',
               limit=20, offset=0, includeTotalCount='true')
 

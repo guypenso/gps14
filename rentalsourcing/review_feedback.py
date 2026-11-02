@@ -34,4 +34,4 @@ def refresh(store,now=None,opener=None,config=None):
             if old and json.loads(old[0]).get('status')=='rejected':continue
             store.save_setting(name,dict(d,fetched_at=now.isoformat()))
         store.save_setting('penten_review_feed',dict(fetched_at=now.isoformat(),decisions=len(records)))
-    return {'state':'fresh','decisions':len(records)}
+    return {'state':'fresh','decisions':len(records),'criteria_counts':result.get('criteria_counts',{})}

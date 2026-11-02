@@ -47,10 +47,10 @@ def basic_rejection(row):
     if len(zipcode) != 5 or not zipcode.isdigit(): return 'missing_zip'
     if zipcode in EXCLUDED_ZIPS: return 'excluded_zip'
     if property_type_verification(row)[0]=='Rejected':return property_type_verification(row)[1]
-    for field, low, high in [('bedrooms', 3, math.inf), ('bathrooms', 1, math.inf),
+    for field, low, high in [('bedrooms', 3, 4), ('bathrooms', 1, math.inf),
                               ('squareFootage', 1000, math.inf), ('price', 0.01, 200000)]:
         value = row.get(field)
-        if not number(value) or not low <= value <= high: return field
+        if not number(value) or not low <= value <= high or field=='bedrooms' and not float(value).is_integer(): return field
     if not row.get('id') or not row.get('formattedAddress'): return 'identity'
     return None
 
@@ -133,10 +133,10 @@ def verification(row, boundary):
     zipcode=str(row.get('zipCode') or '').split('-')[0]
     if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
     elif zipcode in EXCLUDED_ZIPS: failed.append('excluded_zip')
-    for field,lo,hi in [('bedrooms',3,math.inf),('bathrooms',1,math.inf),('squareFootage',1000,math.inf),('price',0.01,200000)]:
+    for field,lo,hi in [('bedrooms',3,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf),('price',0.01,200000)]:
         value=row.get(field)
         if not number(value): missing.append(field)
-        elif not lo<=value<=hi: failed.append(field)
+        elif not lo<=value<=hi or field=='bedrooms' and not float(value).is_integer(): failed.append(field)
     if not isinstance(row.get('formattedAddress'),str) or not row['formattedAddress'].strip(): missing.append('address')
     if not isinstance(row.get('id'),str) or not row['id'].strip(): missing.append('property_id')
     x,y=row.get('longitude'),row.get('latitude')
