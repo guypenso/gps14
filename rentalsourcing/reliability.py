@@ -35,8 +35,8 @@ def snapshot(store,now=None):
  identities=store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
  last_job=store.execute('SELECT day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last_job[2]) if last_job else {}
  pending_tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
- sent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE 'daily:%' AND state='sent'").fetchone()[0]
- unsent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE 'daily:%' AND state!='sent' AND state NOT IN ('cancelled_stale','cancelled')").fetchone()[0]
+ sent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE ? AND state='sent'",('daily:%',)).fetchone()[0]
+ unsent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE ? AND state!='sent' AND state NOT IN ('cancelled_stale','cancelled')",('daily:%',)).fetchone()[0]
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()]
  local=now.astimezone(ISRAEL)
  if (local.hour,local.minute)>=(8,45) and daily.get('state')=='not_observed':
