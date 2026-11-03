@@ -149,6 +149,8 @@ def recover(store,boundary,now=None,opener=None):
   if 'before' in saved and 'after' not in saved:
    saved['after']={**audit(store,boundary,now,opener=opener),'receiver':after};store.save_setting(baseline,saved);logging.getLogger(__name__).info('RELIABILITY_AUDIT_AFTER '+json.dumps(saved['after'],sort_keys=True))
  except Exception as exc:result['audit']={'state':'deferred','category':type(exc).__name__}
+ try:result['roundtrip']=roundtrip(store,now,opener=opener)
+ except Exception as exc:result['roundtrip']={'state':'deferred','category':type(exc).__name__}
  try:result['health']=publish(store,now,opener=opener)
  except Exception as e:result['health']={'state':'deferred','category':type(e).__name__}
  return result
@@ -240,3 +242,14 @@ def pending_inventory(store,boundary,now,opener=None):
     if isinstance(exc,ValueError) and 'no longer passes' in str(exc):
      error={'category':'frozen_selection_no_longer_eligible','retryable':False};store.save_setting(hold,{'job':name,'component':component_name,'at':now.isoformat(),'error':error});component(store,component_name,'failed',now=now,pending=1,error=error,recovery='manual_action_required');incident(store,component_name,error,now=now)
    done+=1
+
+
+def roundtrip(store,now=None,opener=None):
+ config=review_configuration()
+ if not config:return {'state':'disabled'}
+ url,key,token=config;config=(url.rsplit('/',1)[0]+'/review-operational-check',key,token);nonce=uuid.uuid4().hex;body=json.dumps({'action':'check','nonce':nonce},separators=(',',':')).encode()
+ def validate(result,raw,response):
+  signature=response.headers.get('X-RentalSourcing-Response-Signature','')
+  if result.get('nonce')!=nonce or not hmac.compare_digest(signature,'v1='+hmac.new(key.encode(),raw,hashlib.sha256).hexdigest()):raise SyncFailure('response_signature',None,False)
+  if result.get('backend_authenticated') is not True:raise SyncFailure('backend_health_unavailable',None,True)
+ return request_json(store,'health_roundtrip','health-roundtrip',config,body,timeout=25,opener=opener,now=now,validate=validate,poll=True)
