@@ -3,6 +3,8 @@ on:
   push:
     branches: [codex/neighborhood-condo-exclusions-20261103]
     paths: [scripts/fetch_regions.py, .github/workflows/verified-exclusion-boundaries.yml]
+  pull_request:
+    paths: [scripts/fetch_regions.py, .github/workflows/verified-exclusion-boundaries.yml]
 permissions:
   contents: read
 jobs:
