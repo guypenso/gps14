@@ -158,6 +158,11 @@ def recover(store,boundary,now=None,opener=None):
 def start_watchdog(url,boundary):
  """Existing dashboard workers, no new service. Session lock prevents overlap with scans."""
  if os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()!='true':return
+ logger=logging.getLogger(__name__)
+ if not logger.handlers:
+  logger.addHandler(logging.StreamHandler())
+ logger.setLevel(logging.INFO)
+ logger.propagate=False
  def loop():
   from .storage import Store
   while True:
@@ -170,7 +175,10 @@ def start_watchdog(url,boundary):
      except Exception:pass
     elif store.lock() and get(store,'watchdog_lease',{}).get('at','')<(dt.datetime.now(UTC)-dt.timedelta(seconds=240)).isoformat():
      store.save_setting('watchdog_lease',{'at':dt.datetime.now(UTC).isoformat()})
-     value=recover(store,boundary);logging.getLogger(__name__).info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted')}))
+     value=recover(store,boundary)
+     evidence=get(store,'reliability_audit:2026-11-03:v1',{})
+     view=snapshot(store)
+     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':evidence,'state':view['state'],'counts':view['counts'],'budget':view['budget']},sort_keys=True))
    except Exception as e:
     logging.getLogger(__name__).error('RELIABILITY_WATCHDOG_FAILED '+type(e).__name__)
     if store:
