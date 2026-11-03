@@ -31,9 +31,10 @@ def run(store,config,*,job_key=JOB,opener=None):
     for _ in range(100):
         records=[evidence(json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+100]]
         body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
-        with opener.open(signed_request((url,key,token),body,now),timeout=90) as response:
-            result=json.loads(response.read(20000))
-            if response.status!=200 or result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
+        from .sync_runtime import request_json
+        def validate(result,*args):
+            if result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
+        result=request_json(store,'listing_enrichment',job_key+':'+str(ledger['offset'])+':'+str(ledger['cursor']),(url,key,token),body,timeout=90,max_bytes=20000,opener=opener,now=now,validate=validate)
         ledger['offset']+=len(records);ledger['cursor']=result.get('next_cursor');ledger['batches']+=1;ledger['summary']=result.get('summary',{})
         ledger['done']=ledger['offset']>=len(rows) and ledger['cursor'] is None
         store.save_setting(job_key,ledger)

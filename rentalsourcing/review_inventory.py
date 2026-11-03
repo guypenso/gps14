@@ -86,15 +86,16 @@ def run(store,boundary,now,*,execute=False,download=False,config=None,opener=Non
             for card in json.loads(batch['payload'])['opportunities']:
                 current=store.get_property(card['source_id'])
                 if not current or verification(current['payload'],boundary)[0]!='Candidate':raise ValueError('Frozen candidate no longer passes non-tax rules; no import performed')
-            request=signed_request(config,batch['payload'].encode(),now)
-            with opener.open(request,timeout=60) as response:
-                receipt=json.loads(response.read(16384))
-                if response.status!=200 or receipt.get('accepted') is not True or receipt.get('report_id')!=json.loads(batch['payload'])['report_id']:raise ValueError('Invalid inventory receipt')
+            from .sync_runtime import request_json
+            report_id=json.loads(batch['payload'])['report_id']
+            def validate(receipt,*args):
+                if receipt.get('accepted') is not True or receipt.get('report_id')!=report_id:raise ValueError('Invalid inventory receipt')
+            receipt=request_json(store,'inventory_sync',report_id,config,batch['payload'].encode(),timeout=60,max_bytes=16384,opener=opener,now=now,validate=validate)
             batch.update(synced_at=now.isoformat(),error_type=None,receipt=receipt);store.save_setting(job_key,ledger)
             for key,value in receipt.get('counts',{}).items():aggregate[key]=aggregate.get(key,0)+value
         except Exception as exc:
             batch['error_type']=type(exc).__name__;store.save_setting(job_key,ledger)
-            raise ValueError('Stored review delivery failed: '+type(exc).__name__+(' HTTP '+str(exc.code) if hasattr(exc,'code') else '')) from None
+            raise ValueError('Stored review delivery failed: '+type(exc).__name__+(' HTTP '+str(getattr(exc,'http_status',getattr(exc,'code',None))) if getattr(exc,'http_status',getattr(exc,'code',None)) is not None else '')) from None
     ledger['synced_at']=now.isoformat();ledger['receipt_counts']=aggregate;store.save_setting(job_key,ledger)
     all_cards=[p for b in ledger['batches'] for p in json.loads(b['payload'])['opportunities']]
     print('REVIEW_INVENTORY_ACCEPTED '+json.dumps(aggregate,sort_keys=True))

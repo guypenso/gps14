@@ -27,7 +27,7 @@ def scheduled_job(store,day):
     return old[0] if old else 'daily:'+day
 
 
-def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
+def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     """Existing cron + collector + outbox. Caller holds the existing scan lock."""
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
     from .price_sync import safe_flush,safe_current_baselines
@@ -38,16 +38,25 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
         if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
         return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
-    stats={};failure=None;client=None
+    stats={};failure=None;client=None;feedback_ok=True
     # Human decisions are read before enrichment. Failed feedback keeps discovery
     # available while deferring paid tax work conservatively.
-    from .command_center import configuration
-    if configuration() and os.getenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK','false')=='true':
+    from .command_center import configuration,review_configuration
+    from .sync_runtime import classify,component,incident
+    feedback_config=None;feedback_required=os.getenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK','false')=='true' or os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false')=='true'
+    try:
+        feedback_config=review_configuration() or configuration()
+    except Exception as exc:
+        feedback_ok=False;error=classify(exc,operation='review-feedback-configuration');component(store,'review_feedback','failed',now=clock(),pending=1,error=error.safe());incident(store,'review_feedback',error.safe(),now=clock())
+    if feedback_config and (feedback_required or review_configuration()):
         from .review_feedback import refresh
-        try:event('penten_review_feedback',**refresh(store,clock()))
+        try:
+            feedback=refresh(store,clock(),opener,feedback_config);event('penten_review_feedback',**feedback);feedback_ok=feedback.get('state')=='fresh'
         except Exception as exc:
-            event('penten_review_feedback_failed',error_type=type(exc).__name__)
-            settings=replace(settings,per_run=1)
+            event('penten_review_feedback_failed',error_type=type(exc).__name__,http_status=getattr(exc,'http_status',getattr(exc,'code',None)))
+            feedback_ok=False
+    elif feedback_required:
+        feedback_ok=False;error={'category':'review_configuration_missing','retryable':False};component(store,'review_feedback','failed',now=clock(),pending=1,error=error);incident(store,'review_feedback',error,now=clock())
 
     if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
     elif settings.approval_mode not in {'billing_cycle','one_time'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
@@ -61,7 +70,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             client=Client(store,effective,clock,opener)
             try:
                 scan_job=scheduled_job(store,day)
-                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store)).run(scan_job,day)
+                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok).run(scan_job,day)
                 stats['requests_consumed']=client.count
                 if stats.get('sample_truncated'):stats['partial']=True
             except Exception as exc:
@@ -73,7 +82,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
                 stats['requests_consumed']=client.count
     safe_flush(store)
     from .diagnostics import funnel,safe_read
-    stats['funnel']=safe_read(funnel,store,boundary,clock())
+    stats['funnel']=safe_read(funnel,store,boundary,clock());store.save_setting('health_funnel',stats['funnel'])
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     from .command_center import review_configuration
@@ -87,6 +96,35 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     except Exception as exc:event('stored_review_sync_deferred',error_type=type(exc).__name__)
     if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+
+
+def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
+    from .reliability import begin,stage,finish,publish,snapshot
+    from .sync_runtime import get
+    clock=clock or (lambda:dt.datetime.now(dt.timezone.utc));begin(store,day,clock());stage(store,day,'scheduled_run','success',clock())
+    store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
+    try:
+        result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener)
+        scan=result.get('scan','unknown');last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last[0]) if last else {}
+        stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
+        for name in ('listing_processing','eligibility_filtering','property_storage','price_history'):
+            stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
+        tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
+        stage(store,day,'tax_verification','partial' if tax else 'success',clock(),pending=tax,expected=True,coverage='Pending evidence remains unverified; API approval limits preserved')
+        stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent') else 1)
+        status=finish(store,day,clock());result['workflow_status']=status;result['email_status']=result.get('status')
+        current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+len([i for i in current['incidents'] if i['state']=='open'])
+        try:publish(store,clock(),opener=opener)
+        except Exception as exc:event('operational_health_deferred',error_type=type(exc).__name__)
+        result['workflow_status']=finish(store,day,clock())
+        current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_price_observations']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
+        return result
+    except Exception as exc:
+        from .sync_runtime import classify
+        error=classify(exc,operation='daily-workflow');stage(store,day,'email_delivery' if 'Resend' in type(exc).__name__ else 'daily_workflow','failed',clock(),error=error.safe());finish(store,day,clock())
+        try:publish(store,clock(),opener=opener)
+        except Exception:pass
+        raise
 
 
 def main(argv=None):
@@ -124,6 +162,14 @@ def main(argv=None):
             event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],query=listing_parameters(boundary))
         from .sync_probe import inspect
         event('sync_authentication_probe',**inspect())
+        if settings.enabled and os.getenv('DATABASE_URL'):
+            observer=None
+            try:
+                observer=Store(validate_postgres_url(os.getenv('DATABASE_URL')),initialize=False)
+                observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))
+            except Exception as exc:event('budget_telemetry_unavailable',error_type=type(exc).__name__)
+            finally:
+                if observer:observer.close()
         event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
               configured=settings.public(),database_configured=bool(os.getenv('DATABASE_URL')),
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
@@ -143,7 +189,11 @@ def main(argv=None):
             if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
             event('scan_already_running');return
         store.migrate()
+        if args.scheduled:
+            from .reliability import begin
+            begin(store,day,dt.datetime.now(dt.timezone.utc))
         boundary=load_boundary(settings.boundary_file)
+        if args.migrate:event('migrations_complete');return
         from .tax_backlog import reconcile
         event('tax_cache_recovery',**reconcile(store,settings,dt.datetime.now(dt.timezone.utc)))
         from .criteria import reevaluate
@@ -154,7 +204,6 @@ def main(argv=None):
         event('pipeline_funnel',**safe_read(funnel,store,boundary,dt.datetime.now(dt.timezone.utc)))
         event('command_center_health',**safe_read(sync_health,store))
         event('allowance_health',**store.budget_health(settings,record_warning=False))
-        if args.migrate:event('migrations_complete');return
         if args.status:
             event('status',budget=store.budget_health(settings),
               jobs=store.execute('SELECT id,state,offset_value,collection_done FROM scan_jobs ORDER BY updated_at DESC LIMIT 10').fetchall(),
@@ -179,7 +228,9 @@ def main(argv=None):
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
         if args.scheduled:
-            event('daily_discovery_result',**daily_discovery(store,boundary,settings,day));return
+            result=daily_discovery(store,boundary,settings,day);event('daily_discovery_result',**result)
+            if result.get('unresolved_critical') or result.get('workflow_status')=='failed':raise SystemExit(2)
+            return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
         store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))

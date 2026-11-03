@@ -90,12 +90,12 @@ def test_durable_chunked_backfill_recovers_without_provider_or_email_calls(store
             return Response({'accepted':True,'report_id':body['report_id'],'counts':{'inserted':len(body['opportunities'])}})
     receiver=Receiver()
     with pytest.raises(ValueError,match='HTTP 503'):run(store,boundary,clock(),execute=True,config=config,opener=receiver)
-    receiver.fail=False;result=run(store,boundary,clock(),execute=True,config=config,opener=receiver)
+    receiver.fail=False;clock.advance(minutes=1);result=run(store,boundary,clock(),execute=True,config=config,opener=receiver)
     assert result['synced_at'] and result['receipt_counts']['inserted']==126
     assert receiver.calls.count(receiver.calls[0])==1
-    assert len(receiver.calls)==3
+    assert len(receiver.calls)==5
     run(store,boundary,clock(),execute=True,config=config,opener=receiver)
-    assert len(receiver.calls)==3
+    assert len(receiver.calls)==5
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]==126

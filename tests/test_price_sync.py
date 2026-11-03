@@ -24,7 +24,7 @@ def test_durable_retry_preserves_body_ids_and_no_paid_usage(store,clock):
             if self.fail:raise TimeoutError()
             return Response(req)
     opener=Opener();config=('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'service')
-    assert flush(store,config,clock(),opener)['state']=='deferred';opener.fail=False
+    assert flush(store,config,clock(),opener)['state']=='deferred';opener.fail=False;clock.advance(minutes=1)
     assert flush(store,config,clock(),opener)['sent']==1
     assert opener.calls[0]==opener.calls[1]
     assert flush(store,config,clock(),opener)['sent']==0

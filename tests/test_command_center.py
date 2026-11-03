@@ -100,10 +100,11 @@ def test_sync_failure_survives_restart_and_cannot_interfere_with_email(store,bou
     reopened=Store(store.test_url,initialize=False)
     try:
         receiver.fail=False
+        clock.advance(minutes=1)  # Durable backoff survives the restart.
         assert flush(reopened,clock(),receiver)==1
-        assert len(receiver.requests)==2 and receiver.requests[0].data==receiver.requests[1].data
+        assert len(receiver.requests)==4 and all(r.data==receiver.requests[0].data for r in receiver.requests)
         row=reopened.execute('SELECT attempts,error_type,synced_at FROM command_center_reports WHERE outbox_id=?',(identity,)).fetchone()
-        assert row[0]==2 and row[1] is None and row[2]
+        assert row[0]==4 and row[1] is None and row[2]
     finally:reopened.close()
     assert digest.send(identity)=='already_sent'
 

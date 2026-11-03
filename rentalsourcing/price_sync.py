@@ -46,7 +46,7 @@ def seed(store,boundary,now):
         for identity,(p,observed) in properties.items():count+=enqueue(store,p,observed,observed,observation_id='snapshot:'+identity+':'+observed,historical=True,eligible=verification(p,boundary)[0]=='Candidate')
         store.save_setting(key,dict(created_at=now.isoformat(),queued=count))
 
-def flush(store,config=None,now=None,opener=None):
+def flush(store,config=None,now=None,opener=None,max_batches=5):
     config=config or review_configuration()
     if not config:return {'state':'disabled'}
     now=now or dt.datetime.now(dt.timezone.utc);opener=opener or urllib.request.build_opener(NoRedirect)
@@ -57,13 +57,14 @@ def flush(store,config=None,now=None,opener=None):
         if not row.get('synced_at'):pending.append((name,row))
     pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
     sent=0;coverage=None
-    for offset in range(0,min(len(pending),900),BATCH_SIZE):
+    for offset in range(0,min(len(pending),BATCH_SIZE*max_batches),BATCH_SIZE):
         part=pending[offset:offset+BATCH_SIZE];payload={'observations':[r['observation'] for name,r in part]};payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest();body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
         for name,row in part:row['attempts']+=1;store.save_setting(name,row)
         try:
-            with opener.open(signed_request((url,key,token),body,now),timeout=30) as response:
-                result=json.loads(response.read(200000))
-                if response.status!=200 or result.get('accepted') is not True or result.get('batch_id')!=payload['batch_id']:raise ValueError('Invalid price receipt')
+            from .sync_runtime import request_json
+            def validate(result,*args):
+                if result.get('accepted') is not True or result.get('batch_id')!=payload['batch_id']:raise ValueError('Invalid price receipt')
+            result=request_json(store,'price_sync',payload['batch_id'],(url,key,token),body,timeout=30,max_bytes=200000,opener=opener,now=now,validate=validate)
             for name,row in part:row.update(synced_at=now.isoformat(),error_type=None);store.save_setting(name,row)
             sent+=len(part);coverage=result.get('coverage')
         except Exception as exc:
