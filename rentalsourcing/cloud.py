@@ -92,7 +92,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
 def main(argv=None):
     parser=argparse.ArgumentParser(description='RentalSourcing daily production collector')
     group=parser.add_mutually_exclusive_group()
-    group.add_argument('--check',action='store_true',help='Check config and boundary offline; no provider calls')
+    group.add_argument('--check',action='store_true',help='Check config, boundary and read-only sync authentication; no provider calls')
     group.add_argument('--scheduled',action='store_true',help='Explicit collector run in the Israel 08:00 window; requires API approval')
     group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
     group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
@@ -122,6 +122,8 @@ def main(argv=None):
             boundary=load_boundary(settings.boundary_file)
             from .request import listing_parameters
             event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],query=listing_parameters(boundary))
+        from .sync_probe import inspect
+        event('sync_authentication_probe',**inspect())
         event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
               configured=settings.public(),database_configured=bool(os.getenv('DATABASE_URL')),
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
