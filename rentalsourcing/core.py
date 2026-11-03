@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from .provenance import demo_marked
 from .turnkey import evidence as turnkey_evidence
+from .condominium import evidence as condominium_evidence
 
 EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
@@ -15,12 +16,15 @@ def number(value):
 
 def property_type_verification(row):
     """Structured use/attachment evidence only; architectural style is not a property type."""
+    condo=condominium_evidence(row)
+    if condo['state']=='excluded':return 'Rejected',condo['reason']
     fields=('propertyType','propertySubType','propertySubtype','structureType','dwellingType')
     values=[re.sub(r'[^a-z0-9]+','',str(row[k]).lower()) for k in fields if row.get(k)]
     town={'townhouse','townhome','townhouses','townhomes','attachedtownhouse','attachedtownhome','rowhouse','rowhome','rowhouses','rowhomes','singlefamilyattached','attachedsinglefamily','singlefamilyresidenceattached','terracedhouse','terracedhome','terracehouse','attachedrowhouse'}
     if any(v in town or v.startswith(('townhouse','townhome')) or v.endswith(('townhouse','townhome','rowhouse','rowhome','terracedhouse')) for v in values):return 'Rejected','townhouse'
     if any(v in {'land','commercial','industrial'} for v in values):return 'Rejected','non_residential'
-    residential={'singlefamily','singlefamilyresidence','singlefamilydetached','detachedsinglefamily','singlefamilyhome','detached','condo','condominium','multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome','singlefamilyresidential','singlefamilyresidencedetached','detachedsinglefamilyresidence','sfh','sfr'}
+    if condo['state']=='pending':return 'Pending Verification',condo['reason']
+    residential={'singlefamily','singlefamilyresidence','singlefamilydetached','detachedsinglefamily','singlefamilyhome','detached','multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome','singlefamilyresidential','singlefamilyresidencedetached','detachedsinglefamilyresidence','sfh','sfr'}
     if row.get('propertyType') and re.sub(r'[^a-z0-9]+','',str(row['propertyType']).lower()) in residential:
         if row.get('attached') is True or row.get('isAttached') is True or any(v in {'attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome'} for v in values):
             return 'Pending Verification','attached_property_type_unverified'
@@ -158,7 +162,7 @@ def tax_verification(record, today=None):
     from decimal import Decimal, InvalidOperation
     today=today or dt.date.today()
     type_state,type_reason=property_type_verification(record)
-    type_evidence=any(record.get(k) for k in ('propertyType','propertySubType','propertySubtype','structureType','dwellingType','attached','isAttached'))
+    type_evidence=any(record.get(k) for k in ('propertyType','propertySubType','propertySubtype','structureType','dwellingType','attached','isAttached','ownershipType','ownership','commonInterest','isCondominium','isCondo')) or condominium_evidence(record)['state']!='clear'
     if type_evidence and type_state=='Rejected':return 'Rejected',None,type_reason
     taxes=record.get('propertyTaxes')
     if not isinstance(taxes,dict) or not taxes:

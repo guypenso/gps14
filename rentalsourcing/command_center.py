@@ -73,6 +73,7 @@ def snapshot(store, identity, day, items, stats, now, boundary=None):
             tax_fetched_at=entry.get('tax_fetched_at')))
         from .listing_enrichment import evidence
         info=evidence(p,observed or now.isoformat())
+        if info['condominium_evidence']['state']!='clear':opportunities[-1]['condominium_evidence']=info['condominium_evidence']
         if info['turnkey_evidence']['classified'] or info['agents'] or 'zillow.com/' in str(info.get('zillow_url') or ''):opportunities[-1]['listing_info']=info
     # Optional official-data estimates never occupy verified annual-tax fields.
     public=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
