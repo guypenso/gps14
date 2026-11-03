@@ -5,6 +5,7 @@ import json
 import urllib.parse
 import urllib.error
 import uuid
+import os
 from .core import verification,tax_verification,historical_reduction,number
 from .collector import LIVE, RequestDeferred, tax_expiry
 from .provenance import demo_marked
@@ -13,8 +14,9 @@ from .storage import BudgetExceeded
 from .telemetry import event
 
 class Engine:
-    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None):
+    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None,allow_paid_tax=True):
         self.store=store;self.boundary=boundary;self.client=client;self.settings=settings
+        self.allow_paid_tax=allow_paid_tax
         self.on_discovery_complete=on_discovery_complete
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
 
@@ -184,6 +186,16 @@ class Engine:
                     from .tax_backlog import review_deferred
                     if review_deferred(identity,store):
                         store.set_verification(identity,'Pending Verification',['owner_review_deferred_no_paid_tax_lookup'])
+                        continue
+                    from .review_feedback import review_current,refresh
+                    # Recheck human decisions immediately before a paid lookup.
+                    if self.allow_paid_tax and (os.getenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK','false')=='true' or os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false')=='true'):
+                        try:refresh(store,self.clock())
+                        except Exception:self.allow_paid_tax=False
+                    if review_deferred(identity,store):
+                        store.set_verification(identity,'Pending Verification',['owner_review_deferred_no_paid_tax_lookup']);continue
+                    if not self.allow_paid_tax or not review_current(store,self.clock()):
+                        store.set_verification(identity,'Pending Verification',['review_feedback_unavailable_no_paid_tax_lookup'])
                         continue
                     before_attempt=self.client.count
                     try:record,_=self.client.get('/properties/'+urllib.parse.quote(identity,safe=''))

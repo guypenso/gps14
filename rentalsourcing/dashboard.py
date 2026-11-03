@@ -1,4 +1,5 @@
 """Private read-only dashboard. HTTP routes never call RentCast or send email."""
+import hashlib
 import datetime as dt
 import hmac
 import json
@@ -134,8 +135,17 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
                 raise RuntimeError('Database migrations are missing; run scripts/start_web.sh')
         finally:s.close()
 
+    def backend_authorized():
+        if request.method!='POST' or request.headers.get('Origin'):return False
+        key=os.getenv('COMMAND_CENTER_REVIEW_SECRET','');stamp=request.headers.get('X-RentalSourcing-Timestamp','');sig=request.headers.get('X-RentalSourcing-Signature','')
+        if len(key)<32 or not stamp.isdigit() or abs(clock().timestamp()-int(stamp))>300:return False
+        return hmac.compare_digest(sig,'v1='+hmac.new(key.encode(),stamp.encode()+b'.'+request.get_data(),hashlib.sha256).hexdigest())
+
     @app.before_request
     def authenticate():
+        if request.path in ('/api/operations/backend-health','/api/operations/queue-recovery'):
+            if backend_authorized():return None
+            return jsonify(error='Backend authentication required'),401
         if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
         auth=request.authorization
         valid=bool(auth and hmac.compare_digest((auth.username or '').encode(),username.encode()) & hmac.compare_digest((auth.password or '').encode(),password.encode()))
@@ -154,6 +164,38 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         s=Store(url,initialize=False)
         try:return snapshot(s,boundary,clock())
         finally:s.close()
+
+    @app.post('/api/operations/backend-health')
+    def backend_health():
+        from .reliability import snapshot as health_snapshot
+        d=request.get_json(silent=True) or {};nonce=d.get('nonce','')
+        if d.get('action')!='health' or not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid nonce'),400
+        current=Store(url,initialize=False)
+        try:body=json.dumps({'nonce':nonce,'health':health_snapshot(current,clock())},sort_keys=True,separators=(',',':'))
+        finally:current.close()
+        signature='v1='+hmac.new(os.getenv('COMMAND_CENTER_REVIEW_SECRET','').encode(),body.encode(),hashlib.sha256).hexdigest()
+        return Response(body,200,{'X-RentalSourcing-Response-Signature':signature},content_type='application/json')
+
+    @app.post('/api/operations/queue-recovery')
+    def queue_recovery():
+        d=request.get_json(silent=True) or {}
+        if d.get('action')!='recover' or not isinstance(d.get('nonce'),str) or len(d['nonce'])!=32 or not d.get('requested_by'):return jsonify(error='Explicit recovery action required'),400
+        current=Store(url,initialize=False)
+        try:
+            from .sync_runtime import get
+            old=get(current,'manual_recovery_requested',{})
+            if old.get('at','')>(clock()-dt.timedelta(seconds=60)).isoformat():return jsonify(accepted=True,state='already_queued',cadence_seconds=300)
+            current.save_setting('manual_recovery_request:'+d['nonce'],{'at':clock().isoformat(),'requested_by':str(d['requested_by'])[:100],'state':'queued'})
+            current.save_setting('watchdog_lease',{'at':'1970-01-01T00:00:00+00:00'});current.save_setting('manual_recovery_requested',{'at':clock().isoformat(),'requested_by':str((request.get_json(silent=True) or {}).get('requested_by',''))[:100],'state':'queued_no_email_or_provider_calls'})
+        finally:current.close()
+        return jsonify(accepted=True,state='queued',cadence_seconds=300)
+
+    @app.get('/api/operations')
+    def operations_health():
+        from .reliability import snapshot as health_snapshot
+        current=Store(url,initialize=False)
+        try:return jsonify(health_snapshot(current,clock()))
+        finally:current.close()
 
     @app.get('/healthz')
     def health():
@@ -198,4 +240,7 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.errorhandler(500)
     def unavailable(error):return jsonify(error='הנתונים אינם זמינים כרגע; בדוק את לוג השירות'),503
 
+    if not testing:
+        from .reliability import start_watchdog
+        start_watchdog(url,boundary)
     return app

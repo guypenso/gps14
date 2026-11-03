@@ -98,32 +98,33 @@ def signed_request(config,body,now):
         'OAI-Sites-Authorization':'Bearer '+service_token})
 
 
-def flush(store, now=None, opener=None):
+def flush(store, now=None, opener=None, config_override=None):
     """At most three pending deliveries; retry on a later existing daily run.
 
     Called AFTER email handling, outside its acceptance/error transaction. HTTP
     errors cannot change sent email state. No redirects or immediate retries.
     """
-    config = configuration()
+    config = config_override or configuration()
     if not config:
         return 0
     url, secret, service_token = config
     now = now or dt.datetime.now(dt.timezone.utc)
     opener = opener or urllib.request.build_opener(NoRedirect)
+    from .sync_runtime import request_json,SyncFailure,attempt_count
     rows = store.execute("SELECT r.outbox_id,r.payload FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND o.job_id LIKE ? AND r.synced_at IS NULL ORDER BY o.job_id LIMIT 3", ('daily:%',)).fetchall()
     accepted = 0
     for identity, payload in rows:
         body = payload.encode('utf-8')
-        store.execute('UPDATE command_center_reports SET attempts=attempts+1,last_attempt_at=? WHERE outbox_id=?', (now.isoformat(), identity))
-        req = signed_request(config,body,now)
+        before=attempt_count(store,'property_sync',identity)
+        def validate(result,*args):
+            if result.get('report_id') != identity or result.get('accepted') is not True:raise ValueError('Invalid synchronization receipt')
         try:
-            with opener.open(req, timeout=20) as response:
-                result = json.loads(response.read(4096))
-                if response.status != 200 or result.get('report_id') != identity or result.get('accepted') is not True:
-                    raise ValueError('Invalid synchronization receipt')
-            store.execute('UPDATE command_center_reports SET synced_at=?,error_type=NULL WHERE outbox_id=?', (now.isoformat(), identity))
-            accepted += 1
+            request_json(store,'property_sync',identity,config,body,opener=opener,now=now,validate=validate)
+            store.execute('UPDATE command_center_reports SET synced_at=?,error_type=NULL WHERE outbox_id=?', (now.isoformat(), identity));accepted += 1
         except Exception as exc:
-            # Never persist raw HTTP errors, response bodies, URLs or headers.
-            store.execute('UPDATE command_center_reports SET error_type=? WHERE outbox_id=?', (type(exc).__name__, identity))
+            error=exc.category if isinstance(exc,SyncFailure) else type(exc).__name__
+            store.execute('UPDATE command_center_reports SET error_type=? WHERE outbox_id=?', (error, identity))
+        finally:
+            wires=attempt_count(store,'property_sync',identity)-before
+            if wires:store.execute('UPDATE command_center_reports SET attempts=attempts+?,last_attempt_at=? WHERE outbox_id=?',(wires,now.isoformat(),identity))
     return accepted
