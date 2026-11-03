@@ -1,0 +1,25 @@
+name: Retrieve official exclusion boundaries
+on:
+  push:
+    branches: [codex/neighborhood-condo-exclusions-20261103]
+    paths: [scripts/fetch_regions.py, .github/workflows/verified-exclusion-boundaries.yml]
+permissions:
+  contents: read
+jobs:
+  boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install shapely
+      - run: python scripts/fetch_regions.py data perry-south elliott carrick
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-exclusion-boundaries
+          path: |
+            data/perry-south.*
+            data/elliott.*
+            data/carrick.*
+          retention-days: 3
