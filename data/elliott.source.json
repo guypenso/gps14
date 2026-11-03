@@ -1,0 +1,9 @@
+{
+  "source": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0",
+  "endpoint": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query",
+  "field": "hood",
+  "name": "Elliott",
+  "download_url": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query?where=hood%3D%27Elliott%27&outFields=hood&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-03T20:18:44.501117+00:00",
+  "sha256": "4b8e3eb7a3751de86caa7ec7c427e5b0fe9890be4170da582c5d1e2c6abb5549"
+}
