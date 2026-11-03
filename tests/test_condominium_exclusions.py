@@ -60,3 +60,12 @@ def test_daily_email_snapshot_and_paid_tax_tasks_share_exclusions(store,settings
  assert {p['source_id'] for p in report['opportunities']}=={'allowed','ambiguous'}
  assert next(p for p in report['opportunities'] if p['source_id']=='ambiguous')['qualification']=='pending_verification'
  assert not provider.messages
+
+def test_later_missing_type_cannot_revive_confirmed_condominium(store,settings,clock,policy):
+ from rentalsourcing.engine import Engine
+ from rentalsourcing.collector import Client
+ row=listing(id='persistent-condo',**point(policy.bellevue),zipCode='15202',propertyType='Condo')
+ provider=Provider([row]);client=Client(store,settings,clock,provider,lambda _:None);engine=Engine(store,policy,client,settings,clock)
+ engine.ingest('first',row);later={**row,'price':170000};later.pop('propertyType');engine.ingest('later',later)
+ saved=store.get_property(row['id']);assert saved['state']=='Rejected';assert 'condominium' in saved['reasons'];assert not report_eligible(saved['payload'],policy)
+ assert provider.tax_calls==0

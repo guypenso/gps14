@@ -3,6 +3,11 @@ import re,unicodedata
 FIELDS=('propertyType','propertySubType','propertySubtype','structureType','dwellingType','ownershipType','ownership','ownershipDescription','commonInterest','legalOwnership','isCondominium','isCondo')
 CONTAINERS=('metadata','listingMetadata','propertyDetails','listing','property')
 def evidence(row):
+    prior=row.get('_rentalsourcing_prior_condominium')
+    if isinstance(prior,dict) and isinstance(prior.get('evidence'),list):
+        old={e['field']:e['value'] for e in prior['evidence'] if isinstance(e,dict) and e.get('field') in FIELDS and (isinstance(e.get('value'),str) or e.get('value') is True)}
+        checked=evidence(old)
+        if checked['state']=='excluded':return checked
     sources=[row]+[row[k] for k in CONTAINERS if isinstance(row.get(k),dict)]
     observed=[];ambiguous=False
     for source in sources:
