@@ -1,0 +1,9 @@
+{
+  "source": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0",
+  "endpoint": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query",
+  "field": "hood",
+  "name": "Carrick",
+  "download_url": "https://pghbridgis.pittsburghpa.gov/federated/rest/services/Neighborhoods/FeatureServer/0/query?where=hood%3D%27Carrick%27&outFields=hood&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-03T20:18:44.730669+00:00",
+  "sha256": "f5723c8c01628977d5e7a6f52aabcde310a0cfeee176c712d1f33727b9ce5f5c"
+}

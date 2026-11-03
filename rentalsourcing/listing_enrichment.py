@@ -5,7 +5,7 @@ from .database import validate_postgres_url
 from .storage import Store
 from .request import NoRedirect
 
-JOB='listing-contact-enrichment:2026-11-03:neighborhoods-v1'
+JOB='listing-contact-enrichment:2026-11-03:neighborhoods-condominium-v2'
 
 def evidence(p,observed):
     a=p.get('listingAgent');office=p.get('listingOffice');agents=[]
@@ -15,7 +15,8 @@ def evidence(p,observed):
     for a in agents:
         for field,limit in [('name',200),('email',254),('phone',60),('brokerage',200)]:a[field]=bounded(a[field],limit)
     from .turnkey import evidence as turnkey_evidence
-    return dict(latitude=p.get('latitude'),longitude=p.get('longitude'),turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
+    from .condominium import evidence as condo_evidence
+    return dict(condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
 
 def run(store,config,*,job_key=JOB,opener=None):
     if not config:return {'state':'disabled'}

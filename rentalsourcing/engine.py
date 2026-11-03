@@ -21,6 +21,11 @@ class Engine:
     def ingest(self,job_id,row):
         if not isinstance(row,dict):return
         source=getattr(self.client,'source','fixture')
+        # Confirmed condominium ownership cannot disappear when a later provider snapshot omits type fields.
+        from .condominium import evidence as condo_evidence
+        prior=self.store.get_property(row.get('id')) if isinstance(row.get('id'),str) else None
+        if prior and condo_evidence(prior['payload'])['state']=='excluded':
+            row={**row,'_rentalsourcing_prior_condominium':condo_evidence(prior['payload'])}
         state,reasons=verification(row,self.boundary)
         if source!=LIVE and state!='Rejected':state,reasons='Pending Verification',['non_live_source']
         identity=row.get('id')
