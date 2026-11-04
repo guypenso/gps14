@@ -4,6 +4,8 @@ import datetime as dt,hashlib,hmac,json,re,urllib.request,urllib.robotparser,tim
 from html.parser import HTMLParser
 from urllib.parse import urlsplit,urljoin
 from .core import verification,tax_verification
+from .collector import LIVE
+from .provenance import demo_marked
 from .geography import POLICY
 from .request import NoRedirect
 UTC=dt.timezone.utc
@@ -52,7 +54,7 @@ def evaluate(store,boundary,items,now=None):
    if saved:
     raw=saved[0]
     if isinstance(raw,str):raw=json.loads(raw)
-    if isinstance(raw,dict) and raw.get('id')==match['source_id']:
+    if isinstance(raw,dict) and raw.get('id')==match['source_id'] and saved[1]==LIVE and not demo_marked(raw):
      ts,tax,tr=tax_verification(raw,now.date())
      if ts=='Rejected':state='Rejected';reasons.append(tr)
      elif ts!='Qualified':tax=None
@@ -138,6 +140,14 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
+    if not get(s,'offmarket_reconciliation_v1'):
+     u,k,t=review_configuration();cursor=get(s,'offmarket_reconcile_cursor_v1','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+     def reconciled(value,*args):
+      if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
+     result=request_json(s,'offmarket_reconcile','stored:v1:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v1',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v1',result)
+     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)
      u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':now.strftime('offmarket:%Y-%m-%d:%H')},separators=(',',':')).encode()
