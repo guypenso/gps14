@@ -12,7 +12,7 @@ def test_authoritative_filters_unknown_tax_no_paid_requests(store,boundary,clock
  assert r['criteria_state']=='Pending Verification';assert r['tax']['state']=='unknown'
  assert 'annual_tax_bill_unverified' in r['reasons']
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
- for field,value,reason in [('bedrooms',5,'bedrooms'),('bedrooms',2,'bedrooms'),('price',200001,'price'),('propertyType','Condominium','condominium'),('propertyType','Townhome','townhouse'),('description','turn-key investor package','turnkey'),('zipCode','15204','excluded_zip')]:
+ for field,value,reason in [('bedrooms',5,'bedrooms'),('bedrooms',2,'bedrooms'),('price',200002,'price'),('propertyType','Condominium','condominium'),('propertyType','Townhome','townhouse'),('description','turn-key investor package','turnkey'),('zipCode','15204','excluded_zip')]:
   d=item();d['property'][field]=value;r=evaluate(store,boundary,[d],clock())[0]
   assert r['criteria_state']=='Rejected';assert reason in r['reasons']
 
@@ -20,15 +20,15 @@ def test_missing_not_invented_and_restrictions_not_qualified(store,boundary,cloc
  d=item();d['property']={'formattedAddress':'123 Fictional St, Pittsburgh, PA','state':'PA'}
  r=evaluate(store,boundary,[d],clock())[0];assert r['criteria_state']=='Pending Verification';assert r['tax']['state']=='unknown';assert 'coordinates' in r['reasons']
  d=item(purchase_eligibility='ineligible')
- assert evaluate(store,boundary,[d],clock())[0]['criteria_state']=='Not eligible due to acquisition restrictions'
+ assert evaluate(store,boundary,[d],clock())[0]['criteria_state']=='Rejected'
 
 def test_cached_tax_and_estimates_never_inferred_verified(store,boundary,clock):
  p=item()['property'];store.save_property(p['id'],p,'Pending Verification',[],'RentCast',1,clock().isoformat())
  store.save_tax(p['id'],taxes(p['id']),'rentcast-live',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
  r=evaluate(store,boundary,[item()],clock())[0]
- assert r['tax']['state']=='verified';assert r['criteria_state']=='Meets known criteria'
+ assert r['tax']['state']=='verified';assert r['criteria_state']=='Rejected';assert 'confirmed_active_public_listing' in r['reasons']
  store.execute('DELETE FROM tax_history');store.save_setting('public_tax_batch:2026',{'estimates':{p['id']:{'state':'estimated','annual':1200,'parcel_id':'fixture'}}})
- r=evaluate(store,boundary,[item()],clock())[0];assert r['tax']['state']=='estimated';assert r['criteria_state']=='Pending Verification'
+ r=evaluate(store,boundary,[item()],clock())[0];assert r['tax']['state']=='estimated';assert r['criteria_state']=='Rejected'
 
 def test_public_parser_preserves_real_offering_vs_unavailable_and_no_zillow_scraping(clock):
  result=parse_public('<a href="https://www.zillow.com/homedetails/fixture/123_zpid/">2118 ROCKLEDGE ST LISTING</a><a href="https://example.test/other">123 ST LISTING - PENDING</a>',clock())
@@ -69,4 +69,4 @@ def test_non_live_cached_tax_never_becomes_verified(store,boundary,clock):
  p=item()['property'];store.save_property(p['id'],p,'Pending Verification',[],'rentcast-live',1,clock().isoformat())
  store.save_tax(p['id'],taxes(p['id']),'unverified-supplier',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
  result=evaluate(store,boundary,[item()],clock())[0]
- assert result['tax']['state']=='unknown';assert result['criteria_state']=='Pending Verification'
+ assert result['tax']['state']=='unknown';assert result['criteria_state']=='Rejected';assert result['tax']['state']!='verified'
