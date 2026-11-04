@@ -143,7 +143,8 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
 
     @app.before_request
     def authenticate():
-        if request.path in ('/api/operations/backend-health','/api/operations/queue-recovery'):
+        if request.path=='/api/offmarket/backend':request.max_content_length=300000
+        if request.path in ('/api/operations/backend-health','/api/operations/queue-recovery','/api/offmarket/backend'):
             if backend_authorized():return None
             return jsonify(error='Backend authentication required'),401
         if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
@@ -164,6 +165,25 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         s=Store(url,initialize=False)
         try:return snapshot(s,boundary,clock())
         finally:s.close()
+
+    @app.post('/api/offmarket/backend')
+    def offmarket_backend():
+        from .offmarket import evaluate,fetch_public,SOURCES
+        d=request.get_json(silent=True) or {};nonce=d.get('nonce','')
+        if not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid nonce'),400
+        current=Store(url,initialize=False)
+        try:
+            if d.get('action')=='evaluate':result={'evaluations':evaluate(current,boundary,d.get('records'),clock())}
+            elif d.get('action')=='refresh':
+                result=fetch_public(clock());result['evaluations']=evaluate(current,boundary,result['records'],clock())
+            elif d.get('action')=='sources':result={'sources':SOURCES}
+            else:return jsonify(error='Unsupported off-market action'),400
+            body=json.dumps({'nonce':nonce,**result},sort_keys=True,separators=(',',':'))
+        except Exception as exc:
+            return jsonify(error='Off-market source/evaluation unavailable',error_type=type(exc).__name__),503
+        finally:current.close()
+        signature='v1='+hmac.new(os.getenv('COMMAND_CENTER_REVIEW_SECRET','').encode(),body.encode(),hashlib.sha256).hexdigest()
+        return Response(body,200,{'X-RentalSourcing-Response-Signature':signature},content_type='application/json')
 
     @app.post('/api/operations/backend-health')
     def backend_health():
@@ -243,4 +263,6 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     if not testing:
         from .reliability import start_watchdog
         start_watchdog(url,boundary)
+        from .offmarket import start_scheduler
+        start_scheduler(url)
     return app
