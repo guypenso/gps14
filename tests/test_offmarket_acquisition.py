@@ -78,3 +78,31 @@ def test_complete_offering_can_qualify_but_not_missing_contact(store,boundary,cl
  d['evidence']=[e for e in d['evidence'] if e['kind']!='contact']
  assert evaluate(store,boundary,[d],clock())[0]['acquisition']['queue']=='Research Required'
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+def test_startup_records_program_evidence_before_backend_reconciliation(store,clock,monkeypatch):
+ import rentalsourcing.offmarket as om
+ import rentalsourcing.sync_runtime as runtime
+ from rentalsourcing.sync_runtime import get
+ d=item(source_id='pittsburgh-land-bank',external_id='startup-fixture')
+ store.save_setting('offmarket_reconciliation_v2',{'state':'success','summary':{'verified_contacts':0}})
+ monkeypatch.setenv('ENABLE_REVIEW_INVENTORY_SYNC','true')
+ monkeypatch.setattr('rentalsourcing.storage.Store',lambda *a,**k:store)
+ monkeypatch.setattr(store,'close',lambda:None)
+ monkeypatch.setattr(om,'fetch_public',lambda now:{'records':[d],'program_contact_confirmed':True,'attempted_at':clock().isoformat()})
+ monkeypatch.setattr(om,'claim_schedule',lambda *a:False)
+ monkeypatch.setattr('rentalsourcing.command_center.review_configuration',lambda:('https://fixture.example.test/api/rentalsourcing/review','fixture-key','fixture-token'))
+ called=[]
+ def request(*args,**kwargs):
+  assert get(store,'offmarket_plb_contacts_v2')['contacts']['startup-fixture']['relationship_confirmed']
+  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v3:'
+  result={'state':'success','next_cursor':None};kwargs['validate'](result);called.append(True);return result
+ monkeypatch.setattr(runtime,'request_json',request)
+ def stop(*a):raise StopIteration
+ monkeypatch.setattr(om.time,'sleep',stop)
+ class Thread:
+  def __init__(self,*,target,**kw):self.target=target
+  def start(self):
+   with pytest.raises(StopIteration):self.target()
+ monkeypatch.setattr(om.threading,'Thread',Thread)
+ om.start_scheduler(store.test_url)
+ assert called==[True];assert get(store,'offmarket_reconciliation_v3')['state']=='success'
