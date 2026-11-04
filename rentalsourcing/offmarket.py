@@ -138,6 +138,13 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
+    if not get(s,'offmarket_reconciliation_v1'):
+     u,k,t=review_configuration();body=json.dumps({'action':'reconcile'},separators=(',',':')).encode()
+     def reconciled(value,*args):
+      if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
+     result=request_json(s,'offmarket_reconcile','stored:v1',(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconciliation_v1',result)
+     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)
      u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':now.strftime('offmarket:%Y-%m-%d:%H')},separators=(',',':')).encode()
