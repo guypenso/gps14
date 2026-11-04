@@ -65,7 +65,7 @@ def evaluate(store,boundary,items,now=None):
    row=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
    if row:estimate=json.loads(row[0]).get('estimates',{}).get(match['source_id'])
   from .offmarket_intelligence import analyze
-  evidence=list(item.get('evidence') or [])
+  evidence=[{k:v for k,v in e.items() if k!='program_inventory_verified'} for e in (item.get('evidence') or [])]
   # Only this fixed, fetched public inventory can establish its program contact.
   # Never copy another property's agent or infer an asking price from cached listings.
   if item.get('source_id')=='pittsburgh-land-bank':
@@ -73,7 +73,7 @@ def evaluate(store,boundary,items,now=None):
    if saved_contact:
     contacts=json.loads(saved_contact[0]).get('contacts',{})
     route=contacts.get(str(item.get('external_id')))
-    if route and route.get('offering_street_key')==street_key(p):evidence.append({**route,'matched_property':p})
+    if route and route.get('offering_street_key')==street_key(p):evidence.append({**route,'matched_property':p,'program_inventory_verified':True})
   tax_info={'state':'verified' if tax else 'estimated' if estimate and estimate.get('state')=='estimated' else 'unknown','verified':tax,'estimate':estimate,'source':saved[1] if match and saved and tax else None,'retrieved_at':saved[2] if match and saved and tax else None}
   if state=='Rejected':base_state='Rejected'
   decision=analyze(p,item,base_state,reasons,tax_info,evidence,(cached,match['observed_at']) if match else None,now)
@@ -144,18 +144,18 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if not get(s,'offmarket_reconciliation_v3'):
+    if not get(s,'offmarket_reconciliation_v4'):
      u,k,t=review_configuration()
      # Fetch program evidence locally. A new worker may start before Render switches
      # the public backend, so a loopback refresh can otherwise hit the old release.
      if not get(s,'offmarket_plb_contacts_v2'):
       cache_program_contacts(s,fetch_public(now))
-     cursor=get(s,'offmarket_reconcile_cursor_v3','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+     cursor=get(s,'offmarket_reconcile_cursor_v4','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
      def reconciled(value,*args):
       if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
-     result=request_json(s,'offmarket_reconcile','stored:v3:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
-     s.save_setting('offmarket_reconcile_cursor_v3',result.get('next_cursor') or '')
-     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v3',result)
+     result=request_json(s,'offmarket_reconcile','stored:v4:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v4',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v4',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)

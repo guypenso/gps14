@@ -69,7 +69,8 @@ def price(p,item,evidence,now):
 def contact(p,item,evidence,now):
  routes=[]
  for e in evidence:
-  if e.get('kind')!='contact' or not identity(e,p) or not fresh(e,now,90):continue
+  program=e.get('program_inventory_verified') is True and e.get('role')=='Public Agency' and e.get('verification_method')=='official_inventory' and e.get('source_url')=='https://pghlandbank.org/pilot-residential-rehab-for-sale/' and item.get('source_id')=='pittsburgh-land-bank' and e.get('offering_street_key')==street_key(p)
+  if e.get('kind')!='contact' or not (identity(e,p) or program) or not fresh(e,now,90):continue
   role=e.get('role');email=e.get('email');phone=e.get('phone');url=e.get('contact_url');source=e.get('source_url')
   if role not in ('Public Agency','Wholesaler','Agent','Broker','Owner','Property Manager') or not source or not domain(source,urlsplit(source).hostname or '!'):continue
   if not e.get('name'):continue

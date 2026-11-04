@@ -94,7 +94,7 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
  called=[]
  def request(*args,**kwargs):
   assert get(store,'offmarket_plb_contacts_v2')['contacts']['startup-fixture']['relationship_confirmed']
-  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v3:'
+  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v4:'
   result={'state':'success','next_cursor':None};kwargs['validate'](result);called.append(True);return result
  monkeypatch.setattr(runtime,'request_json',request)
  def stop(*a):raise StopIteration
@@ -105,4 +105,14 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
    with pytest.raises(StopIteration):self.target()
  monkeypatch.setattr(om.threading,'Thread',Thread)
  om.start_scheduler(store.test_url)
- assert called==[True];assert get(store,'offmarket_reconciliation_v3')['state']=='success'
+ assert called==[True];assert get(store,'offmarket_reconciliation_v4')['state']=='success'
+
+
+def test_official_program_membership_verifies_contact_without_inventing_zip(store,boundary,clock):
+ d=item(source_id='pittsburgh-land-bank',external_id='official-no-zip',property={'formattedAddress':'123 Fictional St, Pittsburgh, PA','addressLine1':'123 Fictional St','city':'Pittsburgh','state':'PA'})
+ cache_program_contacts(store,{'records':[d],'program_contact_confirmed':True,'attempted_at':clock().isoformat()})
+ r=evaluate(store,boundary,[d],clock())[0]
+ assert r['acquisition']['contact']['usable'];assert r['acquisition']['queue']=='Pending Verification'
+ assert r['acquisition']['asking_price']['state']=='unknown';assert 'zipCode' in r['reasons'];assert 'coordinates' in r['reasons']
+ d['property']['addressLine1']='124 Wrong Property St'
+ assert not evaluate(store,boundary,[d],clock())[0]['acquisition']['contact']['usable']
