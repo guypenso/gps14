@@ -144,18 +144,18 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if not get(s,'offmarket_reconciliation_v2'):
+    if not get(s,'offmarket_reconciliation_v3'):
      u,k,t=review_configuration()
-     if not get(s,'offmarket_contact_refresh_v2'):
-      body=json.dumps({'action':'refresh'},separators=(',',':')).encode()
-      receipt=request_json(s,'offmarket_refresh','contact:v2',(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90)
-      if receipt.get('state')=='success':s.save_setting('offmarket_contact_refresh_v2',{'at':now.isoformat()})
-     cursor=get(s,'offmarket_reconcile_cursor_v2','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+     # Fetch program evidence locally. A new worker may start before Render switches
+     # the public backend, so a loopback refresh can otherwise hit the old release.
+     if not get(s,'offmarket_plb_contacts_v2'):
+      cache_program_contacts(s,fetch_public(now))
+     cursor=get(s,'offmarket_reconcile_cursor_v3','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
      def reconciled(value,*args):
       if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
-     result=request_json(s,'offmarket_reconcile','stored:v2:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
-     s.save_setting('offmarket_reconcile_cursor_v2',result.get('next_cursor') or '')
-     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v2',result)
+     result=request_json(s,'offmarket_reconcile','stored:v3:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v3',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v3',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)
