@@ -95,6 +95,8 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
  def request(*args,**kwargs):
   assert get(store,'offmarket_plb_contacts_v2')['contacts']['startup-fixture']['relationship_confirmed']
   assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v5:'
+  with pytest.raises(runtime.SyncFailure) as failure:kwargs['validate']({'state':'success','summary':{'policy_version':'old-release'}})
+  assert failure.value.retryable;assert failure.value.category=='offmarket_policy_handover'
   result={'state':'success','next_cursor':None,'summary':{'policy_version':VERSION}};kwargs['validate'](result);called.append(True);return result
  monkeypatch.setattr(runtime,'request_json',request)
  def stop(*a):raise StopIteration
