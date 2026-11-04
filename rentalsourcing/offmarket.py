@@ -118,6 +118,14 @@ def fetch_public(now=None,opener=None):
  if not records:raise ValueError('Inventory parser found no recognizable offering links; not a successful empty inventory')
  return {'source_id':'pittsburgh-land-bank','state':'fetched','attempted_at':now.isoformat(),'fetched_at':dt.datetime.now(UTC).isoformat(),'records':records[:30],'received':len(records),'partial':len(records)>30,'source_sha256':hashlib.sha256(html.encode()).hexdigest()}
 
+def claim_schedule(store,now):
+ from .sync_runtime import get
+ # Separate advisory lock: off-market refresh never waits for or takes the paid discovery lock.
+ if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541211)').fetchone()[0]:return False
+ if get(store,'offmarket_scheduler',{}).get('next_at','')>now.isoformat():return False
+ store.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running'})
+ return True
+
 def start_scheduler(url):
  """Independent six-hour lease in the existing dashboard; no new paid service."""
  if os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()!='true':return
@@ -130,21 +138,18 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if s.lock():
-     last=get(s,'offmarket_scheduler',{})
-     if last.get('next_at','')<=now.isoformat():
-      s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running'})
-      s.close();s=Store(url,initialize=False)
-      u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':now.strftime('offmarket:%Y-%m-%d:%H')},separators=(',',':')).encode()
-      def receipt(value,*args):
-       if value.get('state') not in ('success','partial'):raise ValueError('Off-market refresh not completed')
-      result=request_json(s,'offmarket_refresh',now.strftime('%Y-%m-%d:%H'),(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=receipt)
-      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps(result,sort_keys=True))
-      if result.get('state')=='partial':
-       from .sync_runtime import component,incident
-       error={'category':'offmarket_source_incomplete','retryable':True}
-       component(s,'offmarket_refresh','partial',pending=1,error=error);incident(s,'offmarket_refresh',error)
-      s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'success','result':result})
+    if claim_schedule(s,now):
+     s.close();s=Store(url,initialize=False)
+     u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':now.strftime('offmarket:%Y-%m-%d:%H')},separators=(',',':')).encode()
+     def receipt(value,*args):
+      if value.get('state') not in ('success','partial'):raise ValueError('Off-market refresh not completed')
+     result=request_json(s,'offmarket_refresh',now.strftime('%Y-%m-%d:%H'),(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=receipt)
+     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps(result,sort_keys=True))
+     if result.get('state')=='partial':
+      from .sync_runtime import component,incident
+      error={'category':'offmarket_source_incomplete','retryable':True}
+      component(s,'offmarket_refresh','partial',pending=1,error=error);incident(s,'offmarket_refresh',error)
+     s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(minutes=30) if result.get('state')=='partial' else now+dt.timedelta(hours=6)).isoformat(),'state':result.get('state','failed'),'result':result})
    except Exception as e:
     logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_REFRESH_FAILED '+type(e).__name__)
     if s:

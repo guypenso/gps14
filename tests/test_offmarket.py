@@ -55,3 +55,11 @@ def test_backend_authentication_and_signed_criteria_response(store,boundary,cloc
  r=c.post(url,data=body,headers={'Content-Type':'application/json','X-RentalSourcing-Timestamp':stamp,'X-RentalSourcing-Signature':sig})
  assert r.status_code==200;assert r.json['nonce']=='a'*32;assert r.json['evaluations'][0]['tax']['state']=='unknown'
  assert r.headers['X-RentalSourcing-Response-Signature']=='v1='+hmac.new(key.encode(),r.data,hashlib.sha256).hexdigest()
+
+def test_independent_schedule_is_persistent_and_not_claimed_twice(store,clock,monkeypatch):
+ from rentalsourcing.offmarket import claim_schedule
+ monkeypatch.setattr(store,'lock',lambda:pytest.fail('Off-market must not take the paid discovery lock'))
+ assert claim_schedule(store,clock())
+ assert not claim_schedule(store,clock())
+ clock.advance(hours=6,seconds=1)
+ assert claim_schedule(store,clock())
