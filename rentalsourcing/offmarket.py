@@ -134,28 +134,30 @@ def claim_schedule(store,now):
 
 def start_scheduler(url):
  """Independent six-hour lease in the existing dashboard; no new paid service."""
+ from .offmarket_intelligence import VERSION
  if os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()!='true':return
  def loop():
   from .storage import Store
-  from .sync_runtime import get,request_json
+  from .sync_runtime import get,request_json,SyncFailure
   from .command_center import review_configuration
   while True:
    s=None
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if not get(s,'offmarket_reconciliation_v4'):
+    if not get(s,'offmarket_reconciliation_v5'):
      u,k,t=review_configuration()
      # Fetch program evidence locally. A new worker may start before Render switches
      # the public backend, so a loopback refresh can otherwise hit the old release.
      if not get(s,'offmarket_plb_contacts_v2'):
       cache_program_contacts(s,fetch_public(now))
-     cursor=get(s,'offmarket_reconcile_cursor_v4','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+     cursor=get(s,'offmarket_reconcile_cursor_v5','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
      def reconciled(value,*args):
       if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
-     result=request_json(s,'offmarket_reconcile','stored:v4:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
-     s.save_setting('offmarket_reconcile_cursor_v4',result.get('next_cursor') or '')
-     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v4',result)
+      if value.get('summary',{}).get('policy_version')!=VERSION:raise SyncFailure('offmarket_policy_handover',None,True)
+     result=request_json(s,'offmarket_reconcile','stored:v5:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v5',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v5',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)

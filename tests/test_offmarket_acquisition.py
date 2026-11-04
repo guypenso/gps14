@@ -4,7 +4,7 @@ from conftest import listing,taxes
 from test_offmarket import item
 from rentalsourcing.offmarket import evaluate,cache_program_contacts,PLB,fetch_public
 from rentalsourcing.core import verification
-from rentalsourcing.offmarket_intelligence import analyze
+from rentalsourcing.offmarket_intelligence import analyze,VERSION
 
 def evidence(p,now,kind,**extra):
  return dict({'kind':kind,'matched_property':p,'observed_at':now.isoformat(),'source_url':'https://supplier.example.test/offer','verification_method':'authorized_supplier'},**extra)
@@ -94,8 +94,10 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
  called=[]
  def request(*args,**kwargs):
   assert get(store,'offmarket_plb_contacts_v2')['contacts']['startup-fixture']['relationship_confirmed']
-  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v4:'
-  result={'state':'success','next_cursor':None};kwargs['validate'](result);called.append(True);return result
+  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v5:'
+  with pytest.raises(runtime.SyncFailure) as failure:kwargs['validate']({'state':'success','summary':{'policy_version':'old-release'}})
+  assert failure.value.retryable;assert failure.value.category=='offmarket_policy_handover'
+  result={'state':'success','next_cursor':None,'summary':{'policy_version':VERSION}};kwargs['validate'](result);called.append(True);return result
  monkeypatch.setattr(runtime,'request_json',request)
  def stop(*a):raise StopIteration
  monkeypatch.setattr(om.time,'sleep',stop)
@@ -105,7 +107,7 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
    with pytest.raises(StopIteration):self.target()
  monkeypatch.setattr(om.threading,'Thread',Thread)
  om.start_scheduler(store.test_url)
- assert called==[True];assert get(store,'offmarket_reconciliation_v4')['state']=='success'
+ assert called==[True];assert get(store,'offmarket_reconciliation_v5')['state']=='success'
 
 
 def test_official_program_membership_verifies_contact_without_inventing_zip(store,boundary,clock):
