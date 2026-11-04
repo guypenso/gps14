@@ -14,7 +14,7 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def property_type_verification(row):
+def property_type_verification(row, *, single_family=False):
     """Structured use/attachment evidence only; architectural style is not a property type."""
     condo=condominium_evidence(row)
     if condo['state']=='excluded':return 'Rejected',condo['reason']
@@ -24,6 +24,7 @@ def property_type_verification(row):
     if any(v in town or v.startswith(('townhouse','townhome')) or v.endswith(('townhouse','townhome','rowhouse','rowhome','terracedhouse')) for v in values):return 'Rejected','townhouse'
     if any(v in {'land','commercial','industrial'} for v in values):return 'Rejected','non_residential'
     if condo['state']=='pending':return 'Pending Verification',condo['reason']
+    if single_family and any(v in {'multifamily','duplex','triplex','fourplex','residentialincome','manufactured','manufacturedhome','mobilehome','commercial','land'} for v in values):return 'Rejected','single_family_only'
     residential={'singlefamily','singlefamilyresidence','singlefamilydetached','detachedsinglefamily','singlefamilyhome','detached','multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome','singlefamilyresidential','singlefamilyresidencedetached','detachedsinglefamilyresidence','sfh','sfr'}
     if row.get('propertyType') and re.sub(r'[^a-z0-9]+','',str(row['propertyType']).lower()) in residential:
         if row.get('attached') is True or row.get('isAttached') is True or any(v in {'attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome'} for v in values):
@@ -125,22 +126,25 @@ class Boundary:
         return bool(self.geometry.contains(Point(x,y)))
 
 
-def verification(row, boundary):
+def verification(row, boundary, *, profile="rental", offering=True):
     """Distinguish known failures from evidence that still requires verification."""
     if demo_marked(row): return 'Rejected', ['demo_data']
     missing=[]; failed=[]
     if turnkey_evidence(row)['classified']:failed.append('turnkey')
-    type_state,type_reason=property_type_verification(row)
+    if profile not in ('rental','offmarket'):raise ValueError('Unknown eligibility profile')
+    type_state,type_reason=property_type_verification(row,single_family=profile=='offmarket')
     if type_state=='Rejected':failed.append(type_reason)
     elif type_state=='Pending Verification':missing.append(type_reason)
-    for field,expected in [('status','Active'),('state','PA')]:
+    for field,expected in ([('status','Active')] if offering else [])+[('state','PA')]:
         value=row.get(field)
         if value is None or value=='': missing.append(field)
         elif value!=expected: failed.append(field)
     zipcode=str(row.get('zipCode') or '').split('-')[0]
     if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
     elif zipcode in EXCLUDED_ZIPS: failed.append('excluded_zip')
-    for field,lo,hi in [('bedrooms',3,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf),('price',0.01,200000)]:
+    limits=[('bedrooms',3,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf)]
+    if offering:limits.append(('price',30000 if profile=='offmarket' else 0.01,200001 if profile=='offmarket' else 200000))
+    for field,lo,hi in limits:
         value=row.get(field)
         if not number(value): missing.append(field)
         elif not lo<=value<=hi or field=='bedrooms' and not float(value).is_integer(): failed.append(field)

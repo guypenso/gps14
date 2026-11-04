@@ -48,7 +48,11 @@ def evaluate(store,boundary,items,now=None):
    for k in ('latitude','longitude','bedrooms','bathrooms','squareFootage','propertyType','propertySubType','zipCode','city','state','addressLine1'):
     if p.get(k) in (None,''):p[k]=cached.get(k)
    if not p.get('formattedAddress') or ',' not in p['formattedAddress']:p['formattedAddress']=cached.get('formattedAddress',p.get('formattedAddress'))
-  state,reasons=verification(p,boundary);tax=None;estimate=None
+  state,reasons=verification(p,boundary,profile='offmarket',offering=item.get('kind')=='offering');tax=None;estimate=None
+  if match and match['match']=='unique_exact_street_unit_city_requires_review':
+   reasons.append('cached_address_match_requires_review')
+   if state=='Candidate':state='Pending Verification'
+  base_state=state
   if match:
    saved=store.get_tax(match['source_id'],now.isoformat())
    if saved:
@@ -60,38 +64,27 @@ def evaluate(store,boundary,items,now=None):
      elif ts!='Qualified':tax=None
    row=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
    if row:estimate=json.loads(row[0]).get('estimates',{}).get(match['source_id'])
-  if state=='Candidate' and not tax:state='Pending Verification';reasons.append('annual_tax_bill_unverified')
-  elif state=='Candidate':state='Meets known criteria'
-  try:
-   observed=dt.datetime.fromisoformat(item.get('received_at',now.isoformat()).replace('Z','+00:00'))
-   if observed.tzinfo is None or now-observed>dt.timedelta(days=7):
-    reasons.append('availability_observation_requires_refresh')
-    if state=='Meets known criteria':state='Pending Verification'
-  except (ValueError,TypeError):
-   reasons.append('availability_observation_requires_refresh')
-   if state=='Meets known criteria':state='Pending Verification'
-  restrictions=item.get('purchase_eligibility','unknown')
-  if restrictions=='ineligible':state='Not eligible due to acquisition restrictions';reasons.append('acquisition_restricted')
-  elif restrictions!='permitted':
-   reasons.append('acquisition_program_or_supplier_rights_require_review')
-   if state=='Meets known criteria':state='Pending Verification'
-  # Public records are signals, not evidence of an available sale.
-  if item.get('kind')=='lead':reasons.append('no_evidence_owner_offering_for_sale')
-  score=[]
-  if state not in ('Rejected','Not eligible due to acquisition restrictions'):
-   if not reasons:score.append(('known_hard_criteria',40))
-   elif not any(r in reasons for r in ('coordinates','property_type_unverified','bedrooms','squareFootage','price')):score.append(('documented_non_tax_inputs',20))
-   if item.get('evidence_url') and item.get('availability')=='available':score.append(('published_sale_evidence',20))
-   if isinstance(p.get('price'),(int,float)) and p['price']>0:score.append(('published_price',10))
-   if tax:score.append(('cached_verified_tax',20))
-   if match:score.append(('existing_property_evidence',10))
-  out.append({'property':p,'criteria_version':POLICY,'criteria_state':state,'reasons':list(dict.fromkeys(reasons)),'tax':{'state':'verified' if tax else 'estimated' if estimate and estimate.get('state')=='estimated' else 'unknown','verified':tax,'estimate':estimate,'source':saved[1] if match and saved and tax else None,'retrieved_at':saved[2] if match and saved and tax else None},'match':match,'score':sum(v for _,v in score),'score_explanation':[{'factor':k,'points':v} for k,v in score],'evaluated_at':now.isoformat()})
+  from .offmarket_intelligence import analyze
+  evidence=list(item.get('evidence') or [])
+  # Only this fixed, fetched public inventory can establish its program contact.
+  # Never copy another property's agent or infer an asking price from cached listings.
+  if item.get('source_id')=='pittsburgh-land-bank':
+   saved_contact=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_plb_contacts_v2',)).fetchone()
+   if saved_contact:
+    contacts=json.loads(saved_contact[0]).get('contacts',{})
+    route=contacts.get(str(item.get('external_id')))
+    if route and route.get('offering_street_key')==street_key(p):evidence.append({**route,'matched_property':p})
+  tax_info={'state':'verified' if tax else 'estimated' if estimate and estimate.get('state')=='estimated' else 'unknown','verified':tax,'estimate':estimate,'source':saved[1] if match and saved and tax else None,'retrieved_at':saved[2] if match and saved and tax else None}
+  if state=='Rejected':base_state='Rejected'
+  decision=analyze(p,item,base_state,reasons,tax_info,evidence,(cached,match['observed_at']) if match else None,now)
+  out.append({'property':p,'criteria_version':POLICY,'criteria_state':decision['state'],'reasons':decision['reasons'],'tax':tax_info,'match':match,'score':decision['score'],'score_explanation':decision['score_explanation'],'evaluated_at':now.isoformat(),'acquisition':decision})
  return out
 class Inventory(HTMLParser):
- def __init__(self):super().__init__(convert_charrefs=True);self.links=[];self.href=None;self.label=[]
+ def __init__(self):super().__init__(convert_charrefs=True);self.links=[];self.href=None;self.label=[];self.text=[]
  def handle_starttag(self,tag,attrs):
   if tag=='a':self.href=dict(attrs).get('href');self.label=[]
  def handle_data(self,data):
+  self.text.append(data)
   if self.href:self.label.append(data)
  def handle_endtag(self,tag):
   if tag=='a' and self.href:self.links.append((self.href,' '.join(self.label).strip()));self.href=None;self.label=[]
@@ -104,6 +97,9 @@ def parse_public(html,now):
   if urlsplit(u).scheme!='https':continue
   records.append({'source_id':'pittsburgh-land-bank','external_id':hashlib.sha256((address+'|'+u).encode()).hexdigest(),'kind':'offering','availability':'available' if available else 'unavailable','evidence_url':PLB,'listing_url':u,'purchase_eligibility':'unknown','rights':'public_disposition','restrictions':'Rehabilitation/application conditions and investor-use eligibility require individual confirmation. May also be publicly listed. No title or enforceability conclusion.','received_at':now.isoformat(),'property':{'formattedAddress':address+', Pittsburgh, PA','addressLine1':address,'city':'Pittsburgh','state':'PA'}})
  return records
+
+def InventoryText(html):
+ p=Inventory();p.feed(html);return p.text
 
 def fetch_public(now=None,opener=None):
  now=now or dt.datetime.now(UTC);opener=opener or urllib.request.build_opener(NoRedirect)
@@ -118,7 +114,15 @@ def fetch_public(now=None,opener=None):
  if not robots.can_fetch('PENTEN-RE-OffMarket/1.0',PLB):raise ValueError('Public source disallows automated access')
  html=read(PLB,1500000);records=parse_public(html,now)
  if not records:raise ValueError('Inventory parser found no recognizable offering links; not a successful empty inventory')
- return {'source_id':'pittsburgh-land-bank','state':'fetched','attempted_at':now.isoformat(),'fetched_at':dt.datetime.now(UTC).isoformat(),'records':records[:30],'received':len(records),'partial':len(records)>30,'source_sha256':hashlib.sha256(html.encode()).hexdigest()}
+ return {'source_id':'pittsburgh-land-bank','state':'fetched','attempted_at':now.isoformat(),'fetched_at':dt.datetime.now(UTC).isoformat(),'records':records[:30],'received':len(records),'partial':len(records)>30,'program_contact_confirmed':bool(re.search(r'Please\s+contact\s+Pittsburgh\s+Land\s+Bank\s+staff\s+with\s+any\s+additional\s+questions', ' '.join(InventoryText(html)),re.I) and 'staff@pghlandbank.org' in html and '412-255-6566' in html),'source_sha256':hashlib.sha256(html.encode()).hexdigest()}
+
+def cache_program_contacts(store,result):
+ # Source snapshot is bounded, robots-checked and fetched by fetch_public, not supplied by a client.
+ records=result['records'];contacts={}
+ if result.get('program_contact_confirmed'):
+  for item in records:
+   contacts[item['external_id']]={'offering_street_key':street_key(item['property']),'kind':'contact','name':'Pittsburgh Land Bank','role':'Public Agency','email':'staff@pghlandbank.org','phone':'412-255-6566','source_url':PLB,'observed_at':result['attempted_at'],'verification_method':'official_inventory','relationship':'Responsible for inquiries about this property in the published residential rehab sales program','relationship_confirmed':True}
+ store.save_setting('offmarket_plb_contacts_v2',{'contacts':contacts,'source_sha256':result.get('source_sha256'),'at':result['attempted_at']})
 
 def claim_schedule(store,now):
  from .sync_runtime import get
@@ -140,13 +144,18 @@ def start_scheduler(url):
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if not get(s,'offmarket_reconciliation_v1'):
-     u,k,t=review_configuration();cursor=get(s,'offmarket_reconcile_cursor_v1','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+    if not get(s,'offmarket_reconciliation_v2'):
+     u,k,t=review_configuration()
+     if not get(s,'offmarket_contact_refresh_v2'):
+      body=json.dumps({'action':'refresh'},separators=(',',':')).encode()
+      receipt=request_json(s,'offmarket_refresh','contact:v2',(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90)
+      if receipt.get('state')=='success':s.save_setting('offmarket_contact_refresh_v2',{'at':now.isoformat()})
+     cursor=get(s,'offmarket_reconcile_cursor_v2','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
      def reconciled(value,*args):
       if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
-     result=request_json(s,'offmarket_reconcile','stored:v1:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
-     s.save_setting('offmarket_reconcile_cursor_v1',result.get('next_cursor') or '')
-     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v1',result)
+     result=request_json(s,'offmarket_reconcile','stored:v2:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v2',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v2',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      s.close();s=Store(url,initialize=False)

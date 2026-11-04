@@ -168,14 +168,14 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
 
     @app.post('/api/offmarket/backend')
     def offmarket_backend():
-        from .offmarket import evaluate,fetch_public,SOURCES
+        from .offmarket import evaluate,fetch_public,SOURCES,cache_program_contacts
         d=request.get_json(silent=True) or {};nonce=d.get('nonce','')
         if not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid nonce'),400
         current=Store(url,initialize=False)
         try:
             if d.get('action')=='evaluate':result={'evaluations':evaluate(current,boundary,d.get('records'),clock())}
             elif d.get('action')=='refresh':
-                result=fetch_public(clock());result['evaluations']=evaluate(current,boundary,result['records'],clock())
+                result=fetch_public(clock());cache_program_contacts(current,result);result['evaluations']=evaluate(current,boundary,result['records'],clock())
             elif d.get('action')=='sources':result={'sources':SOURCES}
             else:return jsonify(error='Unsupported off-market action'),400
             body=json.dumps({'nonce':nonce,**result},sort_keys=True,separators=(',',':'))
