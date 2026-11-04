@@ -49,6 +49,9 @@ def evaluate(store,boundary,items,now=None):
     if p.get(k) in (None,''):p[k]=cached.get(k)
    if not p.get('formattedAddress') or ',' not in p['formattedAddress']:p['formattedAddress']=cached.get('formattedAddress',p.get('formattedAddress'))
   state,reasons=verification(p,boundary,profile='offmarket',offering=item.get('kind')=='offering');tax=None;estimate=None
+  if match and match['match']=='unique_exact_street_unit_city_requires_review':
+   reasons.append('cached_address_match_requires_review')
+   if state=='Candidate':state='Pending Verification'
   base_state=state
   if match:
    saved=store.get_tax(match['source_id'],now.isoformat())

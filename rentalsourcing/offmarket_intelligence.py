@@ -98,7 +98,7 @@ def analyze(p,item,base_state,base_reasons,tax,evidence,cached,now):
  if c['category']=='Condition Unknown':reasons.append('condition_verification_required')
  if not r['usable']:reasons.append('contact_research_required')
  if offering and item.get('purchase_eligibility')!='permitted':reasons.append('investor_rental_use_requires_confirmation')
- available=offering and item.get('availability')=='available' and bool(item.get('evidence_url'))
+ available=offering and item.get('availability')=='available' and bool(item.get('evidence_url')) and fresh({'observed_at':item.get('received_at',now.isoformat())},now,7)
  ready=asking['in_range'] and available and hard=='Qualified' and m['bounded_verified'] and not rejected and c['category'] in ('Light Renovation','Moderate Renovation') and r['usable'] and item.get('purchase_eligibility')=='permitted'
  queue='Rejected' if rejected else 'Ready to Pursue' if ready else 'Research Required' if not r['usable'] or not signals and not offering else 'Potential Seller' if potential else 'Pending Verification'
  state='Rejected' if rejected else 'Qualified' if ready else 'Pending Verification'
