@@ -70,7 +70,7 @@ def evaluate(store,boundary,items,now=None):
    if saved_contact:
     contacts=json.loads(saved_contact[0]).get('contacts',{})
     route=contacts.get(str(item.get('external_id')))
-    if route:evidence.append({**route,'matched_property':p})
+    if route and route.get('offering_street_key')==street_key(p):evidence.append({**route,'matched_property':p})
   tax_info={'state':'verified' if tax else 'estimated' if estimate and estimate.get('state')=='estimated' else 'unknown','verified':tax,'estimate':estimate,'source':saved[1] if match and saved and tax else None,'retrieved_at':saved[2] if match and saved and tax else None}
   if state=='Rejected':base_state='Rejected'
   decision=analyze(p,item,base_state,reasons,tax_info,evidence,(cached,match['observed_at']) if match else None,now)
@@ -118,7 +118,7 @@ def cache_program_contacts(store,result):
  records=result['records'];contacts={}
  if result.get('program_contact_confirmed'):
   for item in records:
-   contacts[item['external_id']]={'kind':'contact','name':'Pittsburgh Land Bank','role':'Public Agency','email':'staff@pghlandbank.org','phone':'412-255-6566','source_url':PLB,'observed_at':result['attempted_at'],'verification_method':'official_inventory','relationship':'Responsible for inquiries about this property in the published residential rehab sales program','relationship_confirmed':True}
+   contacts[item['external_id']]={'offering_street_key':street_key(item['property']),'kind':'contact','name':'Pittsburgh Land Bank','role':'Public Agency','email':'staff@pghlandbank.org','phone':'412-255-6566','source_url':PLB,'observed_at':result['attempted_at'],'verification_method':'official_inventory','relationship':'Responsible for inquiries about this property in the published residential rehab sales program','relationship_confirmed':True}
  store.save_setting('offmarket_plb_contacts_v2',{'contacts':contacts,'source_sha256':result.get('source_sha256'),'at':result['attempted_at']})
 
 def claim_schedule(store,now):
