@@ -24,7 +24,7 @@ def test_missing_not_invented_and_restrictions_not_qualified(store,boundary,cloc
 
 def test_cached_tax_and_estimates_never_inferred_verified(store,boundary,clock):
  p=item()['property'];store.save_property(p['id'],p,'Pending Verification',[],'RentCast',1,clock().isoformat())
- store.save_tax(p['id'],taxes(p['id']),'RentCast',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
+ store.save_tax(p['id'],taxes(p['id']),'rentcast-live',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
  r=evaluate(store,boundary,[item()],clock())[0]
  assert r['tax']['state']=='verified';assert r['criteria_state']=='Meets known criteria'
  store.execute('DELETE FROM tax_history');store.save_setting('public_tax_batch:2026',{'estimates':{p['id']:{'state':'estimated','annual':1200,'parcel_id':'fixture'}}})
@@ -63,3 +63,10 @@ def test_independent_schedule_is_persistent_and_not_claimed_twice(store,clock,mo
  assert not claim_schedule(store,clock())
  clock.advance(hours=6,seconds=1)
  assert claim_schedule(store,clock())
+
+
+def test_non_live_cached_tax_never_becomes_verified(store,boundary,clock):
+ p=item()['property'];store.save_property(p['id'],p,'Pending Verification',[],'rentcast-live',1,clock().isoformat())
+ store.save_tax(p['id'],taxes(p['id']),'unverified-supplier',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
+ result=evaluate(store,boundary,[item()],clock())[0]
+ assert result['tax']['state']=='unknown';assert result['criteria_state']=='Pending Verification'

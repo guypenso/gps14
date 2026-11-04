@@ -4,6 +4,8 @@ import datetime as dt,hashlib,hmac,json,re,urllib.request,urllib.robotparser,tim
 from html.parser import HTMLParser
 from urllib.parse import urlsplit,urljoin
 from .core import verification,tax_verification
+from .collector import LIVE
+from .provenance import demo_marked
 from .geography import POLICY
 from .request import NoRedirect
 UTC=dt.timezone.utc
@@ -52,7 +54,7 @@ def evaluate(store,boundary,items,now=None):
    if saved:
     raw=saved[0]
     if isinstance(raw,str):raw=json.loads(raw)
-    if isinstance(raw,dict) and raw.get('id')==match['source_id']:
+    if isinstance(raw,dict) and raw.get('id')==match['source_id'] and saved[1]==LIVE and not demo_marked(raw):
      ts,tax,tr=tax_verification(raw,now.date())
      if ts=='Rejected':state='Rejected';reasons.append(tr)
      elif ts!='Qualified':tax=None
