@@ -3,7 +3,7 @@ import datetime as dt,re
 from urllib.parse import urlsplit
 from .offmarket import street_key
 UTC=dt.timezone.utc
-VERSION='offmarket-acquisition-v2'
+VERSION='offmarket-acquisition-v3'
 REQUIRED=('zillow','redfin','realtor')
 PLATFORMS={'zillow':'zillow.com','redfin':'redfin.com','realtor':'realtor.com','homes':'homes.com','trulia':'trulia.com'}
 
