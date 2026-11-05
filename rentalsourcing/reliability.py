@@ -171,6 +171,9 @@ def start_watchdog(url,boundary):
    store=None
    try:
     store=Store(url,initialize=False)
+    from .listing_enrichment import initial_insights
+    try:initial_insights(store)
+    except Exception as error:logger.warning('INITIAL_INSIGHTS_DEFERRED '+type(error).__name__)
     local=dt.datetime.now(UTC).astimezone(ISRAEL);protected=(local.hour==7 and local.minute>=50) or (local.hour==8 and local.minute<20)
     if protected:
      try:publish(store)
@@ -237,11 +240,10 @@ def pending_inventory(store,boundary,now,opener=None):
  if not config:return
  from .review_inventory import run as inventory
  from .listing_enrichment import run as listing
- job='listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1'
- if not get(store,job):store.save_setting(job,{'offset':0,'cursor':0,'done':False,'batches':0})
  for prefix,runner,component_name in [('stored-review-inventory:',inventory,'inventory_sync'),('listing-contact-enrichment:',listing,'listing_enrichment')]:
   jobs=store.execute('SELECT name,payload FROM settings WHERE name LIKE ? ORDER BY name',(prefix+'%',)).fetchall();done=0
   for name,raw in jobs:
+   if name=='listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1':continue
    ledger=json.loads(raw)
    if ledger.get('synced_at') or ledger.get('done'):continue
    if done>=2:break
