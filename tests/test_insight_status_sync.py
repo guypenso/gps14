@@ -15,7 +15,7 @@ def test_status_without_price_is_durable_and_does_not_call_providers_or_mail(sto
  p=listing(price=None,status='Sold');stamp=clock().isoformat()
  assert enqueue(store,p,stamp,stamp,observation_id='status-only-fixture')
  assert not enqueue(store,p,stamp,stamp,observation_id='status-only-fixture')
- row=json.loads(store.execute("SELECT payload FROM settings WHERE name LIKE 'price-observation:%'").fetchone()[0])
+ row=json.loads(store.execute("SELECT payload FROM settings WHERE name LIKE ?",('price-observation:%',)).fetchone()[0])
  assert row['observation']['price_cents'] is None;assert row['observation']['listing_status']=='Sold'
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
  assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
