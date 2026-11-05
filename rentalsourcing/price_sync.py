@@ -21,7 +21,7 @@ def money(value):
 
 def enqueue(store,p,observed,detected,*,observation_id,previous=None,kind='snapshot',historical=False,eligible=True):
     price=money(p.get('price'))
-    if price is None:return False
+    if price is None and str(p.get('status','')).lower() not in ('active','sold','closed','under contract','under contract - show','active under contract','contingent','pending'):return False
     try:
         at=dt.datetime.fromisoformat(observed.replace('Z','+00:00'));when=dt.datetime.fromisoformat(detected.replace('Z','+00:00'))
         if not at.tzinfo or not when.tzinfo:return False
