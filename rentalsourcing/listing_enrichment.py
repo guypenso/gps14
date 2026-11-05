@@ -44,9 +44,9 @@ def stored_evidence(store,p,observed,now=None):
             out['insight_facts_provenance'][k]={'source':'RentCast cached property record','observed_at':saved[2]}
     return out
 
-def run(store,config,*,job_key=JOB,opener=None):
+def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
     if not config:return {'state':'disabled'}
-    if not store.lock():raise ValueError('Existing job is busy')
+    if acquire_lock and not store.lock():raise ValueError('Existing job is busy')
     saved=store.execute('SELECT payload FROM settings WHERE name=?',(job_key,)).fetchone()
     ledger=json.loads(saved[0]) if saved else {'offset':0,'cursor':0,'done':False,'batches':0}
     if ledger['done']:print('LISTING_ENRICHMENT_ALREADY_ACCEPTED '+json.dumps(ledger.get('summary',{})));return ledger
@@ -82,3 +82,16 @@ def main():
     finally:
         if store:store.close()
 if __name__=='__main__':main()
+
+
+INSIGHTS_JOB='listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1'
+def initial_insights(store,config=None):
+    """Read-only source snapshot, separately locked from paid discovery/recovery."""
+    config=config or review_configuration()
+    if not config:return {'state':'disabled'}
+    saved=store.execute('SELECT payload FROM settings WHERE name=?',(INSIGHTS_JOB,)).fetchone()
+    if saved and json.loads(saved[0]).get('done'):return {'state':'complete'}
+    if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541213)').fetchone()[0]:return {'state':'busy'}
+    try:return run(store,config,job_key=INSIGHTS_JOB,acquire_lock=False)
+    finally:
+        if store.pg:store.execute('SELECT pg_advisory_unlock(73541213)')
