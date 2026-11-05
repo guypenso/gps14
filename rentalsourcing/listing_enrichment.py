@@ -16,7 +16,16 @@ def evidence(p,observed):
         for field,limit in [('name',200),('email',254),('phone',60),('brokerage',200)]:a[field]=bounded(a[field],limit)
     from .turnkey import evidence as turnkey_evidence
     from .condominium import evidence as condo_evidence
-    return dict(condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
+    fields=('heatingType','coolingType','garageSpaces','parkingSpaces','hasGarage','hasBasement','hasLaundry')
+    features=p.get('features') if isinstance(p.get('features'),dict) else {}
+    facts={k:p.get(k,features.get(k)) for k in fields if isinstance(p.get(k,features.get(k)),(str,int,float,bool))}
+    for target,alias in [('hasGarage','garage'),('hasBasement','basement'),('hasLaundry','laundry')]:
+        if target not in facts and isinstance(features.get(alias),bool):facts[target]=features[alias]
+    for k in ('currentMonthlyRent','existingRent','actualRent'):
+        v=p.get(k)
+        if isinstance(v,(float,int)) and not isinstance(v,bool) and 0<v<100000:facts['documented_monthly_rent']=v;break
+    description=next((p[k][:12000] for k in ('description','listingDescription','publicRemarks','remarks') if isinstance(p.get(k),str) and p[k].strip()),'')
+    return dict(description=description,insight_facts=facts,condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
 
 def run(store,config,*,job_key=JOB,opener=None):
     if not config:return {'state':'disabled'}
@@ -29,7 +38,7 @@ def run(store,config,*,job_key=JOB,opener=None):
     from .collector import LIVE
     rows=store.execute('SELECT id,payload,observed_at FROM properties WHERE source=? ORDER BY id',(LIVE,)).fetchall()
     for _ in range(100):
-        records=[evidence(json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+100]]
+        records=[evidence(json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
         body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
         from .sync_runtime import request_json
         def validate(result,*args):
