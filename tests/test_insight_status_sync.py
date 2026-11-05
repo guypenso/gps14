@@ -19,3 +19,14 @@ def test_status_without_price_is_durable_and_does_not_call_providers_or_mail(sto
  assert row['observation']['price_cents'] is None;assert row['observation']['listing_status']=='Sold'
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
  assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+def test_reuses_valid_matching_cached_property_features_without_provider_calls(store,clock):
+ from rentalsourcing.listing_enrichment import stored_evidence
+ p=listing();stamp=clock().isoformat();record={'id':p['id'],'features':{'garage':True,'heatingType':'Forced Air'}}
+ store.save_tax(p['id'],record,'rentcast-live',stamp,(clock()+dt.timedelta(days=1)).isoformat())
+ result=stored_evidence(store,p,stamp,clock())
+ assert result['insight_facts']['hasGarage'] is True
+ assert result['insight_facts_provenance']['heatingType']['source']=='RentCast cached property record'
+ assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+ store.save_tax(p['id'],{'id':'wrong-identity','features':{'garage':True}},'rentcast-live',stamp,(clock()+dt.timedelta(days=1)).isoformat())
+ assert 'hasGarage' not in stored_evidence(store,p,stamp,clock())['insight_facts']

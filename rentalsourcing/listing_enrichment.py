@@ -27,6 +27,23 @@ def evidence(p,observed):
     description=next((p[k][:12000] for k in ('description','listingDescription','publicRemarks','remarks') if isinstance(p.get(k),str) and p[k].strip()),'')
     return dict(description=description,insight_facts=facts,condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),turnkey_evidence=turnkey_evidence(p),source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),retrieved_at=observed,zillow_url=p.get('zillowUrl') or p.get('listingUrl'),agents=agents,listing_status=p.get('status'))
 
+def stored_evidence(store,p,observed,now=None):
+    """Reuse only matching, unexpired live property records. Never performs a lookup."""
+    from .collector import LIVE
+    from .provenance import demo_marked
+    out=evidence(p,observed)
+    out['insight_facts_provenance']={k:{'source':'RentCast stored listing','observed_at':observed} for k in out['insight_facts']}
+    saved=store.get_tax(p.get('id'),(now or dt.datetime.now(dt.timezone.utc)).isoformat())
+    if not saved:return out
+    record=json.loads(saved[0]) if isinstance(saved[0],str) else saved[0]
+    if saved[1]!=LIVE or not isinstance(record,dict) or record.get('id')!=p.get('id') or demo_marked(record):return out
+    cached=evidence(record,saved[2])
+    for k,v in cached['insight_facts'].items():
+        if k not in out['insight_facts']:
+            out['insight_facts'][k]=v
+            out['insight_facts_provenance'][k]={'source':'RentCast cached property record','observed_at':saved[2]}
+    return out
+
 def run(store,config,*,job_key=JOB,opener=None):
     if not config:return {'state':'disabled'}
     if not store.lock():raise ValueError('Existing job is busy')
@@ -38,7 +55,7 @@ def run(store,config,*,job_key=JOB,opener=None):
     from .collector import LIVE
     rows=store.execute('SELECT id,payload,observed_at FROM properties WHERE source=? ORDER BY id',(LIVE,)).fetchall()
     for _ in range(100):
-        records=[evidence(json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
+        records=[stored_evidence(store,json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
         body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
         from .sync_runtime import request_json
         def validate(result,*args):
