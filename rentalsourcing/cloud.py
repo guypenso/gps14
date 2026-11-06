@@ -89,7 +89,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     except Exception as exc:
         stats['future_discovery']={'state':'pending_recovery','error_type':type(exc).__name__}
         error={'category':'future_inventory_processing','retryable':True}
-        component(store,'future_inventory','partial',now=clock(),pending=1,error=error);incident(store,'future_inventory',error,now=clock())
+        component(store,'inventory_sync','partial',now=clock(),pending=1,error=error);incident(store,'inventory_sync',error,now=clock())
     event('future_discovery_verification',**stats['future_discovery'])
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
