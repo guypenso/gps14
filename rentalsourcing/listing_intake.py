@@ -129,4 +129,5 @@ def audit(store,boundary,now):
         review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+r['source_id'],)).fetchone()
         rows.append({**r,'current_state':state,'current_reasons':reasons,'geography':{'state':geo,'reason':geo_reason},'geocode_evidence':json.loads(location[0]) if location else None,'owner_deferred':review_deferred(r['source_id'],store),'source_review':json.loads(review[0]) if review else None})
     if len(rows)>1000:raise ValueError('Listing audit requires pagination beyond 1000 properties')
-    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows}
+    scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
+    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None}
