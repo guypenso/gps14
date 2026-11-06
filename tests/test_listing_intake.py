@@ -86,3 +86,38 @@ def test_read_only_audit_keeps_every_disposition_and_original_identity(store,bou
     assert {r['disposition'] for r in result['properties']}=={'pending_delivery','rejected_hard_criterion','pending_additional_evidence'}
     assert all(r['external_id'].startswith('fixture-email|') for r in result['properties'])
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_geocoder_uses_postal_city_and_replaces_only_legacy_negative_cache(store,boundary,clock):
+    import hashlib,io,json
+    from rentalsourcing.listing_intake import geocode
+    from rentalsourcing.offmarket import street_key
+    p=listing('unseen',addressLine1='100 Fixture',formattedAddress='100 Fixture, Morningside, PA 15212')
+    key='listing_geocode:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest()
+    store.save_setting(key,{'matched':False,'next_at':(clock()+dt.timedelta(days=7)).isoformat()})
+    class Response(io.BytesIO):
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+    class Opener:
+        calls=0
+        def open(self,request,**kwargs):
+            self.calls+=1
+            assert 'Pittsburgh' in request.full_url and 'Morningside' not in request.full_url
+            return Response(json.dumps({'result':{'addressMatches':[{'matchedAddress':'100 Fixture St, Pittsburgh, PA 15212','addressComponents':{'state':'PA','zip':'15212'},'coordinates':{'x':-80,'y':40.45}}]}}).encode())
+    o=Opener();assert geocode(store,p,boundary,clock(),o)['matched']
+    assert geocode(store,p,boundary,clock(),o)['matched'] and o.calls==1
+
+
+def test_official_point_in_excluded_area_is_rejected_not_silently_unmatched(store,boundary,clock):
+    import io,json
+    from rentalsourcing.listing_intake import geocode
+    p=listing('excluded',addressLine1='102 Other St',formattedAddress='102 Other St, Pittsburgh, PA 15212')
+    class Response(io.BytesIO):
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+    class Opener:
+        def open(self,*a,**k):return Response(json.dumps({'result':{'addressMatches':[{'matchedAddress':p['formattedAddress'],'addressComponents':{'state':'PA','zip':'15212'},'coordinates':{'x':-80.27,'y':40.32}}]}}).encode())
+    result=geocode(store,p,boundary,clock(),Opener());assert result['matched']
+    p.update(latitude=result['latitude'],longitude=result['longitude'])
+    from rentalsourcing.core import geographic_verification
+    assert geographic_verification(p,boundary)==('Rejected','sheraden_neighborhood')
