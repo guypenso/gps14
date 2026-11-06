@@ -21,6 +21,10 @@ def listing_report(store,boundary,now):
             'listing_url':r.get('listing_url'),'observed_at':r['observed_at'],'reasons':reasons})
     scheduler=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
     job=json.loads(scheduler[0]) if scheduler else {}
+    preflight=store.execute('SELECT payload FROM settings WHERE name=?',('listing_pre_report_receipt',)).fetchone()
+    latest=json.loads(preflight[0]) if preflight else {}
+    if latest.get('at','')>job.get('attempted_at',''):
+        job={'attempted_at':latest['at'],'state':latest.get('result',{}).get('state','failed')}
     return {'properties':len(rows),'observations':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0],
         'last_attempt_at':job.get('attempted_at'),'state':job.get('state','not_checked'),
         'last_observation':max((r['observed_at'] for r in rows),default=None),'cards':cards}
@@ -45,8 +49,12 @@ def sync_before_report(store,day,now,opener=None):
     body=json.dumps({'action':'listing_refresh','operation_id':'pre-report:'+day},separators=(',',':')).encode()
     def accepted(value,*args):
         if value.get('state') not in ('success','partial'):raise ValueError('Listing intake did not complete')
-    result=request_json(store,'listing_pre_report',day,(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),body,
-        timeout=90,opener=opener,now=now,validate=accepted)
+    try:
+        result=request_json(store,'listing_pre_report',day,(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),body,
+            timeout=90,opener=opener,now=now,validate=accepted)
+    except Exception:
+        store.save_setting('listing_pre_report_receipt',{'at':now.isoformat(),'day':day,'result':{'state':'failed'}})
+        raise
     store.save_setting('listing_pre_report_receipt',{'at':now.isoformat(),'day':day,'result':result})
     component(store,'listing_pre_report',result['state'],now=now,pending=1 if result['state']=='partial' else 0)
     return result

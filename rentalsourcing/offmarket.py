@@ -178,6 +178,8 @@ def start_scheduler(url):
    s=None
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
+    from .listing_intake import reconcile_official_identities
+    reconcile_official_identities(s,now)
     from .investment_policy import POLICY_VERSION
     if not get(s,POLICY_VERSION):
      from .criteria import reevaluate

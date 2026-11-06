@@ -91,6 +91,16 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         error={'category':'future_inventory_processing','retryable':True}
         component(store,'inventory_sync','partial',now=clock(),pending=1,error=error);incident(store,'inventory_sync',error,now=clock())
     event('future_discovery_verification',**stats['future_discovery'])
+    if settings.email_enabled:
+        from .listing_report import sync_before_report
+        try:
+            source_result=sync_before_report(store,day,clock(),opener)
+            stats['listing_intake_state']=source_result.get('state')
+            if source_result.get('state')=='partial':stats['partial']=True
+            event('listing_pre_report',state=source_result.get('state'))
+        except Exception as exc:
+            stats.update(partial=True,listing_intake_state='failed')
+            event('listing_pre_report_failed',error_type=type(exc).__name__)
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     from .command_center import review_configuration

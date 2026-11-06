@@ -7,10 +7,38 @@ from .tax_backlog import review_deferred
 from .request import NoRedirect
 from .provenance import demo_marked
 
+def official_street_key(store,p):
+    """Only an accepted exact official match may resolve an omitted street suffix."""
+    key='listing_geocode:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest()
+    row=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
+    location=json.loads(row[0]) if row else {}
+    if location.get('matched') and location.get('matched_address'):
+        return street_key({'formattedAddress':location['matched_address']})
+    return street_key(p)
+
+def reconcile_official_identities(store,now):
+    """Retain source history and register exact official aliases; never delete data."""
+    existing=[(i,json.loads(raw)) for i,raw in store.execute('SELECT id,payload FROM properties WHERE source=?',(LIVE,)).fetchall()]
+    changed=0
+    for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall():
+        r=json.loads(raw);p=r['property'];key=official_street_key(store,p)
+        if r.get('canonical_source_id') or key==street_key(p):continue
+        matches=[i for i,v in existing if street_key(v)==key and str(v.get('zipCode'))==p['zipCode']]
+        if len(matches)!=1 or matches[0]==r['source_id']:continue
+        target=matches[0];old=r['source_id']
+        alias={'from_source_id':old,'to_source_id':target,'address_key':key,'zip_code':p['zipCode'],'evidence':'accepted_official_exact_address_match','at':now.isoformat(),'canonical_review_rejected':review_deferred(target,store)}
+        store.save_setting('listing_identity_alias:'+old,alias)
+        store.save_setting('listing_identity:'+old,{**r,'canonical_source_id':target})
+        saved=store.execute('SELECT payload FROM settings WHERE name=?',('listing_identity:'+target,)).fetchone()
+        if not saved or json.loads(saved[0])['observed_at']<r['observed_at']:
+            store.save_setting('listing_identity:'+target,{**r,'source_id':target,'property':{**p,'id':target},'matched_rentcast':True,'owner_deferred':review_deferred(target,store)})
+        changed+=1
+    return changed
 
 def evaluate(store,boundary,records,now,opener=None):
     if not isinstance(records,list) or len(records)>30:raise ValueError('Bounded listing intake required')
     existing=[(i,json.loads(raw)) for i,raw in store.execute('SELECT id,payload FROM properties WHERE source=?',(LIVE,)).fetchall()]
+    source_existing=[(r['source_id'],r['property']) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall() for r in [json.loads(raw)] if not r.get('canonical_source_id')]
     cards=[];results=[];counts=dict(received=len(records),known_rentcast=0,not_known_rentcast=0,non_tax_pass=0,pending=0,qualified=0,rejected=0,needs_research=0,owner_deferred=0,paid_calls=0,new_unique_beyond_rentcast=0)
     geocode_budget=2
     for item in records:
@@ -20,19 +48,30 @@ def evaluate(store,boundary,records,now,opener=None):
         for key in ('formattedAddress','addressLine1','zipCode'):
             if not isinstance(p.get(key),str) or not p[key] or len(p[key])>500:raise ValueError('Incomplete listing identity')
         matches=[(i,v) for i,v in existing if street_key(v)==street_key(p) and str(v.get('zipCode'))==p['zipCode']]
+        # Resolve missing-suffix aliases against accepted official address evidence,
+        # never against street text or matching prices alone. Do this before
+        # assigning a new source identity or generating a PENTEN card.
+        location=None
+        if not matches and p.get('latitude') is None and geocode_budget>0:
+            geocode_budget-=1;location=geocode(store,p,boundary,now,opener)
+            if location.get('matched'):p.update(latitude=location['latitude'],longitude=location['longitude'])
+        canonical=official_street_key(store,p)
+        if not matches and canonical!=street_key(p):
+            matches=[(i,v) for i,v in existing if street_key(v)==canonical and str(v.get('zipCode'))==p['zipCode']]
+        source_matches=[(i,v) for i,v in source_existing if str(v.get('zipCode'))==p['zipCode'] and official_street_key(store,v)==canonical]
         matched=matches[0] if len(matches)==1 else None
-        identity=matched[0] if matched else 'realscout:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest()
+        identity=matched[0] if matched else source_matches[0][0] if len(source_matches)==1 else 'realscout:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest()
         counts['known_rentcast' if matched else 'not_known_rentcast']+=1
         identity_key='listing_identity:'+identity
         prior_identity=store.execute('SELECT payload FROM settings WHERE name=?',(identity_key,)).fetchone()
         if not matched and not prior_identity:counts['new_unique_beyond_rentcast']+=1
-        raw_evidence=dict(p)
+        raw_evidence=dict(item.get('property') or {})
         if matched:
             from .turnkey import FIELDS as marketing_fields,META as marketing_meta
             for key in dict.fromkeys(('latitude','longitude','propertyType','propertySubType','propertySubtype','structureType','dwellingType','ownershipType','ownership','commonInterest','attached','isAttached','isCondo','isCondominium','_rentalsourcing_prior_condominium')+marketing_fields+marketing_meta+('turnkey','isTurnkey','isTurnKey')):
                 if p.get(key) is None:p[key]=matched[1].get(key)
         p['id']=identity;p['state']='PA'
-        if p.get('latitude') is None and geocode_budget>0:
+        if location is None and p.get('latitude') is None and geocode_budget>0:
             geocode_budget-=1
             location=geocode(store,p,boundary,now,opener)
             if location.get('matched'):p.update(latitude=location['latitude'],longitude=location['longitude'])
@@ -41,7 +80,7 @@ def evaluate(store,boundary,records,now,opener=None):
         state,reasons=verification(p,boundary)
         fresh=dt.timedelta(0)<=now-stamp<=dt.timedelta(hours=24)
         if not fresh:reasons.append('stale_listing_status_requires_refresh')
-        if len(matches)>1:state='Pending Verification';reasons.append('ambiguous_existing_identity')
+        if len(matches)>1 or not matched and len(source_matches)>1:state='Pending Verification';reasons.append('ambiguous_existing_identity')
         tax=None;fetched=None
         saved=store.get_tax(identity,now.isoformat()) if matched else None
         if saved and saved[1]==LIVE and isinstance(saved[0],dict) and saved[0].get('id')==identity and not demo_marked(saved[0]):
@@ -52,7 +91,7 @@ def evaluate(store,boundary,records,now,opener=None):
         if deferred:counts['owner_deferred']+=1
         if state=='Candidate':counts['non_tax_pass']+=1
         if state=='Rejected':counts['rejected']+=1
-        elif not deferred and len(matches)<=1 and geographic_verification(p,boundary)[0]=='Candidate':
+        elif not deferred and len(matches)<=1 and (matched or len(source_matches)<=1) and geographic_verification(p,boundary)[0]=='Candidate':
             qualified=state=='Candidate' and tax is not None and fresh
             counts['qualified' if qualified else 'pending']+=1
             cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('listing_url') or item.get('evidence_url'),last_reported_status=p['status']))
@@ -71,7 +110,9 @@ def evaluate(store,boundary,records,now,opener=None):
         key='listing_observation:'+hashlib.sha256((str(item.get('external_id'))+'|'+identity).encode()).hexdigest()
         store.save_setting(key,result)
         if not prior_identity or json.loads(prior_identity[0])['observed_at']<=observed:store.save_setting(identity_key,result)
+        if not any(i==identity for i,_ in source_existing):source_existing.append((identity,p))
         results.append(result)
+    reconcile_official_identities(store,now)
     return dict(cards=cards,counts=counts,evaluations=results)
 
 
@@ -115,7 +156,7 @@ def geocode(store,p,boundary,now,opener=None):
 
 
 def summary(store):
-    records=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall()]
+    records=[r for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall() for r in [json.loads(raw)] if not r.get('canonical_source_id')]
     return {'unique_properties':len(records),'known_rentcast_unique':sum(r['matched_rentcast'] for r in records),'unique_beyond_rentcast':sum(not r['matched_rentcast'] for r in records),'owner_deferred_unique':sum(r['owner_deferred'] for r in records),'rejected_unique':sum(r['state']=='Rejected' for r in records),'non_tax_pass_unique':sum(r['state']=='Candidate' for r in records),'source_observations':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0],'paid_provider_calls':0}
 
 
@@ -124,6 +165,7 @@ def audit(store,boundary,now):
     rows=[]
     for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ? ORDER BY name',('listing_identity:%',)).fetchall():
         r=json.loads(raw);p=r['property'];state,reasons=verification(p,boundary)
+        if r.get('canonical_source_id'):continue
         geo,geo_reason=geographic_verification(p,boundary)
         location=store.execute('SELECT payload FROM settings WHERE name=?',('listing_geocode:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest(),)).fetchone()
         review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+r['source_id'],)).fetchone()
@@ -132,4 +174,17 @@ def audit(store,boundary,now):
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
     validation=store.execute('SELECT payload FROM settings WHERE name=?',('realscout_scheduler_validation_v1',)).fetchone()
     from .investment_policy import thresholds
-    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
+    stats=summary(store);tax_changes=[]
+    for identity,raw,observed,tax_raw,source in store.execute('SELECT p.id,p.payload,p.observed_at,t.payload,t.source FROM properties p JOIN tax_history t ON p.id=t.property_id WHERE t.expires_at>?',(now.isoformat(),)).fetchall():
+        record=json.loads(tax_raw)
+        if source!=LIVE or record.get('id')!=identity or demo_marked(record):continue
+        tax_state,tax,_=tax_verification(record,now.date())
+        if tax_state=='Rejected' or not tax or not 1900<=tax['annual']<=2300:continue
+        p=json.loads(raw);review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()
+        protected=review_deferred(identity,store) or bool(review and json.loads(review[0]).get('status') not in (None,'new'))
+        from .digest import recent_timestamp
+        non_tax=verification(p,boundary)[0]=='Candidate';fresh=recent_timestamp(observed,now)
+        tax_changes.append({'source_id':identity,'annual_tax':tax['annual'],'tax_year':tax['year'],'non_tax_pass':non_tax,'fresh_listing':fresh,'human_decision_preserved':protected,'new_qualified_opportunity':non_tax and fresh and not protected})
+    stats['tax_ceiling_recheck']={'cached_records_newly_passing_tax':len(tax_changes),'new_qualified_opportunities':sum(r['new_qualified_opportunity'] for r in tax_changes),'records':tax_changes}
+    aliases=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity_alias:%',)).fetchall()]
+    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':stats,'identity_reconciliations':aliases,'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
