@@ -37,6 +37,9 @@ def test_current_inventory_audit_compares_stable_source_ids_without_provider_cal
    return Result()
  report=current_inventory_audit(store,CONFIG,Receiver())
  assert report['source_records']==2 and report['pending']==2 and report['mapped']==1 and report['missing_pending']==1
+ assert report['destination_review_statuses']=={'monitor':1}
+ assert report['destination_tax_statuses']=={'pending_verification':1}
+ assert report['pending_tax_status_mismatch']==0
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
 class Wire:
  def __init__(self,responses):self.responses=list(responses);self.calls=[]
