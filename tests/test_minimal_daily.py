@@ -17,7 +17,8 @@ def approved(settings):
     return replace(settings,approval_mode='billing_cycle',billing_anchor='2026-10-01T00:00:00+00:00',billing_baseline=9,approved_requests=40,per_month=40,per_day=4,per_run=4,retries=0)
 
 
-def test_daily_scans_before_digest_and_duplicate_does_not_rescan_or_send(store,boundary,settings,clock):
+def test_daily_scans_before_digest_and_duplicate_does_not_rescan_or_send(store,boundary,settings,clock,monkeypatch):
+    monkeypatch.setenv("ENABLE_PAID_TAX_VERIFICATION","true")
     p=Provider();s=approved(settings)
     result=daily_discovery(store,boundary,s,clock().date().isoformat(),clock=clock,opener=p)
     assert result['status']=='sent' and result['scan']=='fresh' and result['requests']>=1
@@ -76,7 +77,8 @@ def test_preview_reuses_digest_but_can_never_be_sent(store,boundary,settings,clo
     assert not p.messages
 
 
-def test_price_reduction_remains_one_property_and_one_new_event(store,boundary,settings,clock):
+def test_price_reduction_remains_one_property_and_one_new_event(store,boundary,settings,clock,monkeypatch):
+    monkeypatch.setenv("ENABLE_PAID_TAX_VERIFICATION","true")
     s=approved(settings);p=Provider([listing(price=180000)])
     first=daily_discovery(store,boundary,s,clock().date().isoformat(),clock=clock,opener=p)
     clock.advance(days=1);p.rows=[listing(price=170000)]

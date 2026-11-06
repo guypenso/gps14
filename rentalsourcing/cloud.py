@@ -70,7 +70,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             client=Client(store,effective,clock,opener)
             try:
                 scan_job=scheduled_job(store,day)
-                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok).run(scan_job,day)
+                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true').run(scan_job,day)
                 stats['requests_consumed']=client.count
                 if stats.get('sample_truncated'):stats['partial']=True
             except Exception as exc:
@@ -83,6 +83,14 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     safe_flush(store)
     from .diagnostics import funnel,safe_read
     stats['funnel']=safe_read(funnel,store,boundary,clock());store.save_setting('health_funnel',stats['funnel'])
+    from .future_discovery import process as process_future
+    try:
+        stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener)
+    except Exception as exc:
+        stats['future_discovery']={'state':'pending_recovery','error_type':type(exc).__name__}
+        error={'category':'future_inventory_processing','retryable':True}
+        component(store,'future_inventory','partial',now=clock(),pending=1,error=error);incident(store,'future_inventory',error,now=clock())
+    event('future_discovery_verification',**stats['future_discovery'])
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     from .command_center import review_configuration

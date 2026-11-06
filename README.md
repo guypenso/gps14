@@ -135,3 +135,20 @@ API_APPROVAL_MODE defaults to one_time. Optional rolling_32_days requires an exp
 allowance approval and counts all app attempts across the preceding 32 UTC dates, preventing a
 calendar reset from creating a new spending allowance. No mode monitors other applications using
 the provider account. Existing four-call approval remains a one-time allowance.
+
+### Future discovery tax safety
+
+First-seen live source identities are persisted as `first_discovery:*` and counted
+once per discovery job. `future_discovery_report:*` records new-only tax and sync
+outcomes. Existing reviewed inventory is not enrolled retroactively. New eligible
+cards are sent through the existing authenticated daily receiver independently of
+email delivery; frozen `stored-review-inventory:future:*` batches use the existing
+watchdog recovery and idempotency machinery. Verified provider cache may qualify
+an otherwise eligible fresh listing; assessment calculations remain pending.
+
+Scheduled paid property-record lookups now require the separate explicit setting
+`ENABLE_PAID_TAX_VERIFICATION=true` as well as all existing budget and feedback
+checks. Default is false. No additional government annual-bill API is represented
+as connected: until authorized bill acquisition is validated, uncached new records
+remain Pending Verification and are delivered for review. Dataset estimates do not
+satisfy the mandatory tax gate. No quotas or daily schedules are changed.

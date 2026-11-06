@@ -18,6 +18,8 @@ def block_provider_network(monkeypatch):
     monkeypatch.setattr('urllib.request.OpenerDirector.open',denied)
     monkeypatch.setenv('RENTCAST_API_KEY','fixture-key-not-real')
     monkeypatch.setenv('RESEND_API_KEY','fixture-resend-not-real')
+    # Legacy paid-path fixtures explicitly simulate separate tax authorization.
+    monkeypatch.setenv('ENABLE_PAID_TAX_VERIFICATION','true')
 
 @pytest.fixture(params=['sqlite','postgres'])
 def store(request,tmp_path):
