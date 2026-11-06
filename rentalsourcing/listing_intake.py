@@ -28,7 +28,8 @@ def evaluate(store,boundary,records,now,opener=None):
         if not matched and not prior_identity:counts['new_unique_beyond_rentcast']+=1
         raw_evidence=dict(p)
         if matched:
-            for key in ('latitude','longitude','propertyType','propertySubType','ownershipType'):
+            from .turnkey import FIELDS as marketing_fields,META as marketing_meta
+            for key in dict.fromkeys(('latitude','longitude','propertyType','propertySubType','propertySubtype','structureType','dwellingType','ownershipType','ownership','commonInterest','attached','isAttached','isCondo','isCondominium','_rentalsourcing_prior_condominium')+marketing_fields+marketing_meta+('turnkey','isTurnkey','isTurnKey')):
                 if p.get(key) is None:p[key]=matched[1].get(key)
         p['id']=identity;p['state']='PA'
         if p.get('latitude') is None and geocode_budget>0:

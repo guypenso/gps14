@@ -64,3 +64,12 @@ def test_official_geocoder_exact_match_and_permanent_denial_cache(store,boundary
     geocode(store,listing('second',addressLine1='102 Other St'),boundary,clock(),denied)
     geocode(store,listing('third',addressLine1='104 Other St'),boundary,clock(),denied)
     assert denied.calls==1
+
+
+def test_listing_alert_cannot_erase_known_turnkey_or_ownership_exclusions(store,boundary,clock):
+    for changes in [{'description':'Fully turnkey investment package'},{'propertyType':'Single Family','ownershipType':'Condominium'},{'propertyType':'Single Family','propertySubType':'Townhome'}]:
+        p=listing('known',addressLine1='100 Fixture Ave',**changes)
+        store.save_property('known',p,'Rejected',[],LIVE,1,clock().isoformat())
+        item=alert();item['property'].pop('propertyType',None)
+        result=evaluate(store,boundary,[item],clock())
+        assert result['cards']==[] and result['counts']['rejected']==1
