@@ -41,6 +41,9 @@ def test_stale_alert_does_not_become_qualified_with_cached_tax(store,boundary,cl
     item=alert();item['received_at']=(clock()-dt.timedelta(days=2)).isoformat()
     r=evaluate(store,boundary,[item],clock())
     assert r['cards'][0]['qualification']=='pending_verification'
+    assert r['cards'][0]['tax_status']=='provider_verified'
+    assert r['cards'][0]['annual_tax']==1500
+    assert 'tax_verification_required' not in r['cards'][0]['reasons']
 
 
 def test_official_geocoder_exact_match_and_permanent_denial_cache(store,boundary,clock):
