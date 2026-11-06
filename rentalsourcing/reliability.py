@@ -172,7 +172,7 @@ def recover(store,boundary,now=None,opener=None):
   else:after=remote_audit(store,opener=opener) if need_audit else previous_audit['result']
   result['audit']=after
   if need_audit:store.save_setting('health_last_audit',{'at':now.isoformat(),'result':after})
-  good=after.get('feedback_matches') and not any(after.get(k) for k in ('remote_unaccepted_reports','missing_source_identities','digest_conflicts'))
+  good=reconciliation_healthy(after)
   error={'category':'cross_system_drift','retryable':True}
   component(store,'consistency','success' if good else 'partial',now=now,processed=after.get('reports',0),pending=0 if good else 1,error=None if good else error,recovery='reconciled' if good else 'scheduled')
   incident(store,'consistency',None if good else error,now=now,resolved=good)
@@ -225,6 +225,10 @@ def start_watchdog(url,boundary):
     if store:store.close()
    time.sleep(300)
  threading.Thread(target=loop,name='penten-sync-recovery',daemon=True).start()
+
+def reconciliation_healthy(after):
+ current=after.get('current_inventory')
+ return bool(after.get('feedback_matches') and not any(after.get(k) for k in ('remote_unaccepted_reports','missing_source_identities','digest_conflicts')) and isinstance(current,dict) and current.get('state')!='disabled' and not any(current.get(k) for k in ('missing','rejected_at_destination','tax_status_mismatch','pending_tax_status_mismatch')))
 
 def remote_audit(store,config=None,opener=None):
  """Pure read-only cross-system comparison. Identifiers are never emitted in logs."""

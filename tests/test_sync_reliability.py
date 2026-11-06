@@ -3,8 +3,14 @@ import pytest
 from conftest import Response,Provider,listing
 from rentalsourcing.sync_runtime import request_json,SyncFailure,get,component,incident
 from rentalsourcing.review_feedback import refresh
-from rentalsourcing.reliability import snapshot,begin,stage,finish,current_inventory_audit,reconcile_completed_enrichment
+from rentalsourcing.reliability import snapshot,begin,stage,finish,current_inventory_audit,reconcile_completed_enrichment,reconciliation_healthy
 CONFIG=('https://penten.example.test/api/rentalsourcing/sync','s'*40,'private-fixture-token')
+def test_current_inventory_drift_is_operationally_unhealthy():
+ baseline={'feedback_matches':True,'remote_unaccepted_reports':0,'missing_source_identities':0,'digest_conflicts':0,'current_inventory':{'missing':0,'rejected_at_destination':0,'tax_status_mismatch':0,'pending_tax_status_mismatch':0}}
+ assert reconciliation_healthy(baseline)
+ for key in ('missing','rejected_at_destination','tax_status_mismatch','pending_tax_status_mismatch'):
+  assert not reconciliation_healthy({**baseline,'current_inventory':{**baseline['current_inventory'],key:1}})
+ assert not reconciliation_healthy({**baseline,'current_inventory':None})
 def test_completed_enrichment_reconciles_only_its_own_orphaned_batch(store,clock):
  job='listing-contact-enrichment:2026-11-05:fixture'
  store.save_setting(job,{'done':True,'offset':648,'cursor':None})
