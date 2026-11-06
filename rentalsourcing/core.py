@@ -6,6 +6,7 @@ from pathlib import Path
 from .provenance import demo_marked
 from .turnkey import evidence as turnkey_evidence
 from .condominium import evidence as condominium_evidence
+from .investment_policy import PRICE_MAX, TAX_BUFFER, TAX_CEILING, annual_tax_passes
 
 EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
@@ -53,9 +54,9 @@ def basic_rejection(row):
     zipcode = str(row.get('zipCode', '')).split('-')[0]
     if len(zipcode) != 5 or not zipcode.isdigit(): return 'missing_zip'
     if zipcode in EXCLUDED_ZIPS: return 'excluded_zip'
-    if property_type_verification(row)[0]=='Rejected':return property_type_verification(row)[1]
+    if property_type_verification(row,single_family=True)[0]=='Rejected':return property_type_verification(row,single_family=True)[1]
     for field, low, high in [('bedrooms', 3, 4), ('bathrooms', 1, math.inf),
-                              ('squareFootage', 1000, math.inf), ('price', 0.01, 200000)]:
+                              ('squareFootage', 1000, math.inf), ('price', 0.01, PRICE_MAX)]:
         value = row.get(field)
         if not number(value) or not low <= value <= high or field=='bedrooms' and not float(value).is_integer(): return field
     if not row.get('id') or not row.get('formattedAddress'): return 'identity'
@@ -74,8 +75,7 @@ def latest_tax(record, today=None):
     if not isinstance(entry, dict) or entry.get('year') != year: return None
     total = entry.get('total')
     if not number(total) or total < 0: return None
-    # Dollars compared in cents; strict inequality rejects $1,900 exactly.
-    if round(total * 100) + 10000 >= 200000: return None
+    if not annual_tax_passes(total): return None
     return {'year': year, 'annual': total, 'adjusted': round(total + 100, 2)}
 
 
@@ -132,7 +132,7 @@ def verification(row, boundary, *, profile="rental", offering=True):
     missing=[]; failed=[]
     if turnkey_evidence(row)['classified']:failed.append('turnkey')
     if profile not in ('rental','offmarket'):raise ValueError('Unknown eligibility profile')
-    type_state,type_reason=property_type_verification(row,single_family=profile=='offmarket')
+    type_state,type_reason=property_type_verification(row,single_family=True)
     if type_state=='Rejected':failed.append(type_reason)
     elif type_state=='Pending Verification':missing.append(type_reason)
     for field,expected in ([('status','Active')] if offering else [])+[('state','PA')]:
@@ -143,7 +143,7 @@ def verification(row, boundary, *, profile="rental", offering=True):
     if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
     elif zipcode in EXCLUDED_ZIPS: failed.append('excluded_zip')
     limits=[('bedrooms',3,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf)]
-    if offering:limits.append(('price',30000 if profile=='offmarket' else 0.01,200001 if profile=='offmarket' else 200000))
+    if offering:limits.append(('price',30000 if profile=='offmarket' else 0.01,PRICE_MAX))
     for field,lo,hi in limits:
         value=row.get(field)
         if not number(value): missing.append(field)
@@ -176,9 +176,9 @@ def tax_verification(record, today=None):
     year=max(years);entry=taxes.get(str(year))
     if not isinstance(entry,dict) or entry.get('year')!=year or not number(entry.get('total')) or entry['total']<0:
         return 'Pending Verification',None,'invalid_latest_tax_amount'
-    amount=Decimal(str(entry['total']));adjusted=amount+Decimal('100')
+    amount=Decimal(str(entry['total']));adjusted=amount+TAX_BUFFER
     tax={'year':year,'annual':float(amount),'adjusted':float(adjusted)}
-    if adjusted>=Decimal('2000'):return 'Rejected',tax,'annual_tax_too_high'
+    if adjusted>TAX_CEILING:return 'Rejected',tax,'annual_tax_too_high'
     if type_evidence and type_state=='Pending Verification':return 'Pending Verification',tax,type_reason
     return 'Qualified',tax,None
 

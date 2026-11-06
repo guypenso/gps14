@@ -23,7 +23,7 @@ def test_new_cache_qualified_estimate_unknown_and_tax_rejected(store,boundary,se
     engine=Engine(store,boundary,Provider(),settings,clock)
     for identity in ['verified','estimate','unknown','rejected']:
         if identity in ['verified','rejected']:
-            store.save_tax(identity,taxes(identity,1500 if identity=='verified' else 1900),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
+            store.save_tax(identity,taxes(identity,1500 if identity=='verified' else 2300.01),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
         engine.ingest('future',listing(identity))
     store.save_setting('public_tax_batch:2026',{'estimates':{'estimate':{'state':'estimated','annual':900,'match_status':'unique_parcel'}}})
     report=process(store,boundary,'future',clock())

@@ -21,7 +21,7 @@ Current acceptance: 100 real listings, 58 rejected, 39 pending tax, three fully 
 2. Persist every observed record, including missing-field records as **Pending Verification**.
 3. Verify the actual city polygon, excluded ZIPs, attributes and price. Known failures are Rejected.
 4. Prioritize price reductions, reuse durable tax cache, and fetch property tax history only when needed.
-5. Require `Latest Available Annual Tax + $100 < $2,000`. Missing latest-year amount stays Pending Verification.
+5. Require `Verified Annual Property Taxes + $100 ≤ $2,400`. Missing latest-year amount stays Pending Verification.
 6. Persist one daily Resend digest containing new verified properties or newly observed price reductions.
 7. Save cursors, tasks, observations, price revisions, tax history, configuration, quota usage and delivery state in PostgreSQL.
 

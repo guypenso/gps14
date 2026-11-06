@@ -53,7 +53,7 @@ def test_empty_dashboard_has_no_demo_and_coverage_unknown(web):
 def test_dashboard_shows_verified_pending_rejected_and_tax_fields(web,store,boundary,clock,settings):
     provider=ingest(store,boundary,clock,replace(settings,page_size=100),[
       listing('verified'),listing('missing',bedrooms=None),listing('excluded',zipCode='15203'),listing('tax-high')],
-      {'verified':taxes('verified',1500),'tax-high':taxes('tax-high',1900)})
+      {'verified':taxes('verified',1500),'tax-high':taxes('tax-high',2300.01)})
     before=len(provider.calls)
     d=web.get('/api/dashboard',headers=HEADERS).get_json()
     assert d['counts']=={'Qualified':1,'Pending Verification':1,'Rejected':2}

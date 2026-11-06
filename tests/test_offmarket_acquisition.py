@@ -18,7 +18,7 @@ def ready_item(now):
 def test_offmarket_price_boundaries_do_not_change_daily(store,boundary,clock,amount,expected):
  d=item();d['property']['price']=amount
  assert evaluate(store,boundary,[d],clock())[0]['criteria_state']==expected
- assert verification(d['property'],boundary)[0]==('Rejected' if amount>200000 else 'Candidate')
+ assert verification(d['property'],boundary)[0]==('Rejected' if amount>200001 else 'Candidate')
 
 @pytest.mark.parametrize('kind',['assessed_value','auction_bid','estimate','rehab','unknown'])
 def test_non_asking_numbers_never_documented(store,boundary,clock,kind):

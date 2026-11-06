@@ -9,7 +9,7 @@ from conftest import Provider,listing
 def test_plan_has_exact_filters_and_valid_encoding_without_network():
     p=plan();q=parse_qs(urlsplit(p['url']).query)
     assert q=={k:[str(v)] for k,v in p['parameters'].items()}
-    assert q['limit']==['100'] and q['bathrooms']==['1:*'] and q['price']==['*:200000']
+    assert q['limit']==['100'] and q['bathrooms']==['1:*'] and q['price']==['*:200001']
     assert p['max_total_attempts']==4 and p['max_tax_candidates']==3 and not p['emails']
 
 

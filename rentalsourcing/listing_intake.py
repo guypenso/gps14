@@ -131,4 +131,5 @@ def audit(store,boundary,now):
     if len(rows)>1000:raise ValueError('Listing audit requires pagination beyond 1000 properties')
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
     validation=store.execute('SELECT payload FROM settings WHERE name=?',('realscout_scheduler_validation_v1',)).fetchone()
-    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
+    from .investment_policy import thresholds
+    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}

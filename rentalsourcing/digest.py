@@ -97,6 +97,9 @@ def render(day,items,stats,health,operations):
     if summary:markup+='<p>'+html.escape(summary)+'</p>'
     if failed:markup+='<p>'+html.escape('סוג התקלה: '+str(stats['error_type']))+'</p>'
     markup+='<p>'+html.escape(footer)+'</p>'+''.join('<p>'+html.escape(w)+'</p>' for w in operations)+'</body></html>'
+    if stats.get('listing_email'):
+        from .listing_report import section
+        source_text,source_html=section(stats['listing_email']);lines.append(source_text);markup=markup.replace('</body>',source_html+'</body>')
     return '\n\n'.join(lines),markup
 
 
@@ -154,6 +157,8 @@ class Digest:
         pending.sort(key=lambda entry:(shown.get(entry['listing'].get('id'),''),review_key(entry['listing'],self.boundary,entry['observed_at'],self.clock(),previous_price(self.store,entry['listing'].get('id'),entry['listing'].get('price')))))
         pending=pending[:50]
         stats['pending_properties']=pending
+        from .listing_report import listing_report
+        stats['listing_email']=listing_report(self.store,self.boundary,self.clock())
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
         status='תקלה בסריקה' if stats.get('error_type') else ('סריקה חלקית' if stats.get('partial') else f'{len(items)} נכסים מאומתים')
@@ -197,7 +202,8 @@ class Digest:
                 self.store.execute('INSERT INTO deal_events VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
                     (event_id,identity,kind,row['price'],previous,revision,'ready',json.dumps(data),now.isoformat()))
                 items.append(dict(data,kind=kind,previous_price=previous));ids.append(event_id)
-            text,markup=render(day,items,{'saved_data_only':True},self.store.budget_health(self.settings,now),self.store.operations())
+            from .listing_report import listing_report
+            text,markup=render(day,items,{'saved_data_only':True,'listing_email':listing_report(self.store,self.boundary,now)},self.store.budget_health(self.settings,now),self.store.operations())
             body={'from':self.settings.email_from,'to':[self.settings.email_to],
                 'subject':f'RentalSourcing | {day} | '+(f'{len(items)} נכסים מאומתים מנתונים שמורים' if items else 'עדכון נתונים שמורים — אין הזדמנויות חדשות מאומתות'),
                 'text':text,'html':markup}

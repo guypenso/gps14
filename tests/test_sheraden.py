@@ -95,4 +95,4 @@ def test_sheraden_rule_does_not_expand_discovery_or_exclude_zip_15205_wholesale(
  query=listing_parameters(policy)
  assert query['latitude']==40.4349024 and query['longitude']==-79.9805549 and query['radius']==7.9
  assert 'city' not in query and 'zipCode' not in query
- assert query['price']=='*:200000' and query['bedrooms']=='3:4' and query['bathrooms']=='1:*' and query['squareFootage']=='1000:*'
+ assert query['price']=='*:200001' and query['bedrooms']=='3:4' and query['bathrooms']=='1:*' and query['squareFootage']=='1000:*'

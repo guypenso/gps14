@@ -54,7 +54,7 @@ School 2026–27 annualized rate and county/municipal 2026 rates are disclosed;
 this is not a certified calendar-year bill. No reassessment or post-purchase
 assumption is invented. Formula, source, year, inputs and warnings are retained.
 Every estimated/unknown opportunity remains Pending Verification, including when
-estimated tax plus $100 is below $2,000. Verified bill rules remain unchanged.
+estimated tax plus $100 is at or below $2,400. Verified bill rules remain unchanged.
 
 ## Verification and rollback
 

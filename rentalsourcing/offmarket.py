@@ -124,12 +124,25 @@ def cache_program_contacts(store,result):
    contacts[item['external_id']]={'offering_street_key':street_key(item['property']),'kind':'contact','name':'Pittsburgh Land Bank','role':'Public Agency','email':'staff@pghlandbank.org','phone':'412-255-6566','source_url':PLB,'observed_at':result['attempted_at'],'verification_method':'official_inventory','relationship':'Responsible for inquiries about this property in the published residential rehab sales program','relationship_confirmed':True}
  store.save_setting('offmarket_plb_contacts_v2',{'contacts':contacts,'source_sha256':result.get('source_sha256'),'at':result['attempted_at']})
 
+def next_source_refresh(now,result):
+ """Existing worker drains bounded pages, then checks again before the report."""
+ from .schedule import ISRAEL
+ if result.get('state')=='partial':return (now+dt.timedelta(minutes=5)).isoformat()
+ local=now.astimezone(ISRAEL)
+ cutoff=local.replace(hour=7,minute=45,second=0,microsecond=0)
+ if cutoff<=local:cutoff+=dt.timedelta(days=1)
+ return min(now+dt.timedelta(hours=6),cutoff.astimezone(UTC)).isoformat()
+
 def claim_schedule(store,now):
  from .sync_runtime import get
  # Separate advisory lock: off-market refresh never waits for or takes the paid discovery lock.
  if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541211)').fetchone()[0]:return False
  previous=get(store,'offmarket_scheduler',{})
- if previous.get('next_at','')>now.isoformat():return False
+ from .schedule import ISRAEL
+ local=now.astimezone(ISRAEL);day=local.date().isoformat()
+ pre_report=local.hour==7 and local.minute>=45 and get(store,'listing_pre_report_day')!=day
+ if previous.get('next_at','')>now.isoformat() and not pre_report:return False
+ if pre_report:store.save_setting('listing_pre_report_day',day)
  store.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running','validation_id':previous.get('validation_id')})
  return True
 
@@ -165,6 +178,13 @@ def start_scheduler(url):
    s=None
    try:
     s=Store(url,initialize=False);now=dt.datetime.now(UTC)
+    from .investment_policy import POLICY_VERSION
+    if not get(s,POLICY_VERSION):
+     from .criteria import reevaluate
+     from .geography import load_boundary
+     from .config import Settings
+     changed=reevaluate(s,load_boundary(Settings.from_env().boundary_file),now)
+     s.save_setting(POLICY_VERSION,{'at':now.isoformat(),'records_updated':changed,'provider_calls':0})
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
     if not get(s,'offmarket_reconciliation_v5'):
      u,k,t=review_configuration()
@@ -193,7 +213,7 @@ def start_scheduler(url):
       from .sync_runtime import component,incident
       error={'category':'offmarket_source_incomplete','retryable':True}
       component(s,'offmarket_refresh','partial',pending=1,error=error);incident(s,'offmarket_refresh',error)
-     next_at=complete_listing_validation(s,validation,result,now) if validation else (now+dt.timedelta(minutes=30) if result.get('state')=='partial' else now+dt.timedelta(hours=6)).isoformat()
+     next_at=complete_listing_validation(s,validation,result,now) if validation else next_source_refresh(now,result)
      s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':next_at,'state':result.get('state','failed'),'result':result})
    except Exception as e:
     logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_REFRESH_FAILED '+type(e).__name__)
