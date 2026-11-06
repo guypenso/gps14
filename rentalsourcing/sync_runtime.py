@@ -96,7 +96,9 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
   return ledger['receipt']
  same=ledger.get('configuration')==fingerprint
  if same and ledger.get('state')=='dead_letter':raise SyncFailure(**{k:v for k,v in ledger['error'].items() if k in ('category','retryable','endpoint','operation')},status=ledger['error'].get('http_status'))
- if same and ledger.get('state')=='pending' and ledger.get('next_attempt_at','')>stamp.isoformat():raise SyncFailure('recovery_scheduled',None,True,endpoint,identity)
+ # A process can stop after saving an in-flight attempt but before assigning
+ # a retry time. Resume that idempotent operation instead of comparing None.
+ if same and ledger.get('state')=='pending' and (ledger.get('next_attempt_at') or '')>stamp.isoformat():raise SyncFailure('recovery_scheduled',None,True,endpoint,identity)
  if same and not poll and ledger.get('digest') and ledger['digest']!=digest:raise SyncFailure('frozen_operation_changed',409,False,endpoint,identity)
  ledger={**ledger,'id':identity,'component':name,'endpoint':endpoint,'configuration':fingerprint,'digest':digest,'created_at':ledger.get('created_at',stamp.isoformat()),'attempts':ledger.get('attempts',0),'state':'pending'}
  opener=opener or urllib.request.build_opener(NoRedirect)

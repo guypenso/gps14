@@ -88,6 +88,20 @@ def test_persisted_backoff_and_safe_restart(store,clock):
   assert len(wire.calls)==3;clock.advance(minutes=2)
   assert request_json(resumed,'price_sync','persistent',CONFIG,b'{}',opener=wire,now=clock())['accepted']
  finally:resumed.close()
+def test_restart_recovers_an_interrupted_attempt_without_a_backoff_timestamp(store,clock):
+ wire=Wire([{'accepted':True},{'accepted':True}]);body=b'{"frozen":true}'
+ request_json(store,'health_roundtrip','interrupted',CONFIG,body,opener=wire,now=clock(),poll=True)
+ key='sync_operation:health_roundtrip:'+hashlib.sha256(b'interrupted').hexdigest()
+ ledger=get(store,key);store.save_setting(key,{**ledger,'state':'pending','next_attempt_at':None,'error':None})
+ from rentalsourcing.storage import Store
+ resumed=Store(store.test_url,initialize=False)
+ try:
+  assert request_json(resumed,'health_roundtrip','interrupted',CONFIG,body,opener=wire,now=clock(),poll=True)['accepted']
+  assert get(resumed,key)['state']=='success'
+ finally:resumed.close()
+ assert len(wire.calls)==2 and wire.calls[0].data==wire.calls[1].data
+ assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+ assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
 def test_rate_limit_obeys_retry_after_without_immediate_replay(store,clock):
  wire=Wire([error(429),{'accepted':True}])
  with pytest.raises(SyncFailure):request_json(store,'feedback','limited',CONFIG,b'{}',opener=wire,now=clock(),sleeper=lambda _:pytest.fail('No immediate 429 retry'))
