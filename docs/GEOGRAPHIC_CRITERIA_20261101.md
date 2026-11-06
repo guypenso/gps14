@@ -8,9 +8,9 @@ never reject an otherwise detached single-family property. Unknown or ambiguous
 property types remain Pending Verification. Property-record type evidence from
 existing selective tax lookups/cache is also checked; no extra requests are added.
 
-All prior limits remain: active PA residential sale, <=$200,000, >=3 beds, >=1 bath,
->=1,000 sqft, excluded ZIPs 15203/15204/15210/15211, latest annual tax + $100 strictly
-≤$2,400. Postal city/ZIP never verifies municipal/neighborhood membership. Bellevue
+Current limits: active PA single-family sale, <=$200,001, exactly 3 or 4 beds, >=1 bath,
+>=1,000 sqft, excluded ZIPs 15203/15204/15210/15211, verified annual tax + $100
+≤$2,400 (inclusive, effective November 7, 2026). Postal city/ZIP never verifies municipal/neighborhood membership. Bellevue
 is tested first in geography; excluded ZIPs still override that exception. Unknown
 coordinates/borders cannot appear as geographically confirmed opportunities.
 

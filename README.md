@@ -25,8 +25,11 @@ Current acceptance: 100 real listings, 58 rejected, 39 pending tax, three fully 
 6. Persist one daily Resend digest containing new verified properties or newly observed price reductions.
 7. Save cursors, tasks, observations, price revisions, tax history, configuration, quota usage and delivery state in PostgreSQL.
 
-All criteria remain fixed: inside Pittsburgh PA, Active/For Sale, bedrooms >=3, bathrooms >=1,
-living area >=1,000 sqft, price <=$200,000, ZIP 15210 and 15203 excluded. There is no demo fallback.
+Current criteria: approved Pittsburgh PA or Bellevue Borough geography, Active/For Sale,
+exactly 3 or 4 bedrooms, at least one bathroom, at least 1,000 sqft and asking price
+at most $200,001. Single-family only; condos, townhomes and turnkey listings are
+excluded. Preserve excluded ZIPs 15203/15204/15210/15211 and every neighborhood
+restriction. Verified annual tax + $100 must be at most $2,400. There is no demo fallback.
 
 ## Quick local validation
 
