@@ -93,3 +93,24 @@ def test_actual_scheduled_discovery_runs_selected_sender_intake_before_digest(st
     provider=Provider();daily_discovery(store,boundary,approved(settings),clock().date().isoformat(),clock=clock,opener=provider)
     assert order==['selected_sender_intake','prepare_daily_digest']
     assert len(provider.messages)==1
+
+def test_official_missing_suffix_match_preserves_existing_rejection(store,boundary,clock):
+    import hashlib
+    from test_listing_intake import alert
+    from rentalsourcing.offmarket import street_key
+    from rentalsourcing.listing_intake import audit, reconcile_official_identities
+    p=listing('known',addressLine1='100 Fixture St',formattedAddress='100 Fixture St, Pittsburgh, PA 15212')
+    store.save_property('known',p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    store.save_setting('penten_review:known',{'status':'rejected','reviewed_at':clock().isoformat()})
+    item=alert(addressLine1='100 Fixture',formattedAddress='100 Fixture, Pittsburgh, PA 15212',latitude=None,longitude=None)
+    key='listing_geocode:'+hashlib.sha256((street_key(item['property'])+'|15212').encode()).hexdigest()
+    store.save_setting(key,{'matched':True,'matched_address':'100 FIXTURE ST, PITTSBURGH, PA, 15212','latitude':40.45,'longitude':-80,'next_at':(clock()+dt.timedelta(days=7)).isoformat()})
+    result=evaluate(store,boundary,[item],clock())
+    assert result['cards']==[] and result['evaluations'][0]['source_id']=='known'
+    shadow={**result['evaluations'][0],'source_id':'old-shadow','property':{**result['evaluations'][0]['property'],'id':'old-shadow'}}
+    store.save_setting('listing_identity:old-shadow',shadow)
+    assert reconcile_official_identities(store,clock())==1
+    after=audit(store,boundary,clock());assert after['summary']['unique_properties']==1
+    assert after['identity_reconciliations'][0]['to_source_id']=='known'
+    assert after['identity_reconciliations'][0]['canonical_review_rejected']
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
