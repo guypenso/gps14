@@ -105,6 +105,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
     try:
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener)
+        store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
         scan=result.get('scan','unknown');last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last[0]) if last else {}
         stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
         for name in ('listing_processing','eligibility_filtering','property_storage','price_history'):

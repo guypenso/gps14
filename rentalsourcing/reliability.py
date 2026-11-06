@@ -29,6 +29,7 @@ def snapshot(store,now=None):
  for name in ('scheduled_run','discovery','listing_processing','eligibility_filtering','tax_verification','property_storage','price_history','review_feedback','property_sync','price_sync','inventory_sync','listing_enrichment','email_delivery','consistency','health_delivery'):
   if not any(c['component']==name for c in comps):comps.append({'component':name,'state':'not_recorded','last_success_at':None,'last_attempt_at':None,'processed':0,'pending':0,'evidence':'No per-stage telemetry recorded'})
  ops=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall()]
+ pending_details=[{'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
  pending_reports=store.execute("SELECT COUNT(*) FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND r.synced_at IS NULL").fetchone()[0]
  prices=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall()]
  feedback=get(store,'penten_review_feed',{})
@@ -63,7 +64,7 @@ def snapshot(store,now=None):
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()];opens=[i for i in incidents if i.get('state')=='open']
  effective='failed' if daily.get('state')=='failed' or any(i.get('component') in ('daily_schedule','email_delivery') for i in opens) else 'partial' if pending_reports or pending or blocked or opens or price_pending or inventory_pending or daily.get('state') in ('partial','not_observed','running') else 'success'
  budget=get(store,'health_budget',{})
- return {'runtime':{'build_sha':os.getenv('RENDER_GIT_COMMIT'),'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
+ return {'runtime':{'build_sha':os.getenv('RENDER_GIT_COMMIT'),'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
 
 def publish(store,now=None,config=None,opener=None):
  config=config or review_configuration()
@@ -138,7 +139,7 @@ def recover(store,boundary,now=None,opener=None):
  pending_inventory(store,boundary,now,opener)
  try:
   previous_audit=get(store,'health_last_audit',{})
-  need_audit=not previous_audit or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
+  need_audit=not previous_audit or 'current_inventory' not in previous_audit.get('result',{}) or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
   after=remote_audit(store,opener=opener) if need_audit else previous_audit['result'];result['audit']=after
   if need_audit:store.save_setting('health_last_audit',{'at':now.isoformat(),'result':after})
   good=after.get('feedback_matches') and not any(after.get(k) for k in ('remote_unaccepted_reports','missing_source_identities','digest_conflicts'))
@@ -183,7 +184,7 @@ def start_watchdog(url,boundary):
      value=recover(store,boundary)
      evidence=get(store,'reliability_audit:2026-11-03:v1',{})
      view=snapshot(store)
-     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':evidence,'state':view['state'],'counts':view['counts'],'budget':view['budget']},sort_keys=True))
+     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget']},sort_keys=True))
    except Exception as e:
     logging.getLogger(__name__).error('RELIABILITY_WATCHDOG_FAILED '+type(e).__name__)
     if store:
@@ -233,7 +234,52 @@ def remote_audit(store,config=None,opener=None):
    if result.get('nonce')!=nonce or not hmac.compare_digest(response.headers.get('X-RentalSourcing-Response-Signature',''),'v1='+hmac.new(key.encode(),data,hashlib.sha256).hexdigest()):raise ValueError('Invalid authority assertion')
    authority=result['authority']
  feed=get(store,'penten_review_feed',{})
- return {**counts,'authority':authority,'feedback_matches':bool(authority and feed.get('decision_digest')==authority['snapshot_version'])}
+ return {**counts,'authority':authority,'feedback_matches':bool(authority and feed.get('decision_digest')==authority['snapshot_version']),'current_inventory':current_inventory_audit(store,config,opener)}
+
+def current_inventory_audit(store,config=None,opener=None):
+ """Compare every presently reviewable stored identity with the live PENTEN alias map."""
+ from .core import verification,tax_verification
+ from .geography import load_boundary
+ from .config import Settings
+ from .tax_backlog import review_deferred
+ from .provenance import demo_marked
+ from .request import NoRedirect
+ from .command_center import signed_request
+ boundary=load_boundary(Settings.from_env().boundary_file)
+ config=config or review_configuration()
+ if not config:return {'state':'disabled'}
+ now=dt.datetime.now(UTC)
+ candidates=[];counts={'source_records':0,'hard_rejected':0,'review_deferred':0,'tax_rejected':0,'pending':0,'verified':0,'mapped':0,'missing':0,'rejected_at_destination':0,'tax_status_mismatch':0}
+ for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall():
+  counts['source_records']+=1
+  p=json.loads(raw)
+  if source!=LIVE or verification(p,boundary)[0]!='Candidate':counts['hard_rejected']+=1;continue
+  if review_deferred(identity,store):counts['review_deferred']+=1;continue
+  cached=store.get_tax(identity,now.isoformat())
+  valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
+  tax_state=tax_verification(cached[0],now.date())[0] if valid else 'Pending Verification'
+  if tax_state=='Rejected':counts['tax_rejected']+=1;continue
+  kind='verified' if tax_state=='Qualified' else 'pending'
+  counts[kind]+=1;candidates.append((identity,kind))
+ url,key,token=config;config=(url.rsplit('/',1)[0]+'/review-inventory-audit',key,token)
+ opener=opener or urllib.request.build_opener(NoRedirect)
+ missing=[]
+ for start in range(0,len(candidates),25):
+  part=candidates[start:start+25];nonce=uuid.uuid4().hex
+  body=json.dumps({'nonce':nonce,'source_ids':[id for id,_ in part]},separators=(',',':')).encode()
+  with opener.open(signed_request(config,body,dt.datetime.now(UTC)),timeout=budget_timeout(20)) as response:
+   raw=response.read(65537)
+   if len(raw)>65536 or response.status!=200:raise ValueError('Inventory audit response invalid')
+   if not hmac.compare_digest(response.headers.get('X-RentalSourcing-Response-Signature',''),'v1='+hmac.new(key.encode(),raw,hashlib.sha256).hexdigest()):raise ValueError('Inventory audit signature mismatch')
+   result=json.loads(raw)
+  if result.get('nonce')!=nonce or result.get('accepted') is not True or len(result.get('results',[]))!=len(part):raise ValueError('Inventory audit receipt mismatch')
+  for (identity,kind),row in zip(part,result['results']):
+   if row.get('source_id')!=identity:raise ValueError('Inventory audit order mismatch')
+   if not row.get('matched'):counts['missing']+=1;missing.append((identity,kind));continue
+   counts['mapped']+=1
+   if row.get('review_status')=='rejected':counts['rejected_at_destination']+=1
+   if kind=='verified' and row.get('tax_status')!='provider_verified':counts['tax_status_mismatch']+=1
+ return {**counts,'missing_pending':sum(kind=='pending' for _,kind in missing),'missing_verified':sum(kind=='verified' for _,kind in missing)}
 
 def pending_inventory(store,boundary,now,opener=None):
  config=review_configuration()
