@@ -166,6 +166,10 @@ def complete_listing_validation(store,request,result,now):
  store.save_setting('realscout_scheduler_validation_v1',{**request,'state':'done' if passed else 'failed','completed_at':dt.datetime.now(UTC).isoformat(),'result':result})
  return request.get('original_next_at') if (request.get('original_next_at') or '')>now.isoformat() else (now+dt.timedelta(hours=6)).isoformat()
 
+def listing_operation_id(claimed_at,validation=None):
+ """Retries share a claim; later passes must not reuse an earlier partial receipt."""
+ return 'validation:'+validation['id'] if validation else 'listing-pass:'+claimed_at
+
 def start_scheduler(url):
  """Independent six-hour lease in the existing dashboard; no new paid service."""
  from .offmarket_intelligence import VERSION
@@ -205,7 +209,7 @@ def start_scheduler(url):
     if claim_schedule(s,now):
      validation=get(s,'realscout_scheduler_validation_v1') if get(s,'offmarket_scheduler',{}).get('validation_id') else None
      s.close();s=Store(url,initialize=False)
-     operation=('validation:'+validation['id']) if validation else now.strftime('%Y-%m-%d:%H')
+     operation=listing_operation_id(get(s,'offmarket_scheduler')['attempted_at'],validation)
      u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':operation},separators=(',',':')).encode()
      def receipt(value,*args):
       if value.get('state') not in ('success','partial'):raise ValueError('Off-market refresh not completed')

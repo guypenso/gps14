@@ -46,6 +46,11 @@ def test_existing_worker_pre_report_claim_and_bounded_drain(store):
     before=now-dt.timedelta(hours=1)
     assert next_source_refresh(before,{'state':'success'})==now.isoformat()
     assert next_source_refresh(before,{'state':'partial'})==(before+dt.timedelta(minutes=5)).isoformat()
+    from rentalsourcing.offmarket import listing_operation_id
+    first=listing_operation_id(before.isoformat());second=listing_operation_id((before+dt.timedelta(minutes=5)).isoformat())
+    assert first!=second
+    assert first==listing_operation_id(before.isoformat())
+    assert listing_operation_id(before.isoformat(),{'id':'fixed-validation'})=='validation:fixed-validation'
 
 def test_daily_report_includes_only_fresh_unreviewed_source_evidence(store,boundary,clock):
     from test_listing_intake import alert
