@@ -34,6 +34,8 @@ class Engine:
         if not isinstance(identity,str) or not identity:
             identity='unidentified:'+hashlib.sha256(json.dumps(row,sort_keys=True).encode()).hexdigest()
         old=self.store.get_property(identity);revision=old['revision'] if old else 0
+        if old is None and source==LIVE:
+            self.store.save_setting('first_discovery:'+identity,{'source_id':identity,'job_id':job_id,'at':self.clock().isoformat(),'non_tax_state':state})
         previous=old['payload'].get('price') if old else None
         price=row.get('price');changed=number(price) and price!=previous
         if changed:revision+=1

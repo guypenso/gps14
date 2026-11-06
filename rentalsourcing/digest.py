@@ -51,6 +51,11 @@ def render(day,items,stats,health,operations):
         summary=f"Discovery: {stats.get('discovery_state','unknown')}; page records: {stats.get('received_this_run',stats.get('received',0))}; collection complete: {stats.get('discovery_complete',False)}; non-tax eligible stored: {counts.get('non_tax_pass',0)}; tax cache usable: {counts.get('valid_tax_cache',0)}; uncached tax backlog: {counts.get('tax_uncached_backlog',0)}; verified opportunities in this report: {len(items)}; requests this run: {stats.get('requests_consumed',0)}; pending shown: {len(stats.get('pending_properties',[]))}/{stats.get('pending_total',len(stats.get('pending_properties',[])))}."
         lines.append(summary)
     if stats.get('discovery_state'):lines.append(scan_labels.get(stats['discovery_state'],stats['discovery_state']))
+    if stats.get('future_discovery'):
+        f=stats['future_discovery']
+        future_summary='New discoveries: '+', '.join(str(k)+'='+str(f.get(k,0)) for k in ('new_source_listings','new_non_tax_pass','new_parcel_matches','new_verified_tax','new_estimated_tax','new_unknown_tax','new_qualified','new_pending','new_rejected','synced'))
+        lines.append(future_summary)
+        summary=(summary+' ' if summary else '')+future_summary
     items=sorted((item for item in items if str(item['listing'].get('zipCode','')).split('-')[0] not in EXCLUDED_ZIPS),key=lambda item:item['kind']!='price_reduction')
     cards=[]
     for item in items:

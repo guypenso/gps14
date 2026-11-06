@@ -17,10 +17,12 @@ from .public_tax import download_and_match,unknown
 JOB='stored-review-inventory:2026-11-02:turnkey-v1'
 
 
-def select(store,boundary,now):
+def select(store,boundary,now,*,source_ids=None,include_verified=False):
     cards=[];counts={'stored':0,'hard_rejected':0,'other_missing':0,'owner_rejected':0,'tax_rejected':0,'verified_tax':0,'actionable':0,'stale':0,'fresh':0}
     for identity,raw,source,observed in store.execute('SELECT id,payload,source,observed_at FROM properties').fetchall():
+        if source_ids is not None and identity not in source_ids:continue
         counts['stored']+=1;p=json.loads(raw);state,reasons=verification(p,boundary)
+        verified_tax=None;verified_fetched=None
         if state=='Rejected':counts['hard_rejected']+=1;continue
         if source!=LIVE or state!='Candidate':counts['other_missing']+=1;continue
         if review_deferred(identity,store):counts['owner_rejected']+=1;continue
@@ -29,27 +31,32 @@ def select(store,boundary,now):
         if valid:
             tax_state,tax,reason=tax_verification(cached[0],now.date())
             if tax_state=='Rejected':counts['tax_rejected']+=1;continue
-            if tax_state=='Qualified':counts['verified_tax']+=1;continue
+            if tax_state=='Qualified':
+                counts['verified_tax']+=1
+                if not include_verified:continue
+                verified_tax=tax;verified_fetched=cached[2]
         fresh=recent_timestamp(observed,now);counts['fresh' if fresh else 'stale']+=1
         first=store.execute('SELECT MIN(observed_at) FROM price_history WHERE property_id=?',(identity,)).fetchone()[0] or observed
         muni='Bellevue Borough' if boundary.bellevue.contains(p) else 'Pittsburgh'
         neighborhood='Brighton Heights' if boundary.brighton.contains(p) else 'Spring Hill-City View' if boundary.spring_hill.contains(p) else None
         from .condominium import evidence as condo_evidence
         card=dict(condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),source_id=identity,source='RentCast',source_label='RentCast Sale Listings',address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=None,tax_year=None,tax_status='pending_verification',qualification='pending_verification',section='pending_verification',previous_price=previous_price(store,identity,p.get('price')),listing_url=listing_link(p),reasons=['tax_verification_required']+([] if fresh else ['stale_listing_status_requires_refresh']),discovered_at=first,updated_at=observed,listing_observed_at=observed,verified_at=None,tax_fetched_at=None,last_reported_status=p.get('status'),municipality=muni,neighborhood=neighborhood)
+        if verified_tax and fresh:
+            card.update(annual_tax=verified_tax['annual'],tax_year=verified_tax['year'],tax_status='provider_verified',tax_source='RentCast Property Records',qualification='verified',section='new',reasons=[],verified_at=now.isoformat(),tax_fetched_at=verified_fetched)
         from .listing_enrichment import evidence
         card['listing_info']=evidence(p,observed)
         cards.append((card,p));counts['actionable']+=1
     return cards,counts
 
 
-def run(store,boundary,now,*,execute=False,download=False,config=None,opener=None,job_key=JOB,refresh_decisions=True):
+def run(store,boundary,now,*,execute=False,download=False,config=None,opener=None,job_key=JOB,refresh_decisions=True,source_ids=None,include_verified=False):
     opener=opener or urllib.request.build_opener(NoRedirect)
     if not store.lock():raise ValueError('Existing application job is busy; no backfill performed')
     saved=store.execute('SELECT payload FROM settings WHERE name=?',(job_key,)).fetchone()
     if execute and saved and json.loads(saved[0]).get('synced_at'):
         print('REVIEW_INVENTORY_ALREADY_ACCEPTED');return json.loads(saved[0])
     if execute and refresh_decisions:print('PENTEN_REVIEW_FEEDBACK '+json.dumps(refresh(store,now,opener,config),sort_keys=True))
-    pairs,counts=select(store,boundary,now)
+    pairs,counts=select(store,boundary,now,source_ids=source_ids,include_verified=include_verified)
     print('STORED_REVIEW_DRY_RUN '+json.dumps(counts,sort_keys=True))
     if not execute:return counts
     if not config:raise ValueError('Existing private synchronization configuration required')
@@ -74,7 +81,7 @@ def run(store,boundary,now,*,execute=False,download=False,config=None,opener=Non
             part=offset//125
             body=json.dumps(dict(schema_version=1,report_id='daily-'+hashlib.sha256((job_key+':part:'+str(part)).encode()).hexdigest(),report_date=now.date().isoformat(),prepared_at=now.isoformat(),report_kind='stored_review',discovery_state='stored',opportunities=cards[offset:offset+125]),ensure_ascii=False,separators=(',',':'))
             batches.append(dict(payload=body,attempts=0,synced_at=None,error_type=None))
-        ledger=dict(batches=batches,counts=counts,synced_at=None,public_manifest=manifest)
+        ledger=dict(batches=batches,counts=counts,synced_at=None,public_manifest=manifest,delivery_scope='daily' if include_verified else 'review')
         store.save_setting(job_key,ledger)
     aggregate={}
     for batch in ledger['batches']:
@@ -86,6 +93,10 @@ def run(store,boundary,now,*,execute=False,download=False,config=None,opener=Non
             for card in json.loads(batch['payload'])['opportunities']:
                 current=store.get_property(card['source_id'])
                 if not current or verification(current['payload'],boundary)[0]!='Candidate':raise ValueError('Frozen candidate no longer passes non-tax rules; no import performed')
+                if card.get('qualification')=='verified':
+                    saved_tax=store.get_tax(card['source_id'],now.isoformat())
+                    if not saved_tax or saved_tax[1]!=LIVE or saved_tax[0].get('id')!=card['source_id'] or tax_verification(saved_tax[0],now.date())[0]!='Qualified' or not recent_timestamp(current['observed_at'],now):
+                        raise ValueError('Frozen candidate no longer passes verified freshness requirements; no import performed')
             from .sync_runtime import request_json
             report_id=json.loads(batch['payload'])['report_id']
             def validate(receipt,*args):
