@@ -164,7 +164,7 @@ def recover(store,boundary,now=None,opener=None):
  pending_inventory(store,boundary,now,opener)
  try:
   previous_audit=get(store,'health_last_audit',{})
-  need_audit=not previous_audit or 'current_inventory' not in previous_audit.get('result',{}) or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
+  need_audit=not previous_audit or 'destination_review_statuses' not in previous_audit.get('result',{}).get('current_inventory',{}) or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
   # The full historical report audit can span many HTTP requests. Reuse its
   # recent saved result and check the current inventory in one bounded request.
   if need_audit and previous_audit.get('result'):
@@ -279,7 +279,7 @@ def current_inventory_audit(store,config=None,opener=None):
  config=config or review_configuration()
  if not config:return {'state':'disabled'}
  now=dt.datetime.now(UTC)
- candidates=[];counts={'source_records':0,'hard_rejected':0,'review_deferred':0,'tax_rejected':0,'pending':0,'verified':0,'mapped':0,'missing':0,'rejected_at_destination':0,'tax_status_mismatch':0}
+ candidates=[];counts={'source_records':0,'hard_rejected':0,'review_deferred':0,'tax_rejected':0,'pending':0,'verified':0,'mapped':0,'missing':0,'rejected_at_destination':0,'tax_status_mismatch':0,'pending_tax_status_mismatch':0,'destination_review_statuses':{},'destination_tax_statuses':{}}
  for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall():
   counts['source_records']+=1
   p=json.loads(raw)
@@ -307,8 +307,12 @@ def current_inventory_audit(store,config=None,opener=None):
    if row.get('source_id')!=identity:raise ValueError('Inventory audit order mismatch')
    if not row.get('matched'):counts['missing']+=1;missing.append((identity,kind));continue
    counts['mapped']+=1
+   for key,value in [('destination_review_statuses',row.get('review_status')),('destination_tax_statuses',row.get('tax_status'))]:
+    label=value if isinstance(value,str) and value in ('new','pursue','monitor','missed_under_contract','rejected','provider_verified','pending_verification') else 'other'
+    counts[key][label]=counts[key].get(label,0)+1
    if row.get('review_status')=='rejected':counts['rejected_at_destination']+=1
    if kind=='verified' and row.get('tax_status')!='provider_verified':counts['tax_status_mismatch']+=1
+   if kind=='pending' and row.get('tax_status')!='pending_verification':counts['pending_tax_status_mismatch']+=1
  return {**counts,'missing_pending':sum(kind=='pending' for _,kind in missing),'missing_verified':sum(kind=='verified' for _,kind in missing)}
 
 def pending_inventory(store,boundary,now,opener=None):
