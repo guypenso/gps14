@@ -6,6 +6,7 @@ import json
 
 from rentalsourcing.collector import LIVE
 from rentalsourcing.tax_intelligence import snapshot,provider_evidence
+from rentalsourcing.tax_dataset_import import preserve_evidence
 from rentalsourcing.dashboard import create_app
 from conftest import listing,taxes
 
@@ -34,6 +35,16 @@ def test_expired_provider_tax_is_historical_not_verified(clock):
     assert result['state']=='historical'
     assert result['qualification_gate']=='Pending Verification'
     assert provider_evidence('other',row,clock()) is None
+
+
+def test_new_dataset_preserves_prior_estimate_and_flags_parcel_conflict():
+    now=dt.datetime(2026,11,6,tzinfo=dt.timezone.utc)
+    old={'missing':{'state':'estimated','annual':900,'parcel_id':'A','warnings':[]},'conflict':{'state':'estimated','annual':1200,'parcel_id':'B','warnings':[]}}
+    fresh={'missing':{'state':'unknown'},'conflict':{'state':'estimated','annual':1200,'parcel_id':'C'}}
+    assert preserve_evidence(fresh,old,'WPRDC',now)==(1,1)
+    assert fresh['missing']['retained_from_prior_batch'] is True
+    assert fresh['missing']['state']=='estimated'
+    assert fresh['conflict']['state']=='unknown' and fresh['conflict']['match_status']=='conflict'
 
 
 def test_signed_tax_endpoint_auth_bounds_and_response(store,boundary,clock,monkeypatch):
