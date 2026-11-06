@@ -73,3 +73,16 @@ def test_listing_alert_cannot_erase_known_turnkey_or_ownership_exclusions(store,
         item=alert();item['property'].pop('propertyType',None)
         result=evaluate(store,boundary,[item],clock())
         assert result['cards']==[] and result['counts']['rejected']==1
+
+
+def test_read_only_audit_keeps_every_disposition_and_original_identity(store,boundary,clock):
+    from rentalsourcing.listing_intake import audit
+    records=[alert(),alert(bedrooms=5),alert(latitude=None,longitude=None)]
+    for i,r in enumerate(records):
+        r['external_id']='fixture-email|'+str(i);r['property']['addressLine1']=str(100+i)+' Fixture Ave'
+    evaluate(store,boundary,records,clock())
+    result=audit(store,boundary,clock())
+    assert result['summary']['unique_properties']==3
+    assert {r['disposition'] for r in result['properties']}=={'pending_delivery','rejected_hard_criterion','pending_additional_evidence'}
+    assert all(r['external_id'].startswith('fixture-email|') for r in result['properties'])
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0

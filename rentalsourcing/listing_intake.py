@@ -57,7 +57,10 @@ def evaluate(store,boundary,records,now,opener=None):
             counts['qualified' if qualified else 'pending']+=1
             cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('evidence_url'),last_reported_status=p['status']))
         elif state!='Rejected' and not deferred:counts['needs_research']+=1
-        result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred)
+        result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred,
+                    external_id=item.get('external_id'),listing_id=item.get('listing_id'),evidence_url=item.get('evidence_url'),
+                    tax_status='provider_verified' if tax is not None else 'unknown',tax_evidence=tax,
+                    disposition='preserved_owner_decision' if deferred else 'rejected_hard_criterion' if state=='Rejected' else 'pending_delivery' if any(c['source_id']==identity for c in cards) else 'pending_additional_evidence')
         key='listing_observation:'+hashlib.sha256((str(item.get('external_id'))+'|'+identity).encode()).hexdigest()
         store.save_setting(key,result)
         if not prior_identity or json.loads(prior_identity[0])['observed_at']<=observed:store.save_setting(identity_key,result)
@@ -99,3 +102,16 @@ def geocode(store,p,boundary,now,opener=None):
 def summary(store):
     records=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall()]
     return {'unique_properties':len(records),'known_rentcast_unique':sum(r['matched_rentcast'] for r in records),'unique_beyond_rentcast':sum(not r['matched_rentcast'] for r in records),'owner_deferred_unique':sum(r['owner_deferred'] for r in records),'rejected_unique':sum(r['state']=='Rejected' for r in records),'non_tax_pass_unique':sum(r['state']=='Candidate' for r in records),'source_observations':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0],'paid_provider_calls':0}
+
+
+def audit(store,boundary,now):
+    """Read-only bounded source ledger; never contacts listing/tax providers."""
+    rows=[]
+    for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ? ORDER BY name',('listing_identity:%',)).fetchall():
+        r=json.loads(raw);p=r['property'];state,reasons=verification(p,boundary)
+        geo,geo_reason=geographic_verification(p,boundary)
+        location=store.execute('SELECT payload FROM settings WHERE name=?',('listing_geocode:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest(),)).fetchone()
+        review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+r['source_id'],)).fetchone()
+        rows.append({**r,'current_state':state,'current_reasons':reasons,'geography':{'state':geo,'reason':geo_reason},'geocode_evidence':json.loads(location[0]) if location else None,'owner_deferred':review_deferred(r['source_id'],store),'source_review':json.loads(review[0]) if review else None})
+    if len(rows)>1000:raise ValueError('Listing audit requires pagination beyond 1000 properties')
+    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows}
