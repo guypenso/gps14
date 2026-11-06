@@ -132,4 +132,16 @@ def audit(store,boundary,now):
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
     validation=store.execute('SELECT payload FROM settings WHERE name=?',('realscout_scheduler_validation_v1',)).fetchone()
     from .investment_policy import thresholds
-    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
+    stats=summary(store);tax_changes=[]
+    for identity,raw,observed,tax_raw,source in store.execute('SELECT p.id,p.payload,p.observed_at,t.payload,t.source FROM properties p JOIN tax_history t ON p.id=t.property_id WHERE t.expires_at>?',(now.isoformat(),)).fetchall():
+        record=json.loads(tax_raw)
+        if source!=LIVE or record.get('id')!=identity or demo_marked(record):continue
+        tax_state,tax,_=tax_verification(record,now.date())
+        if tax_state=='Rejected' or not tax or not 1900<=tax['annual']<=2300:continue
+        p=json.loads(raw);review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()
+        protected=review_deferred(identity,store) or bool(review and json.loads(review[0]).get('status') not in (None,'new'))
+        from .digest import recent_timestamp
+        non_tax=verification(p,boundary)[0]=='Candidate';fresh=recent_timestamp(observed,now)
+        tax_changes.append({'source_id':identity,'annual_tax':tax['annual'],'tax_year':tax['year'],'non_tax_pass':non_tax,'fresh_listing':fresh,'human_decision_preserved':protected,'new_qualified_opportunity':non_tax and fresh and not protected})
+    stats['tax_ceiling_recheck']={'cached_records_newly_passing_tax':len(tax_changes),'new_qualified_opportunities':sum(r['new_qualified_opportunity'] for r in tax_changes),'records':tax_changes}
+    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':stats,'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}

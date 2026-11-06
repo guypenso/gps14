@@ -25,6 +25,11 @@ def test_tax_change_preserves_identity_decisions_and_unverified_evidence(store,b
     assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:known',)).fetchone()[0])['status']=='rejected'
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert tax_verification({'id':'estimate','taxAssessments':{'2026':{'value':50000}}})[0]=='Pending Verification'
+    from rentalsourcing.listing_intake import audit
+    change=audit(store,boundary,clock())['summary']['tax_ceiling_recheck']
+    assert change['cached_records_newly_passing_tax']==1
+    assert change['new_qualified_opportunities']==0
+    assert change['records'][0]['human_decision_preserved']
 
 def test_price_and_single_family_requirements(boundary):
     assert verification(listing(price=200001),boundary)[0]=='Candidate'
@@ -55,6 +60,8 @@ def test_daily_report_includes_only_fresh_unreviewed_source_evidence(store,bound
     assert not listing_report(store,boundary,clock())['cards']
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    store.save_setting('listing_pre_report_receipt',{'at':clock().isoformat(),'result':{'state':'failed'}})
+    assert listing_report(store,boundary,clock())['state']=='failed'
 
 def test_pre_report_intake_uses_authenticated_source_only_endpoint_without_sending(store,clock,monkeypatch):
     from conftest import Response
@@ -72,3 +79,17 @@ def test_pre_report_intake_uses_authenticated_source_only_endpoint_without_sendi
     assert result['state']=='success' and len(opener.calls)==1
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+def test_actual_scheduled_discovery_runs_selected_sender_intake_before_digest(store,boundary,settings,clock,monkeypatch):
+    from conftest import Provider
+    from test_minimal_daily import approved
+    from rentalsourcing.cloud import daily_discovery
+    from rentalsourcing.digest import Digest
+    order=[];original=Digest.prepare
+    def sync(*args,**kwargs):order.append('selected_sender_intake');return {'state':'success'}
+    def prepare(*args,**kwargs):order.append('prepare_daily_digest');return original(*args,**kwargs)
+    monkeypatch.setattr('rentalsourcing.listing_report.sync_before_report',sync)
+    monkeypatch.setattr(Digest,'prepare',prepare)
+    provider=Provider();daily_discovery(store,boundary,approved(settings),clock().date().isoformat(),clock=clock,opener=provider)
+    assert order==['selected_sender_intake','prepare_daily_digest']
+    assert len(provider.messages)==1
