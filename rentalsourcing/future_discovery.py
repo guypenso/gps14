@@ -32,12 +32,12 @@ def process(store,boundary,job_id,now,*,config=None,opener=None):
             ledger=run(store,boundary,now,execute=True,config=config,opener=opener,
                        job_key='stored-review-inventory:future:'+job_id,source_ids=identities,include_verified=True,refresh_decisions=False)
             report.update(state='accepted',synced=sum(len(json.loads(b['payload'])['opportunities']) for b in ledger['batches']))
-            component(store,'future_inventory','success',now=now,processed=report['synced'])
-            incident(store,'future_inventory',None,now=now,resolved=True)
+            component(store,'inventory_sync','success',now=now,processed=report['synced'])
+            incident(store,'inventory_sync',None,now=now,resolved=True)
         except Exception as exc:
             report.update(state='pending_recovery',error_type=type(exc).__name__)
             error={'category':'future_inventory_delivery','retryable':True}
-            component(store,'future_inventory','partial',now=now,pending=len(cards),error=error)
-            incident(store,'future_inventory',error,now=now)
+            component(store,'inventory_sync','partial',now=now,pending=len(cards),error=error)
+            incident(store,'inventory_sync',error,now=now)
     store.save_setting(key,report)
     return report
