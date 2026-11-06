@@ -8,7 +8,7 @@
 ## מכסה לבקשת אישור
 
 - עמוד ראשון אחד מ־GET /v1/listings/sale: עד 100 מודעות, offset=0 ו־includeTotalCount=true.
-- city=Pittsburgh, state=PA, status=Active, bedrooms=3:*, bathrooms=1:*, squareFootage=1000:*, price=*:200000.
+- city=Pittsburgh, state=PA, status=Active, bedrooms=3:*, bathrooms=1:*, squareFootage=1000:*, price=*:200001.
 - עד שלוש קריאות /v1/properties/{id} עבור שלושה מועמדים ייחודיים שעברו את כל הסינון הבסיסי.
 - בסך הכול עד ארבעה ניסיונות רשת, ללא retries, ללא עמוד שני וללא מיילים.
 - אם אין מועמדים, אין קריאות מס. Cache תקין יכול להפחית עוד את מספר הקריאות.
@@ -35,7 +35,7 @@ ENABLE_RENTCAST=true, DATABASE_URL והגבול הרשמי המאומת. אין 
 ## מסים ומידע ציבורי של המחוז
 
 Property Records של RentCast מספק propertyTaxes[year].total. נבחרת השנה האחרונה הזמינה,
-לא שווי taxAssessments. צריך Latest Available Annual Tax + $100 < $2,000 באופן מחמיר.
+לא שווי taxAssessments. צריך Verified Annual Property Taxes + $100 ≤ $2,400 באופן מחמיר.
 https://developers.rentcast.io/reference/property-data-schema
 
 Allegheny County Municipal Boundaries הוא מקור רשמי ל־130 רשויות, וכולל קודי רשות/FIPS

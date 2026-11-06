@@ -43,7 +43,7 @@ def test_new_digest_cached_tax_and_fresh_price_reduction(store,boundary,settings
     ({'bedrooms':None},'Pending Verification'),({'bathrooms':None},'Pending Verification'),
     ({'squareFootage':None},'Pending Verification'),({'price':None},'Pending Verification'),
     ({'longitude':None},'Pending Verification'),({'zipCode':'15210'},'Rejected'),
-    ({'zipCode':'15203'},'Rejected'),({'price':200001},'Rejected'),
+    ({'zipCode':'15203'},'Rejected'),({'price':200001.01},'Rejected'),
     ({'bedrooms':2},'Rejected'),({'bathrooms':0},'Rejected'),({'squareFootage':999},'Rejected'),
     ({'latitude':40.52},'Rejected'),({'longitude':-80.1},'Rejected'),
     ({'status':'Inactive'},'Rejected'),({'demo':True},'Rejected')])
@@ -57,7 +57,7 @@ def test_missing_fields_persist_pending_and_known_failures_rejected(store,bounda
     assert json.loads(store.execute('SELECT event_ids FROM outbox WHERE id=?',(message,)).fetchone()[0])==[]
 
 
-@pytest.mark.parametrize('amount,expected',[(1899,'Qualified'),(1899.99,'Qualified'),(1900,'Rejected'),(None,'Pending Verification')])
+@pytest.mark.parametrize('amount,expected',[(1899,'Qualified'),(1899.99,'Qualified'),(2300.01,'Rejected'),(None,'Pending Verification')])
 def test_real_schema_tax_threshold(store,boundary,settings,clock,provider,amount,expected):
     provider.records['fixture-property']=taxes(amount=amount)
     execute(store,boundary,settings,clock,provider)

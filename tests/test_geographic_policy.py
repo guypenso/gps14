@@ -57,9 +57,9 @@ def test_subtype_and_ambiguity_do_not_confuse_architectural_style(policy):
 def test_hard_limits_and_excluded_zips_unchanged(policy):
  row=at(policy.bellevue,zipCode='15202');assert verification(row,policy)[0]=='Candidate'
  for zip in EXCLUDED_ZIPS:assert verification(dict(row,zipCode=zip),policy)[0]=='Rejected'
- for field,value in [('price',200001),('bedrooms',2),('bathrooms',0),('squareFootage',999)]:assert verification(dict(row,**{field:value}),policy)[0]=='Rejected'
+ for field,value in [('price',200001.01),('bedrooms',2),('bathrooms',0),('squareFootage',999)]:assert verification(dict(row,**{field:value}),policy)[0]=='Rejected'
  assert tax_verification(taxes(amount=1899.99),dt.date(2026,11,1))[0]=='Qualified'
- assert tax_verification(taxes(amount=1900),dt.date(2026,11,1))[0]=='Rejected'
+ assert tax_verification(taxes(amount=2300.01),dt.date(2026,11,1))[0]=='Rejected'
 
 def test_discovery_circle_covers_both_entire_municipalities_without_extra_request(policy):
  q=listing_parameters(policy);assert 'city' not in q and 'zipCode' not in q
@@ -69,7 +69,7 @@ def test_discovery_circle_covers_both_entire_municipalities_without_extra_reques
  for region in [policy.city,policy.bellevue]:
   polys=list(region.geometry.geoms) if region.geometry.geom_type=='MultiPolygon' else [region.geometry]
   assert all(distance(x,y)<=q['radius'] for poly in polys for x,y in poly.exterior.coords)
- assert q['price']=='*:200000' and q['bedrooms']=='3:4' and q['bathrooms']=='1:*' and q['squareFootage']=='1000:*'
+ assert q['price']=='*:200001' and q['bedrooms']=='3:4' and q['bathrooms']=='1:*' and q['squareFootage']=='1000:*'
 
 def test_region_checksum_and_missing_polygon_fail_closed(tmp_path):
  src=ROOT/'data/bellevue.geojson';target=tmp_path/src.name;target.write_bytes(src.read_bytes()+b' ');target.with_suffix('.source.json').write_bytes(src.with_suffix('.source.json').read_bytes())
@@ -122,7 +122,7 @@ def test_property_record_type_evidence_cannot_approve_a_townhouse():
  assert tax_verification(dict(record,propertyType='Townhouse'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Single Family',propertySubType='Town House'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Unknown'))[0]=='Pending Verification'
- assert tax_verification(dict(taxes(amount=1900),propertyType='Unknown'))[0]=='Rejected'
+ assert tax_verification(dict(taxes(amount=2300.01),propertyType='Unknown'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Single Family',architecturalStyle='Townhouse'))[0]=='Qualified'
 
 def test_unverified_geography_cannot_crowd_verified_bellevue_out_of_pending_report(store,settings,clock,policy):

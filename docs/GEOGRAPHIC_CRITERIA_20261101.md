@@ -10,7 +10,7 @@ existing selective tax lookups/cache is also checked; no extra requests are adde
 
 All prior limits remain: active PA residential sale, <=$200,000, >=3 beds, >=1 bath,
 >=1,000 sqft, excluded ZIPs 15203/15204/15210/15211, latest annual tax + $100 strictly
-<$2,000. Postal city/ZIP never verifies municipal/neighborhood membership. Bellevue
+≤$2,400. Postal city/ZIP never verifies municipal/neighborhood membership. Bellevue
 is tested first in geography; excluded ZIPs still override that exception. Unknown
 coordinates/borders cannot appear as geographically confirmed opportunities.
 

@@ -41,7 +41,7 @@ def test_untrusted_or_incomplete_records_never_qualify(store,boundary,settings,c
 
 
 def test_latest_tax_rejection_is_preserved(store,boundary,settings,clock):
-    row=listing();seed(store,row,clock());cache(store,row,taxes(amount=1900),clock)
+    row=listing();seed(store,row,clock());cache(store,row,taxes(amount=2300.01),clock)
     reconcile(store,settings,clock());reevaluate(store,boundary,clock())
     assert store.get_property(row['id'])['state']=='Rejected'
     assert priorities(store,boundary,clock())==[]

@@ -227,6 +227,12 @@ def main(argv=None):
         if args.prepare_email or args.scheduled_email:
             target=dt.date.fromisoformat(args.email_day).isoformat() if args.email_day else day
             if args.scheduled_email and args.email_day:raise ValueError('Scheduled email date must be the current Israeli date')
+            if args.scheduled_email:
+                # Last bounded Gmail intake occurs before the existing daily outbox
+                # is prepared. Failures remain recoverable and never suppress mail.
+                from .listing_report import sync_before_report
+                try:event('listing_pre_report',**sync_before_report(store,target,dt.datetime.now(dt.timezone.utc)))
+                except Exception as exc:event('listing_pre_report_failed',error_type=type(exc).__name__)
             message=digest.prepare_stored(target)
             event('stored_email_prepared',outbox_id=message,day=target,source='saved_data_only')
             if args.scheduled_email:
@@ -242,7 +248,7 @@ def main(argv=None):
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200000,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_strict_max=2000))
+        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()
