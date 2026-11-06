@@ -4,7 +4,7 @@ from decimal import Decimal,InvalidOperation,ROUND_HALF_UP
 from pathlib import Path
 from .request import NoRedirect
 
-CSV_URL='https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/9a1c60bd-f9f7-4aba-aeb7-af8c3aaa44e5/download/assessments.csv'
+CSV_URL='https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/9a1c60bd-f9f7-4aba-aeb7-af8c3aaa44e5/download/data.csv'
 SOURCE='https://data.wprdc.org/dataset/property-assessments'
 WORDS={'street':'st','avenue':'ave','road':'rd','boulevard':'blvd','drive':'dr','lane':'ln','court':'ct','place':'pl','terrace':'ter','circle':'cir','highway':'hwy','north':'n','south':'s','east':'e','west':'w','apartment':'unit','apt':'unit','suite':'unit','ste':'unit'}
 
@@ -111,3 +111,16 @@ def download_and_match(candidates,boundary,now,opener=None):
         file.seek(0)
         estimates=match_csv(io.TextIOWrapper(file,encoding='utf-8-sig',newline=''),candidates,boundary,rates,now,sha.hexdigest())
     return estimates,dict(source=SOURCE,download_url=CSV_URL,sha256=sha.hexdigest(),bytes=size,retrieved_at=now.isoformat(),year=rates['year'])
+
+
+def import_local_csv(path,candidates,boundary,now):
+    """Process one operator-supplied official CSV; still estimate-only evidence."""
+    source=Path(path)
+    if not source.is_file() or source.stat().st_size<=0 or source.stat().st_size>768*1024*1024:raise ValueError('Official assessment CSV missing or exceeds safe size')
+    rates=json.loads((Path(__file__).resolve().parents[1]/'data/tax-rates-2026.json').read_text())
+    sha=hashlib.sha256()
+    with source.open('rb') as stream:
+        for chunk in iter(lambda:stream.read(65536),b''):sha.update(chunk)
+    with source.open('r',encoding='utf-8-sig',newline='') as stream:
+        estimates=match_csv(stream,candidates,boundary,rates,now,sha.hexdigest())
+    return estimates,dict(source=SOURCE,import_method='operator_supplied_official_csv',download_url=CSV_URL,sha256=sha.hexdigest(),bytes=source.stat().st_size,retrieved_at=now.isoformat(),year=rates['year'],official_bill_verified=False)

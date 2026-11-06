@@ -144,7 +144,8 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.before_request
     def authenticate():
         if request.path=='/api/offmarket/backend':request.max_content_length=300000
-        if request.path in ('/api/operations/backend-health','/api/operations/queue-recovery','/api/offmarket/backend'):
+        if request.path=='/api/operations/tax-intelligence':request.max_content_length=1000
+        if request.path in ('/api/operations/backend-health','/api/operations/queue-recovery','/api/operations/tax-intelligence','/api/offmarket/backend'):
             if backend_authorized():return None
             return jsonify(error='Backend authentication required'),401
         if request.path=='/healthz' and request.method in {'GET','HEAD'}:return None
@@ -192,6 +193,20 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         if d.get('action')!='health' or not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid nonce'),400
         current=Store(url,initialize=False)
         try:body=json.dumps({'nonce':nonce,'health':health_snapshot(current,clock())},sort_keys=True,separators=(',',':'))
+        finally:current.close()
+        signature='v1='+hmac.new(os.getenv('COMMAND_CENTER_REVIEW_SECRET','').encode(),body.encode(),hashlib.sha256).hexdigest()
+        return Response(body,200,{'X-RentalSourcing-Response-Signature':signature},content_type='application/json')
+
+    @app.post('/api/operations/tax-intelligence')
+    def tax_intelligence():
+        from .tax_intelligence import snapshot as tax_snapshot
+        d=request.get_json(silent=True) or {};nonce=d.get('nonce','')
+        if d.get('action')!='snapshot' or not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid tax snapshot request'),400
+        if type(d.get('offset',0)) is not int or type(d.get('limit',25)) is not int or not 0<=d.get('offset',0)<=10000 or not 1<=d.get('limit',25)<=25:return jsonify(error='Invalid tax queue bounds'),400
+        current=Store(url,initialize=False)
+        try:
+            result=tax_snapshot(current,boundary,clock(),d.get('offset',0),d.get('limit',25))
+            body=json.dumps({'nonce':nonce,'tax':result},sort_keys=True,separators=(',',':'))
         finally:current.close()
         signature='v1='+hmac.new(os.getenv('COMMAND_CENTER_REVIEW_SECRET','').encode(),body.encode(),hashlib.sha256).hexdigest()
         return Response(body,200,{'X-RentalSourcing-Response-Signature':signature},content_type='application/json')
