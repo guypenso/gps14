@@ -6,7 +6,7 @@ from conftest import listing,taxes
 from rentalsourcing.collector import LIVE
 from rentalsourcing.review_inventory import select,run,JOB
 from rentalsourcing.review_feedback import refresh
-from rentalsourcing.public_tax import match_csv,calculate,norm
+from rentalsourcing.public_tax import match_csv,calculate,norm,import_local_csv,CSV_URL
 
 
 def add(store,identity,clock,**kw):
@@ -63,6 +63,20 @@ def test_ambiguous_unmatched_units_and_municipalities_never_guessed(boundary):
     stream=io.StringIO();writer=csv.DictWriter(stream,fieldnames=list(row()));writer.writeheader();writer.writerow(row());writer.writerow(row(PARID='0001A00002000000'));stream.seek(0)
     result=match_csv(stream,[p],boundary,rates(),now,'fixture')
     assert result['fixture']['state']=='unknown' and result['fixture']['match_status']=='ambiguous'
+
+
+def test_documented_download_path_and_bounded_manual_csv_import(boundary,tmp_path):
+    import csv
+    assert CSV_URL.endswith('/resource/9a1c60bd-f9f7-4aba-aeb7-af8c3aaa44e5/download/data.csv')
+    path=tmp_path/'official-assessments.csv'
+    with path.open('w',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=list(row()));writer.writeheader();writer.writerow(row())
+    now=dt.datetime(2026,11,2,tzinfo=dt.timezone.utc)
+    estimate,manifest=import_local_csv(path,[listing('fixture',addressLine1='100 Fixture Ave')],boundary,now)
+    assert estimate['fixture']['state']=='estimated'
+    assert manifest['official_bill_verified'] is False
+    assert manifest['sha256']==hashlib.sha256(path.read_bytes()).hexdigest()
+    assert 'qualification' not in estimate['fixture']
 
 
 def test_durable_chunked_backfill_recovers_without_provider_or_email_calls(store,boundary,clock):
