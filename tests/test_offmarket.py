@@ -70,3 +70,19 @@ def test_non_live_cached_tax_never_becomes_verified(store,boundary,clock):
  store.save_tax(p['id'],taxes(p['id']),'unverified-supplier',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
  result=evaluate(store,boundary,[item()],clock())[0]
  assert result['tax']['state']=='unknown';assert result['criteria_state']=='Rejected';assert result['tax']['state']!='verified'
+
+
+def test_controlled_listing_validation_uses_existing_claim_and_preserves_cadence(store,clock):
+ from rentalsourcing.offmarket import request_listing_validation,claim_schedule,complete_listing_validation
+ from rentalsourcing.sync_runtime import get
+ due=(clock()+dt.timedelta(hours=4)).isoformat()
+ store.save_setting('offmarket_scheduler',{'state':'success','next_at':due})
+ request=request_listing_validation(store,clock())
+ assert request_listing_validation(store,clock())==request
+ assert request['original_next_at']==due
+ assert claim_schedule(store,clock())
+ assert not claim_schedule(store,clock())
+ receipt={'state':'success','email':{'results':[{'state':'success','extracted':0,'failed':0}]}}
+ assert complete_listing_validation(store,request,receipt,clock())==due
+ assert get(store,'realscout_scheduler_validation_v1')['state']=='done'
+ assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
