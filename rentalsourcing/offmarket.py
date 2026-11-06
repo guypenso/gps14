@@ -128,9 +128,30 @@ def claim_schedule(store,now):
  from .sync_runtime import get
  # Separate advisory lock: off-market refresh never waits for or takes the paid discovery lock.
  if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541211)').fetchone()[0]:return False
- if get(store,'offmarket_scheduler',{}).get('next_at','')>now.isoformat():return False
- store.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running'})
+ previous=get(store,'offmarket_scheduler',{})
+ if previous.get('next_at','')>now.isoformat():return False
+ store.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running','validation_id':previous.get('validation_id')})
  return True
+
+def request_listing_validation(store,now):
+ """Arm one safe pass of the existing worker; never execute discovery here."""
+ from .sync_runtime import get
+ key='realscout_scheduler_validation_v1';old=get(store,key)
+ if old:return old
+ if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541211)').fetchone()[0]:raise ValueError('Source scheduler is busy')
+ previous=get(store,'offmarket_scheduler',{})
+ if previous.get('state')=='running':raise ValueError('Source scheduler is busy')
+ request={'id':'realscout-validation-20261106-v1','state':'queued','requested_at':now.isoformat(),'original_next_at':previous.get('next_at')}
+ store.save_setting(key,request)
+ store.save_setting('offmarket_scheduler',{**previous,'next_at':now.isoformat(),'state':'validation_queued','validation_id':request['id']})
+ return request
+
+def complete_listing_validation(store,request,result,now):
+ """Record the worker receipt and restore its original six-hour cadence."""
+ email=result.get('email',{}).get('results',[])
+ passed=result.get('state')=='success' and bool(email) and all(r.get('state')=='success' for r in email)
+ store.save_setting('realscout_scheduler_validation_v1',{**request,'state':'done' if passed else 'failed','completed_at':dt.datetime.now(UTC).isoformat(),'result':result})
+ return request.get('original_next_at') if (request.get('original_next_at') or '')>now.isoformat() else (now+dt.timedelta(hours=6)).isoformat()
 
 def start_scheduler(url):
  """Independent six-hour lease in the existing dashboard; no new paid service."""
@@ -160,17 +181,20 @@ def start_scheduler(url):
      if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v5',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
+     validation=get(s,'realscout_scheduler_validation_v1') if get(s,'offmarket_scheduler',{}).get('validation_id') else None
      s.close();s=Store(url,initialize=False)
-     u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':now.strftime('offmarket:%Y-%m-%d:%H')},separators=(',',':')).encode()
+     operation=('validation:'+validation['id']) if validation else now.strftime('%Y-%m-%d:%H')
+     u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':operation},separators=(',',':')).encode()
      def receipt(value,*args):
       if value.get('state') not in ('success','partial'):raise ValueError('Off-market refresh not completed')
-     result=request_json(s,'offmarket_refresh',now.strftime('%Y-%m-%d:%H'),(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=receipt)
-     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps(result,sort_keys=True))
+     result=request_json(s,'offmarket_refresh',operation,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=receipt)
+     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps({**result,'scheduler_validation_id':validation['id'] if validation else None},sort_keys=True))
      if result.get('state')=='partial':
       from .sync_runtime import component,incident
       error={'category':'offmarket_source_incomplete','retryable':True}
       component(s,'offmarket_refresh','partial',pending=1,error=error);incident(s,'offmarket_refresh',error)
-     s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(minutes=30) if result.get('state')=='partial' else now+dt.timedelta(hours=6)).isoformat(),'state':result.get('state','failed'),'result':result})
+     next_at=complete_listing_validation(s,validation,result,now) if validation else (now+dt.timedelta(minutes=30) if result.get('state')=='partial' else now+dt.timedelta(hours=6)).isoformat()
+     s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':next_at,'state':result.get('state','failed'),'result':result})
    except Exception as e:
     logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_REFRESH_FAILED '+type(e).__name__)
     if s:

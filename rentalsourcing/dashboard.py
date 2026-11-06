@@ -180,6 +180,9 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
             elif d.get('action')=='listing_audit':
                 from .listing_intake import audit as listing_audit
                 result=listing_audit(current,boundary,clock())
+            elif d.get('action')=='listing_validate_schedule':
+                from .offmarket import request_listing_validation
+                result={'validation':request_listing_validation(current,clock())}
             elif d.get('action')=='listing_evaluate':
                 from .listing_intake import evaluate as evaluate_listings
                 result=evaluate_listings(current,boundary,d.get('records'),clock())
