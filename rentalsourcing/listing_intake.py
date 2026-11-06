@@ -57,6 +57,11 @@ def evaluate(store,boundary,records,now,opener=None):
             counts['qualified' if qualified else 'pending']+=1
             cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('listing_url') or item.get('evidence_url'),last_reported_status=p['status']))
         elif state!='Rejected' and not deferred:counts['needs_research']+=1
+        if cards and cards[-1]['source_id']==identity and tax is not None:
+            # A stale listing cannot qualify, but it does not invalidate fresh
+            # cached annual-tax evidence. Keep these independent evidence states.
+            cards[-1].update(annual_tax=tax['annual'],tax_year=tax['year'],tax_status='provider_verified',tax_source='RentCast cached Property Records',tax_fetched_at=fetched,verified_at=now.isoformat())
+            cards[-1]['reasons']=[reason for reason in cards[-1]['reasons'] if reason!='tax_verification_required']
         if cards and cards[-1]['source_id']==identity and p.get('listingDescription'):
             cards[-1]['listing_info']={'source':'RealScout','source_id':identity,'address':p['formattedAddress'],'street_address':p['addressLine1'],'zip_code':p['zipCode'],'retrieved_at':observed,'description':p['listingDescription'],'listing_status':p['status'],'agents':[]}
         result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred,
@@ -124,4 +129,5 @@ def audit(store,boundary,now):
         review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+r['source_id'],)).fetchone()
         rows.append({**r,'current_state':state,'current_reasons':reasons,'geography':{'state':geo,'reason':geo_reason},'geocode_evidence':json.loads(location[0]) if location else None,'owner_deferred':review_deferred(r['source_id'],store),'source_review':json.loads(review[0]) if review else None})
     if len(rows)>1000:raise ValueError('Listing audit requires pagination beyond 1000 properties')
-    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows}
+    scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
+    return {'as_of':now.isoformat(),'summary':summary(store),'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None}
