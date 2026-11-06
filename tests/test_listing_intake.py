@@ -121,3 +121,30 @@ def test_official_point_in_excluded_area_is_rejected_not_silently_unmatched(stor
     p.update(latitude=result['latitude'],longitude=result['longitude'])
     from rentalsourcing.core import geographic_verification
     assert geographic_verification(p,boundary)==('Rejected','sheraden_neighborhood')
+
+
+def test_all_nine_captured_unknown_properties_have_an_explicit_disposition(store,clock):
+    import json
+    from pathlib import Path
+    from rentalsourcing.listing_intake import audit
+    from rentalsourcing.geography import load_boundary
+    clock.value=dt.datetime(2026,11,6,11,tzinfo=dt.timezone.utc)
+    actual_boundary=load_boundary('data/pittsburgh.geojson')
+    rows=json.loads(Path('tests/fixtures/realscout-nine-20261106.json').read_text())['records']
+    records=[]
+    class NoMatch:
+        def open(self,*a,**k):raise OSError('Isolated test: official source unavailable')
+    for row in rows:
+        p={k:row[k] for k in ['bedrooms','bathrooms','squareFootage','price']}
+        p.update(addressLine1=row['street'],formattedAddress=row['address'],city='Pittsburgh',state='PA',zipCode=row['zip'])
+        if row['street']=='1111 Duffield St':p.update(latitude=40.47880551376,longitude=-79.932045106514)
+        records.append({'source_id':'realscout-email','external_id':row['source_email_id'],'received_at':row['observed_at'],'listing_status':row['status'],'property':p})
+    for item in records:evaluate(store,actual_boundary,[item],clock(),NoMatch())
+    checked=audit(store,actual_boundary,clock())['properties']
+    assert len(checked)==9
+    counts={d:sum(r['disposition']==d for r in checked) for d in ['pending_delivery','rejected_hard_criterion','pending_additional_evidence']}
+    assert counts=={'pending_delivery':1,'rejected_hard_criterion':5,'pending_additional_evidence':3}
+    for r in checked:
+        if r['disposition']=='rejected_hard_criterion':assert 'bedrooms' in r['reasons'] or 'excluded_zip' in r['reasons']
+        assert r['tax_status']=='unknown'
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0

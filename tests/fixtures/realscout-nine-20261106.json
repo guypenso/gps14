@@ -1,0 +1,122 @@
+{
+  "source": "Authorized production email facts; replayed only into isolated test databases.",
+  "records": [
+    {
+      "source_email_id": "1a19e6eb9b1a5150",
+      "observed_at": "2026-11-02T22:43:38.000Z",
+      "address": "2544 Spinneweber, Overbrook, PA 15227",
+      "street": "2544 Spinneweber",
+      "display_city": "Overbrook",
+      "zip": "15227",
+      "price": 169000,
+      "bedrooms": 3,
+      "bathrooms": 1,
+      "squareFootage": 1260,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a19e6eb9b1a5150",
+      "observed_at": "2026-11-02T22:43:38.000Z",
+      "address": "3830 N East St, Observatory Hill, PA 15214",
+      "street": "3830 N East St",
+      "display_city": "Observatory Hill",
+      "zip": "15214",
+      "price": 189000,
+      "bedrooms": 3,
+      "bathrooms": 1,
+      "squareFootage": 1000,
+      "status": null
+    },
+    {
+      "source_email_id": "1a1a3e7abde29904",
+      "observed_at": "2026-11-04T00:13:50.000Z",
+      "address": "319 Elsdon St, Central North Side, PA 15214",
+      "street": "319 Elsdon St",
+      "display_city": "Central North Side",
+      "zip": "15214",
+      "price": 149900,
+      "bedrooms": 5,
+      "bathrooms": 1,
+      "squareFootage": 1734,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a1a73d7753c7d96",
+      "observed_at": "2026-11-04T15:46:25.000Z",
+      "address": "1615 Falck Ave, Brighton Heights, PA 15212",
+      "street": "1615 Falck Ave",
+      "display_city": "Brighton Heights",
+      "zip": "15212",
+      "price": 95000,
+      "bedrooms": 5,
+      "bathrooms": 2,
+      "squareFootage": 2107,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a1a8186188c9cfc",
+      "observed_at": "2026-11-04T19:45:32.000Z",
+      "address": "3225 Allendale St, Sheraden, PA 15204",
+      "street": "3225 Allendale St",
+      "display_city": "Sheraden",
+      "zip": "15204",
+      "price": 25000,
+      "bedrooms": 3,
+      "bathrooms": 1.5,
+      "squareFootage": 1431,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a1a90f483ff2449",
+      "observed_at": "2026-11-05T00:15:10.000Z",
+      "address": "217 henderson, Fineview, PA 15212",
+      "street": "217 henderson",
+      "display_city": "Fineview",
+      "zip": "15212",
+      "price": 95000,
+      "bedrooms": 3,
+      "bathrooms": 1,
+      "squareFootage": 1050,
+      "status": null
+    },
+    {
+      "source_email_id": "1a1ac628d163f4aa",
+      "observed_at": "2026-11-05T15:45:01.000Z",
+      "address": "1206 Amanda St, Carrick, PA 15210",
+      "street": "1206 Amanda St",
+      "display_city": "Carrick",
+      "zip": "15210",
+      "price": 85000,
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "squareFootage": 1450,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a1adabe3d251184",
+      "observed_at": "2026-11-05T21:44:45.000Z",
+      "address": "1111 Duffield St, Morningside, PA 15206",
+      "street": "1111 Duffield St",
+      "display_city": "Morningside",
+      "zip": "15206",
+      "price": 115000,
+      "bedrooms": 3,
+      "bathrooms": 1,
+      "squareFootage": 1008,
+      "status": "Active"
+    },
+    {
+      "source_email_id": "1a1aea1f28fef4f0",
+      "observed_at": "2026-11-06T02:13:31.000Z",
+      "address": "2361 Almont Avenue, Carrick, PA 15210",
+      "street": "2361 Almont Avenue",
+      "display_city": "Carrick",
+      "zip": "15210",
+      "price": 189900,
+      "bedrooms": 3,
+      "bathrooms": 1,
+      "squareFootage": 1620,
+      "status": "Active"
+    }
+  ]
+}
