@@ -55,10 +55,12 @@ def evaluate(store,boundary,records,now,opener=None):
         elif not deferred and len(matches)<=1 and geographic_verification(p,boundary)[0]=='Candidate':
             qualified=state=='Candidate' and tax is not None and fresh
             counts['qualified' if qualified else 'pending']+=1
-            cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('evidence_url'),last_reported_status=p['status']))
+            cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('listing_url') or item.get('evidence_url'),last_reported_status=p['status']))
         elif state!='Rejected' and not deferred:counts['needs_research']+=1
+        if cards and cards[-1]['source_id']==identity and p.get('listingDescription'):
+            cards[-1]['listing_info']={'source':'RealScout','source_id':identity,'address':p['formattedAddress'],'street_address':p['addressLine1'],'zip_code':p['zipCode'],'retrieved_at':observed,'description':p['listingDescription'],'listing_status':p['status'],'agents':[]}
         result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred,
-                    external_id=item.get('external_id'),listing_id=item.get('listing_id'),evidence_url=item.get('evidence_url'),
+                    external_id=item.get('external_id'),listing_id=item.get('listing_id'),listing_url=item.get('listing_url'),raw_listing_status=item.get('raw_listing_status'),source_neighborhood=item.get('source_neighborhood'),evidence_url=item.get('evidence_url'),
                     tax_status='provider_verified' if tax is not None else 'unknown',tax_evidence=tax,
                     disposition='preserved_owner_decision' if deferred else 'rejected_hard_criterion' if state=='Rejected' else 'pending_delivery' if any(c['source_id']==identity for c in cards) else 'pending_additional_evidence')
         key='listing_observation:'+hashlib.sha256((str(item.get('external_id'))+'|'+identity).encode()).hexdigest()
@@ -74,10 +76,13 @@ def geocode(store,p,boundary,now,opener=None):
     row=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
     if row:
         cached=json.loads(row[0])
-        if cached.get('next_at','')>now.isoformat():return cached
+        if cached.get('next_at','')>now.isoformat() and (cached.get('matched') or cached.get('query_version')=='canonical_city_v2'):return cached
     if store.execute('SELECT 1 FROM settings WHERE name=?',('listing_geocoder_access_denied',)).fetchone():return {'matched':False,'reason':'official_geocoder_access_denied'}
-    result={'matched':False,'source':'US Census public address geocoder','retrieved_at':now.isoformat(),'next_at':(now+dt.timedelta(days=7)).isoformat()}
-    url='https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?'+urllib.parse.urlencode({'address':p['formattedAddress'],'benchmark':'Public_AR_Current','format':'json'})
+    result={'matched':False,'source':'US Census public address geocoder','query_version':'canonical_city_v2','retrieved_at':now.isoformat(),'next_at':(now+dt.timedelta(days=7)).isoformat(),'reason':'official_geocoder_no_unique_exact_match'}
+    # RealScout's display city is often a neighborhood, not a postal municipality.
+    # Keep the original address evidence, but use the canonical postal city here.
+    postal=', '.join([p['addressLine1']+((' '+p['addressLine2']) if p.get('addressLine2') else ''),p.get('city') or 'Pittsburgh','PA '+p['zipCode']])
+    url='https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?'+urllib.parse.urlencode({'address':postal,'benchmark':'Public_AR_Current','format':'json'})
     try:
         opener=opener or urllib.request.build_opener(NoRedirect)
         with opener.open(urllib.request.Request(url,headers={'User-Agent':'RentalSourcing authorized listing intake','Accept':'application/json'}),timeout=12) as response:
@@ -86,10 +91,15 @@ def geocode(store,p,boundary,now,opener=None):
         matches=json.loads(raw)['result']['addressMatches']
         if len(matches)==1:
             m=matches[0];components=m['addressComponents'];coords=m['coordinates']
-            exact=street_key({'formattedAddress':m['matchedAddress']})==street_key(p) and str(components.get('zip'))==p['zipCode'] and components.get('state')=='PA'
+            official=street_key({'formattedAddress':m['matchedAddress']}).split();supplied=street_key(p).split()
+            suffixes={'st','ave','rd','dr','blvd','ln','ct','pl','ter','cir','way'}
+            exact_street=official==supplied or official[:-1]==supplied and official[-1] in suffixes and supplied[-1] not in suffixes
+            exact=exact_street and str(components.get('zip'))==p['zipCode'] and components.get('state')=='PA'
             if exact and not p.get('addressLine2') and not any(x in street_key(p).split() for x in ('unit','apt')):
                 x,y=float(coords['x']),float(coords['y']);locations=[{**p,'longitude':x+dx,'latitude':y+dy} for dx,dy in [(0,0),(.0002,0),(-.0002,0),(0,.0002),(0,-.0002)]]
-                if all(geographic_verification(v,boundary)[0]=='Candidate' for v in locations):result.update(matched=True,longitude=x,latitude=y,precision='official_street_interpolation_not_parcel',source_url=url)
+                geography=[geographic_verification(v,boundary) for v in locations]
+                if len(set(geography))==1 and geography[0][0] in ('Candidate','Rejected'):
+                    result.update(matched=True,longitude=x,latitude=y,precision='official_street_interpolation_not_parcel',source_url=url,matched_address=m['matchedAddress'],reason=None)
     except urllib.error.HTTPError as exc:
         result['reason']='official_geocoder_http_'+str(exc.code)
         if exc.code in (401,403):store.save_setting('listing_geocoder_access_denied',{'at':now.isoformat(),'status':exc.code})
