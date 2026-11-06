@@ -89,10 +89,35 @@ def audit(store,boundary,now=None,config=None,opener=None):
  reports=store.execute("SELECT r.outbox_id,r.payload,r.synced_at,r.attempts,r.error_type FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent'").fetchall()
  return {'source_records':store.execute('SELECT COUNT(*) FROM properties').fetchone()[0],'price_history_records':store.execute('SELECT COUNT(*) FROM price_history').fetchone()[0],'cached_review_decisions':len(reviews),'cached_rejections':sum(r.get('status')=='rejected' for r in reviews.values()),'accepted_reports':sum(bool(r[2]) for r in reports),'pending_reports':sum(not r[2] for r in reports),'pending_report_cards':sum(len(json.loads(r[1]).get('opportunities',[])) for r in reports if not r[2]),'private_feedback_probe':probe(config or review_configuration(),opener)}
 
+def reconcile_completed_enrichment(store,now=None):
+ """Retire only orphaned batch failures whose exact parent job is complete.
+
+ The failed request remains in the ledger for audit. A completed job is
+ stronger evidence than a transport timeout, but this is reconciliation,
+ not a fabricated successful receipt for that individual request.
+ """
+ now=now or dt.datetime.now(UTC)
+ jobs={name:json.loads(raw) for name,raw in store.execute(
+  'SELECT name,payload FROM settings WHERE name LIKE ?',('listing-contact-enrichment:%',)).fetchall()}
+ resolved=0;unmatched=0
+ for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:listing_enrichment:%',)).fetchall():
+  operation=json.loads(raw)
+  if operation.get('state')!='pending':continue
+  identity=operation.get('id','')
+  completed=next((job for key,job in jobs.items() if job.get('done') and identity.startswith(key+':') and len(identity[len(key)+1:].split(':'))==2 and all(x.isdigit() for x in identity[len(key)+1:].split(':'))),None)
+  if completed is None:unmatched+=1;continue
+  operation.update(state='reconciled',reconciled_at=now.isoformat(),reconciliation='parent_job_completed',next_attempt_at=None)
+  store.save_setting(name,operation);resolved+=1
+ if resolved:
+  component(store,'listing_enrichment','success',now=now,recovery='completed_job_reconciled')
+  incident(store,'listing_enrichment',None,now=now,resolved=True)
+ return {'reconciled':resolved,'unmatched_pending':unmatched}
+
 @bounded_recovery
 def recover(store,boundary,now=None,opener=None):
  """Only saved sync operations; explicitly never sends emails or calls a listing provider."""
  now=now or dt.datetime.now(UTC);result={}
+ result['completed_job_reconciliation']=reconcile_completed_enrichment(store,now)
  from .review_feedback import refresh
  manual=get(store,'manual_recovery_requested',{})
  if manual.get('state')=='queued_no_email_or_provider_calls':
@@ -140,7 +165,12 @@ def recover(store,boundary,now=None,opener=None):
  try:
   previous_audit=get(store,'health_last_audit',{})
   need_audit=not previous_audit or 'current_inventory' not in previous_audit.get('result',{}) or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
-  after=remote_audit(store,opener=opener) if need_audit else previous_audit['result'];result['audit']=after
+  # The full historical report audit can span many HTTP requests. Reuse its
+  # recent saved result and check the current inventory in one bounded request.
+  if need_audit and previous_audit.get('result'):
+   after={**previous_audit['result'],'current_inventory':current_inventory_audit(store,opener=opener)}
+  else:after=remote_audit(store,opener=opener) if need_audit else previous_audit['result']
+  result['audit']=after
   if need_audit:store.save_setting('health_last_audit',{'at':now.isoformat(),'result':after})
   good=after.get('feedback_matches') and not any(after.get(k) for k in ('remote_unaccepted_reports','missing_source_identities','digest_conflicts'))
   error={'category':'cross_system_drift','retryable':True}

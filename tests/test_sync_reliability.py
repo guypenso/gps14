@@ -3,8 +3,19 @@ import pytest
 from conftest import Response,Provider,listing
 from rentalsourcing.sync_runtime import request_json,SyncFailure,get,component,incident
 from rentalsourcing.review_feedback import refresh
-from rentalsourcing.reliability import snapshot,begin,stage,finish,current_inventory_audit
+from rentalsourcing.reliability import snapshot,begin,stage,finish,current_inventory_audit,reconcile_completed_enrichment
 CONFIG=('https://penten.example.test/api/rentalsourcing/sync','s'*40,'private-fixture-token')
+def test_completed_enrichment_reconciles_only_its_own_orphaned_batch(store,clock):
+ job='listing-contact-enrichment:2026-11-05:fixture'
+ store.save_setting(job,{'done':True,'offset':648,'cursor':None})
+ store.save_setting('listing-contact-enrichment:unfinished',{'done':False,'offset':25})
+ store.save_setting('sync_operation:listing_enrichment:done',{'state':'pending','id':job+':25:10000','component':'listing_enrichment','error':{'category':'recovery_time_budget'}})
+ store.save_setting('sync_operation:listing_enrichment:unfinished',{'state':'pending','id':'listing-contact-enrichment:unfinished:0:0','component':'listing_enrichment'})
+ result=reconcile_completed_enrichment(store,clock())
+ assert result=={'reconciled':1,'unmatched_pending':1}
+ assert get(store,'sync_operation:listing_enrichment:done')['state']=='reconciled'
+ assert get(store,'sync_operation:listing_enrichment:unfinished')['state']=='pending'
+ assert snapshot(store,clock())['counts']['pending_operations']==1
 def test_current_inventory_audit_compares_stable_source_ids_without_provider_calls(store,boundary,clock,monkeypatch):
  from types import SimpleNamespace
  monkeypatch.setattr('rentalsourcing.geography.load_boundary',lambda _:boundary)
