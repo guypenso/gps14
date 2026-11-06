@@ -3,8 +3,30 @@ import pytest
 from conftest import Response,Provider,listing
 from rentalsourcing.sync_runtime import request_json,SyncFailure,get,component,incident
 from rentalsourcing.review_feedback import refresh
-from rentalsourcing.reliability import snapshot,begin,stage,finish
+from rentalsourcing.reliability import snapshot,begin,stage,finish,current_inventory_audit
 CONFIG=('https://penten.example.test/api/rentalsourcing/sync','s'*40,'private-fixture-token')
+def test_current_inventory_audit_compares_stable_source_ids_without_provider_calls(store,boundary,clock,monkeypatch):
+ from types import SimpleNamespace
+ monkeypatch.setattr('rentalsourcing.geography.load_boundary',lambda _:boundary)
+ monkeypatch.setattr('rentalsourcing.config.Settings.from_env',lambda:SimpleNamespace(boundary_file='fixture'))
+ for identity in ('mapped','missing'):
+  store.save_property(identity,listing(identity),'Pending Verification',['tax_not_verified'],'rentcast-live',1,clock().isoformat())
+ class Receiver:
+  def open(self,req,timeout):
+   assert req.full_url.endswith('/review-inventory-audit')
+   body=json.loads(req.data)
+   assert body['source_ids']==['mapped','missing']
+   raw=json.dumps({'accepted':True,'nonce':body['nonce'],'results':[{'source_id':'mapped','matched':True,'review_status':'monitor','tax_status':'pending_verification'},{'source_id':'missing','matched':False}]},separators=(',',':')).encode()
+   class Result:
+    status=200
+    headers={'X-RentalSourcing-Response-Signature':'v1='+hmac.new(CONFIG[1].encode(),raw,hashlib.sha256).hexdigest()}
+    def read(self,n):return raw
+    def __enter__(self):return self
+    def __exit__(self,*a):pass
+   return Result()
+ report=current_inventory_audit(store,CONFIG,Receiver())
+ assert report['source_records']==2 and report['pending']==2 and report['mapped']==1 and report['missing_pending']==1
+ assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
 class Wire:
  def __init__(self,responses):self.responses=list(responses);self.calls=[]
  def open(self,req,timeout):
