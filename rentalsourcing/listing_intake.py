@@ -93,3 +93,8 @@ def geocode(store,p,boundary,now,opener=None):
     except Exception as exc:
         result.update(reason='official_geocoder_unavailable',next_at=(now+dt.timedelta(minutes=30)).isoformat())
     store.save_setting(key,result);return result
+
+
+def summary(store):
+    records=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall()]
+    return {'unique_properties':len(records),'known_rentcast_unique':sum(r['matched_rentcast'] for r in records),'unique_beyond_rentcast':sum(not r['matched_rentcast'] for r in records),'owner_deferred_unique':sum(r['owner_deferred'] for r in records),'rejected_unique':sum(r['state']=='Rejected' for r in records),'non_tax_pass_unique':sum(r['state']=='Candidate' for r in records),'source_observations':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0],'paid_provider_calls':0}
