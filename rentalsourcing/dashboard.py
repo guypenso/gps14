@@ -174,7 +174,10 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         if not isinstance(nonce,str) or len(nonce)!=32:return jsonify(error='Invalid nonce'),400
         current=Store(url,initialize=False)
         try:
-            if d.get('action')=='listing_evaluate':
+            if d.get('action')=='listing_stats':
+                from .listing_intake import summary as listing_summary
+                result={'summary':listing_summary(current)}
+            elif d.get('action')=='listing_evaluate':
                 from .listing_intake import evaluate as evaluate_listings
                 result=evaluate_listings(current,boundary,d.get('records'),clock())
             elif d.get('action')=='evaluate':result={'evaluations':evaluate(current,boundary,d.get('records'),clock())}
