@@ -2,10 +2,10 @@
 import datetime as dt
 import json
 from .collector import LIVE
-from .core import tax_verification,number
+from .core import tax_verification,number,verification
 from .diagnostics import funnel
 from .provenance import demo_marked
-from .tax_backlog import priorities
+from .tax_backlog import priorities,review_deferred
 
 UTC=dt.timezone.utc
 
@@ -55,10 +55,14 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
   queue.append({k:v for k,v in item.items() if k!='key'}|{'tax_evidence':result})
  source_manifest=batch.get('manifest') or {}
  coverage=funnel(store,boundary,now)
+ # The funnel's historical owner_review_deferred counter only includes uncached
+ # records. Decisions remain authoritative even when a tax cache exists.
+ owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
+                    for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall() if source==LIVE)
  return {'as_of':now.isoformat(),'source_records':coverage['counts'].get('stored_unique',0),
          'non_tax_pass':coverage['counts'].get('non_tax_pass',0),
          'non_tax_rejected':coverage['counts'].get('non_tax_rejected',0),
-         'owner_deferred':coverage['counts'].get('owner_review_deferred',0),
+         'owner_deferred':owner_deferred,
          'broad_uncached':coverage['counts'].get('tax_uncached_backlog',0),
          'provider_cache_valid':coverage['counts'].get('valid_tax_cache',0),
          'provider_tax_qualified':coverage['counts'].get('tax_qualified',0),

@@ -28,6 +28,15 @@ def test_saved_estimate_remains_pending_and_deferrals_stay_out(store,boundary,cl
     assert store.execute('SELECT COUNT(*) FROM tax_history').fetchone()[0]==before
 
 
+def test_deferred_record_with_valid_tax_cache_still_counts_as_owner_decision(store,boundary,clock):
+    p=listing('deferred')
+    store.save_property(p['id'],p,'Qualified',[],LIVE,1,clock().isoformat())
+    store.save_tax(p['id'],taxes('deferred',1500),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
+    store.save_setting('penten_review:deferred',{'status':'rejected'})
+    report=snapshot(store,boundary,clock())
+    assert report['owner_deferred']==1 and report['actionable_total']==0
+
+
 def test_expired_provider_tax_is_historical_not_verified(clock):
     p=taxes('first',1500)
     row=(json.dumps(p),LIVE,(clock()-dt.timedelta(days=15)).isoformat(),(clock()-dt.timedelta(days=1)).isoformat())
