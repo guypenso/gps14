@@ -185,12 +185,13 @@ def start_scheduler(url):
     from .listing_intake import reconcile_official_identities
     reconcile_official_identities(s,now)
     from .investment_policy import POLICY_VERSION
-    if not get(s,POLICY_VERSION):
-     from .criteria import reevaluate
+    criteria_key=POLICY_VERSION+':'+POLICY
+    if not get(s,criteria_key):
+     from .criteria import reconcile_geography
      from .geography import load_boundary
      from .config import Settings
-     changed=reevaluate(s,load_boundary(Settings.from_env().boundary_file),now)
-     s.save_setting(POLICY_VERSION,{'at':now.isoformat(),'records_updated':changed,'provider_calls':0})
+     changed=reconcile_geography(s,load_boundary(Settings.from_env().boundary_file),now)
+     s.save_setting(criteria_key,{'at':now.isoformat(),'reconciliation':changed,'provider_calls':0,'geographic_policy':POLICY})
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
     if not get(s,'offmarket_reconciliation_v5'):
      u,k,t=review_configuration()

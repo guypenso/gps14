@@ -31,6 +31,10 @@ REASONS={'excluded_zip':'מיקוד מוחרג','price':'מחיר חסר או מ
  'invalid_timestamp':'מועד האימות חסר או לא תקין','future_timestamp':'מועד האימות נמצא בעתיד',
  'status':'המודעה אינה פעילה למכירה','state':'הנכס אינו בפנסילבניה'}
 
+from .pink_area import NAMES as PINK_NEIGHBORHOODS
+REASONS.update({slug.replace('-','_')+'_neighborhood':name+(' (south bank only)' if slug.endswith('belmar-south') else '')+' neighborhood excluded' for slug,name in PINK_NEIGHBORHOODS.items()})
+REASONS['pink_area_boundary_verification']='Geographic boundary verification required'
+
 class StructuralBoundary:
     def contains(self,row):return True
 

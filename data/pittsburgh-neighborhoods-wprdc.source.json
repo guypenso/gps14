@@ -1,0 +1,55 @@
+{
+  "source": "https://data.wprdc.org/dataset/neighborhoods2",
+  "publisher": "City of Pittsburgh",
+  "license": "Creative Commons Attribution",
+  "official_resource_id": "4af8e160-57e9-4ebf-a501-76ca1b42fc99",
+  "retrieval_method": "pinned_public_redistribution",
+  "download_url": "https://raw.githubusercontent.com/2004Moonlove/Final-Project-Description/717f0b300985910bba0afa06831e488e974ca4bd/Ivan_foodscore/Neighborhoods_.geojson",
+  "provenance_reference": "https://github.com/2004Moonlove/Final-Project-Description/blob/717f0b300985910bba0afa06831e488e974ca4bd/README.md",
+  "retrieved_at": "2026-11-08T11:05:34.297669+00:00",
+  "sha256": "4714bc178ec948babd2bd989dc158f99fb359207636c5de730134322a6d41bd5",
+  "features": 90,
+  "verification": [
+    {
+      "neighborhood": "Brighton Heights",
+      "official_asset_sha256": "6f55211a6375c5244943f61c3b7921a47abeac1f872fe01f997e0b93a06b5418",
+      "hausdorff_degrees": 6.550880341146756e-14
+    },
+    {
+      "neighborhood": "Spring Hill-City View",
+      "official_asset_sha256": "cd80396bd43327d4424bb1ed5e48e0d021fa22b7a0b9c7323fd0f4e102cd30f8",
+      "hausdorff_degrees": 6.550880341146756e-14
+    },
+    {
+      "neighborhood": "Perry South",
+      "official_asset_sha256": "5a4e8317ffd506f5556308f253d2146eababd056e6ab8cc7dcc207fa7e547bc4",
+      "hausdorff_degrees": 6.550880341146756e-14
+    },
+    {
+      "neighborhood": "Elliott",
+      "official_asset_sha256": "4b8e3eb7a3751de86caa7ec7c427e5b0fe9890be4170da582c5d1e2c6abb5549",
+      "hausdorff_degrees": 6.550880341146756e-14
+    },
+    {
+      "neighborhood": "Carrick",
+      "official_asset_sha256": "f5723c8c01628977d5e7a6f52aabcde310a0cfeee176c712d1f33727b9ce5f5c",
+      "hausdorff_degrees": 6.703246762680666e-14
+    },
+    {
+      "neighborhood": "Sheraden",
+      "official_asset_sha256": "45ba1a1143228e8ebcc3aa4e36139fb8f0a91b2a3885500a4b794fa673278fe3",
+      "hausdorff_degrees": 6.355287432313019e-14
+    },
+    {
+      "neighborhood": "Hazelwood",
+      "official_asset_sha256": "a5d2ef6fb40893a8833b8aae9a9a969a188a9684d4e0a37a8d7dc8a58988d84b",
+      "hausdorff_degrees": 6.550880341146756e-14
+    },
+    {
+      "neighborhood": "Mount Washington",
+      "official_asset_sha256": "092d1f58a267e3cb6eb14adb00027d81b3c8b176eda9fd17d3adc3f5016ed70d",
+      "hausdorff_degrees": 6.355287432313019e-14
+    }
+  ],
+  "limitations": "Direct current official download blocked by environment HTTP 403. Pinned WPRDC export matches eight independently downloaded official neighborhoods to floating-point precision. Do not describe as a fresh official download."
+}
