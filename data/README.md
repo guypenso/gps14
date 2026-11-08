@@ -65,3 +65,24 @@ request count, query filters and pagination limits are unchanged.
 
 To refresh only this polygon: `python scripts/fetch_regions.py data sheraden`.
 Review and commit verified public geometry; production never fetches GIS data.
+
+### Eastern Pittsburgh exclusion (2026-11-08)
+
+`pittsburgh-neighborhoods-wprdc.geojson` preserves a complete 90-neighborhood
+City of Pittsburgh export published through WPRDC (CC Attribution). Direct City
+and WPRDC downloads returned HTTP 403 in the execution environment. The pinned
+public redistribution, original resource citation, retrieval date, SHA-256 and
+comparison against eight independently downloaded official polygons are in the
+adjacent `.source.json`. All eight geometries match within 1e-10 degrees. This is
+an official-derived snapshot, not a claimed fresh direct City download.
+
+The policy excludes Homewood North/South/West and East Hills. For
+Lincoln-Lemington-Belmar it selects the existing **south-bank component 0** only;
+the disjoint north-bank component 1 is preserved. It does not approximate the
+hand-drawn outline or expand the rule to neighboring municipalities. Exact
+outer-boundary matches require geographic verification. Coordinates determine
+membership; ZIP codes, street names and descriptive neighborhood mentions do not.
+
+The same snapshot selections are bundled into PENTEN's Worker. Stored source
+records are reevaluated once per geographic policy version with a durable audit;
+manual review settings, listing payloads and price history are unchanged.

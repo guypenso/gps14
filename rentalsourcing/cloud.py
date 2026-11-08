@@ -1,6 +1,7 @@
 """Production entry point; no provider calls without an explicit approved allowance."""
 import argparse
 import datetime as dt
+from .geography import EXCLUDED_NEIGHBORHOODS
 import json
 import logging
 import os
@@ -178,7 +179,7 @@ def main(argv=None):
         if exists:
             boundary=load_boundary(settings.boundary_file)
             from .request import listing_parameters
-            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],query=listing_parameters(boundary))
+            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=listing_parameters(boundary))
         from .sync_probe import inspect
         event('sync_authentication_probe',**inspect())
         if settings.enabled and os.getenv('DATABASE_URL'):
@@ -258,7 +259,7 @@ def main(argv=None):
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=['Sheraden','Hazelwood','Mount Washington','Perry South','Elliott','Carrick'],excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()
