@@ -20,6 +20,8 @@ def test_observed_neighborhood_matrix_keeps_sources_and_unknowns_separate(store,
     property_data = {'longitude': point.x, 'latitude': point.y, 'zipCode': '15206'}
     assert boundary.evaluate(property_data)[0] == 'Candidate'
     store.save_property('rentcast-1', property_data, 'Pending Verification', [], LIVE, 1, clock().isoformat())
+    store.save_property('rentcast-excluded-zip', {**property_data, 'zipCode': '15203'},
+                        'Rejected', ['excluded_zip'], LIVE, 2, clock().isoformat())
     rows = [{'source_id': 'rentcast-1', 'property': property_data, 'observed_at': clock().isoformat()},
             {'source_id': 'realscout-2', 'property': property_data, 'observed_at': clock().isoformat()},
             {'source_id': 'realscout-unlocated', 'property': {'zipCode': '15206'}, 'observed_at': clock().isoformat()}]
@@ -27,6 +29,7 @@ def test_observed_neighborhood_matrix_keeps_sources_and_unknowns_separate(store,
     cell = next(c for c in result['neighborhoods'] if c['neighborhood'] == 'Morningside')
     assert (cell['rentcast_observed'], cell['realscout_observed'], cell['both_sources'], cell['realscout_only']) == (1, 2, 1, 1)
     assert result['unlocated_source_identities']['realscout'] == 1
+    assert result['outside_approved_geography']['rentcast'] == 1
     assert result['market_denominator'] is None and result['market_coverage_percent'] is None
     assert len(result['neighborhoods']) == 91
 
