@@ -187,4 +187,11 @@ def audit(store,boundary,now):
         tax_changes.append({'source_id':identity,'annual_tax':tax['annual'],'tax_year':tax['year'],'non_tax_pass':non_tax,'fresh_listing':fresh,'human_decision_preserved':protected,'new_qualified_opportunity':non_tax and fresh and not protected})
     stats['tax_ceiling_recheck']={'cached_records_newly_passing_tax':len(tax_changes),'new_qualified_opportunities':sum(r['new_qualified_opportunity'] for r in tax_changes),'records':tax_changes}
     aliases=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity_alias:%',)).fetchall()]
-    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':stats,'identity_reconciliations':aliases,'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
+    from .market_coverage import observed_coverage
+    from .config import Settings
+    from pathlib import Path
+    neighborhoods=Path(Settings.from_env().boundary_file).parent/'pittsburgh-neighborhoods-wprdc.geojson'
+    try:coverage=observed_coverage(store,boundary,rows,neighborhoods)
+    except (OSError,ValueError,KeyError) as exc:
+        coverage={'state':'unavailable','reason':type(exc).__name__,'market_coverage_percent':None}
+    return {'as_of':now.isoformat(),'criteria':thresholds(),'summary':stats,'observed_coverage':coverage,'identity_reconciliations':aliases,'properties':rows,'scheduler':json.loads(scheduled[0]) if scheduled else None,'scheduler_validation':json.loads(validation[0]) if validation else None}
