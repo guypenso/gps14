@@ -6,7 +6,8 @@ from pathlib import Path
 from shapely.geometry import Point, shape
 
 from .collector import LIVE
-from .core import number
+from .core import EXCLUDED_ZIPS, number
+from .geography import EXCLUDED_NEIGHBORHOODS
 
 
 def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
@@ -44,7 +45,13 @@ def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
         if not number(x) or not number(y):
             unlocated[source] += 1
             return
+        # The boundary checks polygons; the investment policy also excludes
+        # entire ZIP codes. An observed point in an allowed polygon is not
+        # approved geography when its ZIP is excluded.
+        zipcode = str(property_data.get('zipCode') or '').split('-')[0]
         state, _ = boundary.evaluate(property_data)
+        if zipcode in EXCLUDED_ZIPS:
+            state = 'Rejected'
         if state == 'Rejected':
             outside_approved[source] += 1
             return
@@ -88,7 +95,10 @@ def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
     matrix = []
     for name in sorted(counts):
         c = counts[name]
+        excluded = name in EXCLUDED_NEIGHBORHOODS
+        partial = any(x.startswith(name + ' (') for x in EXCLUDED_NEIGHBORHOODS)
         matrix.append({'neighborhood': name,
+                       'geographic_policy': 'excluded' if excluded else 'partially_excluded' if partial else 'address_and_zip_check_required',
                        'rentcast_observed': len(c['rentcast']),
                        'realscout_observed': len(c['realscout']),
                        'both_sources': len(c['rentcast'] & c['realscout']),
@@ -101,8 +111,9 @@ def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
             'source_dataset': manifest['source'],
             'polygon_retrieval_method': manifest.get('retrieval_method'),
             'neighborhoods': matrix,
-            'zero_observed_neighborhoods': [r['neighborhood'] for r in matrix
-                                            if not r['rentcast_observed'] and not r['realscout_observed']],
+            'zero_observed_nonexcluded_neighborhoods': [r['neighborhood'] for r in matrix
+                                                        if r['geographic_policy'] != 'excluded'
+                                                        and not r['rentcast_observed'] and not r['realscout_observed']],
             'unlocated_source_identities': unlocated,
             'outside_approved_geography': outside_approved,
             'ambiguous_geography': ambiguous,
