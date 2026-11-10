@@ -41,6 +41,24 @@ def test_review_feedback_is_authenticated_and_rejection_is_permanent(store,clock
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
 
 
+def test_review_report_delivery_fetches_decisions_using_review_credentials(store,clock):
+    config=('https://example.test/api/rentalsourcing/review-reports','s'*32,'fixture-review-token')
+    class Response:
+        status=200
+        def __init__(self,nonce):
+            self.body=json.dumps({'nonce':nonce,'decisions':[],'next_cursor':None}).encode()
+            self.headers={'X-RentalSourcing-Response-Signature':'v1='+hmac.new(config[1].encode(),self.body,hashlib.sha256).hexdigest()}
+        def read(self,n):return self.body
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+    class Receiver:
+        def open(self,request,timeout):
+            assert request.full_url=='https://example.test/api/rentalsourcing/review-classifications'
+            return Response(json.loads(request.data)['nonce'])
+    assert refresh(store,clock(),Receiver(),config)['state']=='fresh'
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
 def row(**changes):
     base=dict(PARID='0001A00001000000',PROPERTYHOUSENUM='100',PROPERTYADDRESS='Fixture Avenue',PROPERTYFRACTION='',PROPERTYUNIT='',PROPERTYZIP='15212',MUNIDESC='1st Ward - PITTSBURGH',SCHOOLDESC='Pittsburgh',COUNTYTOTAL='40000',LOCALTOTAL='40000',TAXYEAR='2026',ASOFDATE='2026-10-07',TAXCODE='T',HOMESTEADFLAG='',FARMSTEADFLAG='',ABATEMENTFLAG='',CLEANGREEN='')
     base.update(changes);return base
