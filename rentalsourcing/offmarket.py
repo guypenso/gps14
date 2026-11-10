@@ -77,7 +77,9 @@ def evaluate(store,boundary,items,now=None):
   tax_info={'state':'verified' if tax else 'estimated' if estimate and estimate.get('state')=='estimated' else 'unknown','verified':tax,'estimate':estimate,'source':saved[1] if match and saved and tax else None,'retrieved_at':saved[2] if match and saved and tax else None}
   if state=='Rejected':base_state='Rejected'
   decision=analyze(p,item,base_state,reasons,tax_info,evidence,(cached,match['observed_at']) if match else None,now)
-  out.append({'property':p,'criteria_version':POLICY,'criteria_state':decision['state'],'reasons':decision['reasons'],'tax':tax_info,'match':match,'score':decision['score'],'score_explanation':decision['score_explanation'],'evaluated_at':now.isoformat(),'acquisition':decision})
+  from .rental_intelligence import cached_estimate
+  rent_estimate=cached_estimate(store,p,now)
+  out.append({'rent_estimate':rent_estimate,'property':p,'criteria_version':POLICY,'criteria_state':decision['state'],'reasons':decision['reasons'],'tax':tax_info,'match':match,'score':decision['score'],'score_explanation':decision['score_explanation'],'evaluated_at':now.isoformat(),'acquisition':decision})
  return out
 class Inventory(HTMLParser):
  def __init__(self):super().__init__(convert_charrefs=True);self.links=[];self.href=None;self.label=[];self.text=[]
@@ -191,21 +193,27 @@ def start_scheduler(url):
      from .geography import load_boundary
      from .config import Settings
      changed=reconcile_geography(s,load_boundary(Settings.from_env().boundary_file),now)
+     if changed.get('new_reviewable_ids'):
+      from .review_inventory import run as reconcile_expansion
+      u,k,t=review_configuration()
+      delivered=reconcile_expansion(s,load_boundary(Settings.from_env().boundary_file),now,execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='stored-review-inventory:'+criteria_key,source_ids=set(changed['new_reviewable_ids']),include_verified=True)
+      changed['inventory_receipt']=delivered.get('receipt_counts')
+      s.save_setting('geography_reconciliation:'+POLICY,changed)
      s.save_setting(criteria_key,{'at':now.isoformat(),'reconciliation':changed,'provider_calls':0,'geographic_policy':POLICY})
     # Short, persistent claim; no scan/email paths, no shared discovery lock held over HTTP.
-    if not get(s,'offmarket_reconciliation_v5'):
+    if not get(s,'offmarket_reconciliation_v6'):
      u,k,t=review_configuration()
      # Fetch program evidence locally. A new worker may start before Render switches
      # the public backend, so a loopback refresh can otherwise hit the old release.
      if not get(s,'offmarket_plb_contacts_v2'):
       cache_program_contacts(s,fetch_public(now))
-     cursor=get(s,'offmarket_reconcile_cursor_v5','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
+     cursor=get(s,'offmarket_reconcile_cursor_v6','');body=json.dumps({'action':'reconcile','cursor':cursor},separators=(',',':')).encode()
      def reconciled(value,*args):
       if value.get('state')!='success':raise ValueError('Off-market reconciliation incomplete')
       if value.get('summary',{}).get('policy_version')!=VERSION:raise SyncFailure('offmarket_policy_handover',None,True)
-     result=request_json(s,'offmarket_reconcile','stored:v5:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
-     s.save_setting('offmarket_reconcile_cursor_v5',result.get('next_cursor') or '')
-     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v5',result)
+     result=request_json(s,'offmarket_reconcile','stored:v6:'+cursor,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=reconciled)
+     s.save_setting('offmarket_reconcile_cursor_v6',result.get('next_cursor') or '')
+     if not result.get('next_cursor'):s.save_setting('offmarket_reconciliation_v6',result)
      logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_RECONCILED '+json.dumps(result,sort_keys=True))
     if claim_schedule(s,now):
      validation=get(s,'realscout_scheduler_validation_v1') if get(s,'offmarket_scheduler',{}).get('validation_id') else None

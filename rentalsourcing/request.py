@@ -18,6 +18,9 @@ def listing_parameters(boundary):
     return params
 
 
+def municipal_queries():
+    return [(slug,dict(PARAMS,city=city,zipCode=zipcode)) for slug,city,zipcode in [('pleasant-hills','Pleasant Hills','15236'),('bethel-park','Bethel Park','15102')]]
+
 def build_request():
     key = os.environ.get('RENTCAST_API_KEY')
     if not key:

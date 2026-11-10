@@ -72,6 +72,18 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             try:
                 scan_job=scheduled_job(store,day)
                 stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true').run(scan_job,day)
+                stats['supplemental_jobs']=[]
+                if settings.approval_mode=='monthly_budget' and stats.get('discovery_complete'):
+                    from .request import municipal_queries
+                    scopes=municipal_queries()
+                    # Alternate first municipality without increasing the run's approved request cap.
+                    if int(day[-2:])%2:scopes.reverse()
+                    for slug,query in scopes:
+                        if client.count>=effective.per_run:break
+                        prior=store.execute("SELECT id FROM scan_jobs WHERE id LIKE ? AND collection_done=0 ORDER BY day LIMIT 1",('municipal:'+slug+':%',)).fetchone()
+                        supplemental=prior[0] if prior else 'municipal:'+slug+':'+day
+                        Engine(store,boundary,client,effective,clock,allow_paid_tax=False,query_parameters=query).run(supplemental,day)
+                        stats['supplemental_jobs'].append(supplemental)
                 stats['requests_consumed']=client.count
                 if stats.get('sample_truncated'):stats['partial']=True
             except Exception as exc:
@@ -84,9 +96,12 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     safe_flush(store)
     from .diagnostics import funnel,safe_read
     stats['funnel']=safe_read(funnel,store,boundary,clock());store.save_setting('health_funnel',stats['funnel'])
+    from .rental_intelligence import enrich as enrich_rent
+    stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),client)
     from .future_discovery import process as process_future
     try:
         stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener)
+        stats['supplemental_verification']=[process_future(store,boundary,j,clock(),config=configuration(),opener=opener) for j in stats.get('supplemental_jobs',[])]
     except Exception as exc:
         stats['future_discovery']={'state':'pending_recovery','error_type':type(exc).__name__}
         error={'category':'future_inventory_processing','retryable':True}
@@ -181,7 +196,7 @@ def main(argv=None):
         if exists:
             boundary=load_boundary(settings.boundary_file)
             from .request import listing_parameters
-            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=listing_parameters(boundary))
+            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=listing_parameters(boundary))
         from .sync_probe import inspect
         event('sync_authentication_probe',**inspect())
         if settings.enabled and os.getenv('DATABASE_URL'):
@@ -261,7 +276,7 @@ def main(argv=None):
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()

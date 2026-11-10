@@ -178,7 +178,13 @@ def tax_verification(record, today=None):
         return 'Pending Verification',None,'invalid_latest_tax_amount'
     amount=Decimal(str(entry['total']));adjusted=amount+TAX_BUFFER
     tax={'year':year,'annual':float(amount),'adjusted':float(adjusted)}
-    if adjusted>TAX_CEILING:return 'Rejected',tax,'annual_tax_too_high'
+    if adjusted>TAX_CEILING:
+        rent=record.get('_rentcast_rent') or {}
+        try:rent_date=dt.datetime.fromisoformat(rent.get('observed_at','').replace('Z','+00:00')).date()
+        except (ValueError,TypeError):rent_date=None
+        exception=rent.get('source')=='RentCast' and rent.get('method')=='long_term_avm' and rent.get('source_id')==record.get('id') and number(rent.get('monthly')) and rent['monthly']>2300 and rent_date is not None and 0<=(today-rent_date).days<=30 and len(rent.get('comparables',[]))>=3 and year>=today.year-1
+        if not exception:return 'Rejected',tax,'annual_tax_too_high'
+        tax['eligibility_path']='high_rent_exception'
     if type_evidence and type_state=='Pending Verification':return 'Pending Verification',tax,type_reason
     return 'Qualified',tax,None
 

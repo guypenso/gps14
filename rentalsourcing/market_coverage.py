@@ -36,6 +36,7 @@ def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
     dimensions = {source: {field: {} for field in ('zip_code', 'asking_price_band', 'bedrooms',
                                                    'listing_status', 'alert_type')}
                   for source in ('rentcast', 'realscout')}
+    for name in boundary.additional_municipalities:counts[name]={'rentcast':set(),'realscout':set(),'latest_rentcast':None,'latest_realscout':None}
     unlocated = {'rentcast': 0, 'realscout': 0}
     outside_approved = {'rentcast': 0, 'realscout': 0}
     ambiguous = {'rentcast': 0, 'realscout': 0}
@@ -59,7 +60,10 @@ def observed_coverage(store, boundary, listing_rows, neighborhoods_path):
             ambiguous[source] += 1
             return
         point = Point(float(x), float(y))
-        if boundary.bellevue.geometry.covers(point):
+        municipality=boundary.municipality(property_data)
+        if municipality in boundary.additional_municipalities:
+            name=municipality
+        elif boundary.bellevue.geometry.covers(point):
             name = 'Bellevue Borough'
         else:
             names = [name for name, geom in regions if geom.covers(point)]

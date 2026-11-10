@@ -94,7 +94,7 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
  called=[]
  def request(*args,**kwargs):
   assert get(store,'offmarket_plb_contacts_v2')['contacts']['startup-fixture']['relationship_confirmed']
-  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v5:'
+  assert args[1]=='offmarket_reconcile';assert args[2]=='stored:v6:'
   with pytest.raises(runtime.SyncFailure) as failure:kwargs['validate']({'state':'success','summary':{'policy_version':'old-release'}})
   assert failure.value.retryable;assert failure.value.category=='offmarket_policy_handover'
   result={'state':'success','next_cursor':None,'summary':{'policy_version':VERSION}};kwargs['validate'](result);called.append(True);return result
@@ -107,7 +107,7 @@ def test_startup_records_program_evidence_before_backend_reconciliation(store,cl
    with pytest.raises(StopIteration):self.target()
  monkeypatch.setattr(om.threading,'Thread',Thread)
  om.start_scheduler(store.test_url)
- assert called==[True];assert get(store,'offmarket_reconciliation_v5')['state']=='success'
+ assert called==[True];assert get(store,'offmarket_reconciliation_v6')['state']=='success'
 
 
 def test_official_program_membership_verifies_contact_without_inventing_zip(store,boundary,clock):

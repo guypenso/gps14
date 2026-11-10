@@ -26,10 +26,10 @@ def retrieve(store,now):
     data=json.loads(raw)
     if data.get('error') or data.get('exceededTransferLimit') or len(data.get('features',[]))!=2:raise ValueError('Incomplete official municipality response')
     warnings=[]
-    if {f['properties'].get('NAME') for f in data['features']}!=NAMES:warnings.append('Unexpected municipality labels')
+    if {str(f['properties'].get('NAME')).title() for f in data['features']}!=NAMES:warnings.append('Unexpected municipality labels')
     from shapely.geometry import shape,Point
     for f in data['features']:
-        geometry=shape(f['geometry']);name=f['properties']['NAME']
+        geometry=shape(f['geometry']);name=f['properties']['NAME'].title()
         sample=(-80.038,40.325) if name=='Bethel Park' else (-79.962,40.333)
         if not geometry.is_valid or not geometry.covers(Point(*sample)):warnings.append('Review geometry: '+str(name))
     result={'source':'https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries','download_url':url,'retrieved_at':now.isoformat(),'sha256':hashlib.sha256(raw).hexdigest(),'geojson':data,'source_failures':failures,'validation_warnings':warnings}
