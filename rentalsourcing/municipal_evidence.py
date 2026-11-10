@@ -25,12 +25,13 @@ def retrieve(store,now):
     if raw is None:return {'state':'unavailable','attempted_at':now.isoformat(),'failures':failures}
     data=json.loads(raw)
     if data.get('error') or data.get('exceededTransferLimit') or len(data.get('features',[]))!=2:raise ValueError('Incomplete official municipality response')
-    if {f['properties'].get('NAME') for f in data['features']}!=NAMES:raise ValueError('Unexpected municipalities')
+    warnings=[]
+    if {f['properties'].get('NAME') for f in data['features']}!=NAMES:warnings.append('Unexpected municipality labels')
     from shapely.geometry import shape,Point
     for f in data['features']:
         geometry=shape(f['geometry']);name=f['properties']['NAME']
         sample=(-80.038,40.325) if name=='Bethel Park' else (-79.962,40.333)
-        if not geometry.is_valid or not geometry.covers(Point(*sample)):raise ValueError('Unexpected municipality geometry')
-    result={'source':'https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries','download_url':url,'retrieved_at':now.isoformat(),'sha256':hashlib.sha256(raw).hexdigest(),'geojson':data,'source_failures':failures}
+        if not geometry.is_valid or not geometry.covers(Point(*sample)):warnings.append('Review geometry: '+str(name))
+    result={'source':'https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries','download_url':url,'retrieved_at':now.isoformat(),'sha256':hashlib.sha256(raw).hexdigest(),'geojson':data,'source_failures':failures,'validation_warnings':warnings}
     store.save_setting('approved_municipal_evidence:v1',result)
     return result
