@@ -13,7 +13,7 @@ def billing_window(settings, now=None):
             anchor=anchor.astimezone(dt.timezone.utc)
         except (ValueError,TypeError):
             raise ValueError('BILLING_CYCLE_ANCHOR must be the provider cycle start with timezone') from None
-    elif settings.approval_mode=='billing_cycle':
+    elif settings.approval_mode in {'billing_cycle','monthly_budget'}:
         raise ValueError('BILLING_CYCLE_ANCHOR is required for recurring subscription approval')
     else:
         anchor=dt.datetime(2000,1,settings.billing_day,tzinfo=dt.timezone.utc)
@@ -28,7 +28,7 @@ def billing_window(settings, now=None):
 
 def cycle_key(settings, now=None):
     start,_,_=billing_window(settings,now)
-    return 'cycle:'+ (start.isoformat() if settings.approval_mode=='billing_cycle' else start.date().isoformat())
+    return 'cycle:'+ (start.isoformat() if settings.approval_mode in {'billing_cycle','monthly_budget'} else start.date().isoformat())
 
 
 def future_listing_days(now,end):

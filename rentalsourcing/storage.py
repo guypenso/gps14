@@ -124,26 +124,26 @@ class Store:
     def reserve_api(self,settings,now=None,*,tax_request=False):
         from .billing import cycle_key, billing_window, future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
-        if not settings.approval_id or settings.approved_requests<=0:raise BudgetExceeded('No approved live API allowance')
+        if settings.approval_mode!='monthly_budget' and (not settings.approval_id or settings.approved_requests<=0):raise BudgetExceeded('No approved live API allowance')
         start,end,anchor=billing_window(settings,now)
-        if settings.approval_mode=='billing_cycle' and now<anchor:
+        if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:
             raise BudgetExceeded('Approved subscription cycle has not started')
         periods=[(now.strftime('day:%Y-%m-%d'),settings.per_day),
                  (cycle_key(settings,now),settings.per_month),
                  ('approval:'+settings.approval_id,settings.approved_requests)]
         with self.transaction():
             if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
-            if settings.approval_mode=='billing_cycle':
+            if settings.approval_mode in {'billing_cycle','monthly_budget'}:
                 # Seed the already consumed account usage once, without resetting
                 # persisted app usage when an approval ID or process changes.
                 baseline=settings.billing_baseline if start==anchor else 0
                 self.execute('INSERT INTO usage VALUES (?,?) ON CONFLICT(period) DO UPDATE SET used=CASE WHEN usage.used<excluded.used THEN excluded.used ELSE usage.used END',
                              (cycle_key(settings,now),baseline))
                 # The cycle is incremented once; changing an approval cannot reset it.
-                periods=[periods[0],(cycle_key(settings,now),min(settings.per_month,settings.approved_requests))]
+                periods=[periods[0],(cycle_key(settings,now),settings.request_ceiling)]
                 if tax_request:
                     future_days=future_listing_days(now,end)
-                    if min(settings.per_month,settings.approved_requests)-self.count_usage(cycle_key(settings,now))<=future_days*settings.listing_requests_per_day:
+                    if settings.request_ceiling-self.count_usage(cycle_key(settings,now))<=future_days*settings.listing_requests_per_day:
                         raise BudgetExceeded('Remaining API allowance reserved for future daily listing scans')
             elif settings.approval_mode=='rolling_32_days':
                 periods=periods[:2]
@@ -165,13 +165,13 @@ class Store:
         now=now or dt.datetime.now(dt.timezone.utc)
         cycle,end,anchor=billing_window(settings,now)
         used=self.count_usage(cycle_key(settings,now))
-        if settings.approval_mode=='billing_cycle':
+        if settings.approval_mode in {'billing_cycle','monthly_budget'}:
             if cycle==anchor:used=max(used,settings.billing_baseline)
             approval_used=used
         else:
             approval_used=self.rolling_usage(now) if settings.approval_mode=='rolling_32_days' else self.count_usage('approval:'+settings.approval_id)
-        remaining=max(0,min(settings.per_month-used,settings.approved_requests-approval_used))
-        if settings.approval_mode=='billing_cycle' and now<anchor:remaining=0
+        remaining=max(0,settings.request_ceiling-used) if settings.approval_mode=='monthly_budget' else max(0,min(settings.per_month-used,settings.approved_requests-approval_used))
+        if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None
         if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'

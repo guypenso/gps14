@@ -60,14 +60,14 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         feedback_ok=False;error={'category':'review_configuration_missing','retryable':False};component(store,'review_feedback','failed',now=clock(),pending=1,error=error);incident(store,'review_feedback',error,now=clock())
 
     if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
-    elif settings.approval_mode not in {'billing_cycle','one_time'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
+    elif settings.approval_mode not in {'billing_cycle','one_time','monthly_budget'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     else:
         # Reserve before EVERY wire attempt using existing atomic DB counters.
-        effective=replace(settings,per_month=min(50,settings.per_month),retries=0,max_pages=1)
+        effective=replace(settings,retries=0) if settings.approval_mode=='monthly_budget' else replace(settings,per_month=min(50,settings.per_month),retries=0,max_pages=1)
         allowance=store.scheduled_allowance(effective,clock())
         if allowance<=0:stats=dict(discovery_state='skipped_budget_exhausted',partial=True)
         else:
-            effective=replace(effective,per_run=min(4,allowance))
+            effective=replace(effective,per_run=min(settings.per_run if settings.approval_mode=='monthly_budget' else 4,allowance))
             client=Client(store,effective,clock,opener)
             try:
                 scan_job=scheduled_job(store,day)
@@ -126,18 +126,20 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener)
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
         scan=result.get('scan','unknown');last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last[0]) if last else {}
-        stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
+        stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') or stats.get('discovery_partial') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
         for name in ('listing_processing','eligibility_filtering','property_storage','price_history'):
             stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
         tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
         stage(store,day,'tax_verification','partial' if tax else 'success',clock(),pending=tax,expected=True,coverage='Pending evidence remains unverified; API approval limits preserved')
         stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent') else 1)
         status=finish(store,day,clock());result['workflow_status']=status;result['email_status']=result.get('status')
+        from .price_sync import queue_counts
+        result['price_queue']=queue_counts(store)
         current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+len([i for i in current['incidents'] if i['state']=='open'])
         try:publish(store,clock(),opener=opener)
         except Exception as exc:event('operational_health_deferred',error_type=type(exc).__name__)
         result['workflow_status']=finish(store,day,clock())
-        current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_price_observations']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
+        current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
         return result
     except Exception as exc:
         from .sync_runtime import classify

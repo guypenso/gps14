@@ -28,18 +28,22 @@ class Settings:
     email_to: str = ''
     email_from: str = ''
     boundary_file: str = 'data/pittsburgh.geojson'
+    monthly_budget_requests: int = 0
+    provider_included_requests: int = 0
 
     def __post_init__(self):
         for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout','listing_requests_per_day','negative_tax_cache_hours'):
             if getattr(self,name) <= 0: raise ValueError(f'{name} must be positive')
-        if self.approval_mode not in {'one_time','rolling_32_days','billing_cycle'}:raise ValueError('Invalid API approval mode')
+        if self.approval_mode not in {'one_time','rolling_32_days','billing_cycle','monthly_budget'}:raise ValueError('Invalid API approval mode')
         if self.approved_requests < 0 or self.page_size > 500 or self.retries not in range(3):
             raise ValueError('Invalid request limits')
         if not 1 <= self.billing_day <= 28: raise ValueError('BILLING_DAY must be 1..28 (use 28 for later billing dates conservatively)')
-        if self.approval_mode=='billing_cycle':
+        if self.approval_mode in {'billing_cycle','monthly_budget'}:
             from .billing import billing_window
             billing_window(self)
             if self.billing_baseline < 0:raise ValueError('BILLING_USAGE_BASELINE must include current account usage before activation')
+        if self.approval_mode=='monthly_budget' and min(self.monthly_budget_requests,self.provider_included_requests)<=0:
+            raise ValueError('Monthly budget and verified provider included quota are required; overages are disabled')
         if self.email_enabled and (self.environment != 'production' or not self.email_to or not self.email_from):
             raise ValueError('Email requires production environment and sender/recipient')
 
@@ -53,12 +57,16 @@ class Settings:
           'retries':'NETWORK_RETRIES','billing_day':'BILLING_DAY','billing_anchor':'BILLING_CYCLE_ANCHOR',
           'billing_baseline':'BILLING_USAGE_BASELINE','listing_requests_per_day':'LISTING_REQUESTS_PER_DAY',
           'negative_tax_cache_hours':'NEGATIVE_TAX_CACHE_HOURS','email_approval_id':'EMAIL_APPROVAL_ID','environment':'APP_ENV',
-          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE'}
+          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE','monthly_budget_requests':'MONTHLY_API_REQUEST_BUDGET','provider_included_requests':'PROVIDER_INCLUDED_REQUESTS'}
         defaults=cls(); values={}
         for field,env in mapping.items():
             default=getattr(defaults,field)
             values[field]=int(os.environ[env]) if isinstance(default,int) and env in os.environ else os.getenv(env,default)
         return cls(**values,enabled=os.getenv('ENABLE_RENTCAST')=='true',email_enabled=os.getenv('ENABLE_EMAIL')=='true')
+
+    @property
+    def request_ceiling(self):
+        return min(self.per_month,self.monthly_budget_requests,self.provider_included_requests) if self.approval_mode=='monthly_budget' else min(self.per_month,self.approved_requests)
 
     def public(self):
         data=asdict(self)

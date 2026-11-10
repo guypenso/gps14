@@ -47,6 +47,7 @@ def snapshot(store,now=None):
  inventory_jobs=[json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE ? OR name LIKE ?",('stored-review-inventory:%','listing-contact-enrichment:%')).fetchall()]
  inventory_pending=sum(not (j.get('done') or j.get('synced_at')) for j in inventory_jobs)
  price_pending=sum(not r.get('synced_at') for r in prices)
+ incident(store,'price_backpressure',None if price_pending<=1000 else {'category':'price_queue_high_water','retryable':True},now=now,resolved=price_pending<=1000)
  total_pending=pending_reports+price_pending+inventory_pending
  progress=get(store,'health_backlog_progress',{})
  delivered=max((c.get('last_success_at','') for c in comps if c['component'] in ('property_sync','price_sync','inventory_sync','listing_enrichment') and c.get('processed',0)>0),default='')
@@ -189,6 +190,8 @@ def recover(store,boundary,now=None,opener=None):
 
 def start_watchdog(url,boundary):
  """Existing dashboard workers, no new service. Session lock prevents overlap with scans."""
+ from .price_sync import start_worker
+ start_worker(url)
  enabled=os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true'
  logging.getLogger(__name__).warning('RELIABILITY_WORKER_STARTUP '+json.dumps({'enabled':enabled,'build_sha':os.getenv('RENDER_GIT_COMMIT')}))
  if not enabled:return
