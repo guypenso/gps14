@@ -181,6 +181,9 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
             if d.get('action')=='listing_stats':
                 from .listing_intake import summary as listing_summary
                 result={'summary':listing_summary(current)}
+            elif d.get('action')=='municipal_boundaries':
+                from .municipal_evidence import retrieve
+                result=retrieve(current,clock())
             elif d.get('action')=='listing_audit':
                 from .listing_intake import audit as listing_audit
                 result=listing_audit(current,boundary,clock())
