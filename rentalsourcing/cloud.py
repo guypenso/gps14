@@ -36,9 +36,15 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     digest=Digest(store,boundary,settings,clock,opener)
     old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if old:
+        # A previously prepared daily email must not suppress later enrichment
+        # recovery. This pass is cache-only unless the separate monthly rent
+        # budget and feature switch have both been activated.
+        from .rental_intelligence import enrich as enrich_rent
+        rent_client=Client(store,settings,clock,opener) if settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' else None
+        rental_intelligence=enrich_rent(store,boundary,settings,clock(),rent_client)
         result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
         if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
-        return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=0)
+        return dict(status=result,outbox_id=old[0],scan='existing_daily_outbox_no_rescan',requests=rent_client.count if rent_client else 0,rental_intelligence=rental_intelligence)
     stats={};failure=None;client=None;feedback_ok=True
     # Human decisions are read before enrichment. Failed feedback keeps discovery
     # available while deferring paid tax work conservatively.

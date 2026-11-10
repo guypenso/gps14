@@ -102,8 +102,14 @@ def evaluate(store,boundary,records,now,opener=None):
             cards[-1].update(annual_tax=tax['annual'],tax_year=tax['year'],tax_status='provider_verified',tax_source='RentCast cached Property Records',tax_fetched_at=fetched,verified_at=now.isoformat())
             cards[-1]['reasons']=[reason for reason in cards[-1]['reasons'] if reason!='tax_verification_required']
         if cards and cards[-1]['source_id']==identity:
-            from .rental_intelligence import cached_estimate
-            cards[-1]['rent_estimate']=cached_estimate(store,p,now)
+            from .rental_intelligence import cached_estimate,record_job
+            estimate=cached_estimate(store,p,now)
+            cards[-1]['rent_estimate']=estimate
+            if state=='Candidate' and not deferred:
+                from .config import Settings
+                import os
+                approved=Settings.from_env().approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true'
+                record_job(store,p,'Completed' if estimate else 'Pending' if approved else 'Budget Blocked',now,None if estimate else 'awaiting_scheduled_rent_estimate' if approved else 'monthly_rent_budget_not_approved_or_inactive')
             cards[-1]['eligibility_path']=tax.get('eligibility_path') if tax else None
         if cards and cards[-1]['source_id']==identity and p.get('listingDescription'):
             cards[-1]['listing_info']={'source':'RealScout','source_id':identity,'address':p['formattedAddress'],'street_address':p['addressLine1'],'zip_code':p['zipCode'],'retrieved_at':observed,'description':p['listingDescription'],'listing_status':p['status'],'agents':[]}

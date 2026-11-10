@@ -7,6 +7,17 @@ def identity(p):
     from .offmarket import street_key
     return street_key(p)+'|'+str(p.get('zipCode') or p.get('zip_code') or '').split('-')[0]
 def key(p):return 'rentcast-long-term:'+hashlib.sha256(identity(p).encode()).hexdigest()
+def job_key(p):return 'rent-enrichment:'+hashlib.sha256(identity(p).encode()).hexdigest()
+
+def record_job(store,p,state,now,reason=None,next_at=None):
+    """One durable, identity-scoped state; never itself authorizes a paid call."""
+    previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
+    old=json.loads(previous[0]) if previous else {}
+    value={'source_id':p.get('id'),'subject_identity':identity(p),'state':state,'reason':reason,
+           'updated_at':now.isoformat(),'next_at':next_at,'attempts':old.get('attempts',0)+(state=='Processing')}
+    if old.get('state')!=state or old.get('reason')!=reason or old.get('next_at')!=next_at or old.get('source_id')!=p.get('id'):
+        store.save_setting(job_key(p),value)
+    return value
 
 def normalize(raw,p,observed_at,now):
     try:
@@ -58,31 +69,47 @@ def enrich(store,boundary,settings,now,client=None):
             records.append((source_id,p,row.get('observed_at','')));known.add(source_id)
     for source_id,p,observed in records:
         if review_deferred(source_id,store) or verification(p,boundary)[0]!='Candidate':continue
-        if cached_estimate(store,p,now):counts['cached']+=1;continue
-        if observed<(now-dt.timedelta(hours=24)).isoformat():continue
+        if cached_estimate(store,p,now):counts['cached']+=1;record_job(store,p,'Completed',now);continue
+        previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
+        queued=json.loads(previous[0]).get('state') if previous else None
+        # A budget-blocked discovery remains eligible for a bounded future run
+        # after approval; the daily 24-hour intake window must not erase it.
+        if observed<(now-dt.timedelta(hours=24)).isoformat() and queued not in {'Budget Blocked','Pending','Retry Scheduled'}:continue
+        if observed<(now-dt.timedelta(days=30)).isoformat():
+            record_job(store,p,'Awaiting Evidence',now,'listing_observation_stale')
+            continue
         first=store.execute('SELECT payload FROM settings WHERE name=?',('first_discovery:'+source_id,)).fetchone()
         high_tax=store.get_tax(source_id,now.isoformat())
         from .core import tax_verification
         potential_exception=high_tax and tax_verification(high_tax[0],now.date())[2]=='annual_tax_too_high'
         candidates.append((0 if potential_exception or first and json.loads(first[0]).get('at','')>=(now-dt.timedelta(days=1)).isoformat() else 1,p))
     permitted=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' and settings.approval_mode=='monthly_budget' and client is not None
-    if not permitted:counts['blocked_by_budget']=len(candidates);return counts
+    if not permitted:
+        for _,p in candidates:record_job(store,p,'Budget Blocked',now,'monthly_rent_budget_not_approved_or_inactive')
+        counts['blocked_by_budget']=len(candidates);return counts
     end=billing_window(settings,now)[1];reserve=future_listing_days(now,end)*settings.listing_requests_per_day
     for _,p in sorted(candidates,key=lambda x:(x[0],x[1]['id']))[:min(3,int(os.getenv('RENT_ESTIMATE_REQUESTS_PER_RUN','1')))]:
-        if store.budget_health(settings,now)['remaining']<=reserve:counts['blocked_by_budget']+=1;break
+        if store.budget_health(settings,now)['remaining']<=reserve:
+            for _,remaining in candidates:
+                if not cached_estimate(store,remaining,now):record_job(store,remaining,'Budget Blocked',now,'listing_request_reserve')
+            counts['blocked_by_budget']=len(candidates)-counts['retrieved'];break
         old=store.execute('SELECT payload FROM settings WHERE name=?',('rent-attempt:'+key(p),)).fetchone()
-        if old and json.loads(old[0]).get('next_at','')>now.isoformat():continue
+        if old and json.loads(old[0]).get('next_at','')>now.isoformat():record_job(store,p,'Retry Scheduled',now,'provider_retry_cooldown',json.loads(old[0])['next_at']);continue
         store.save_setting('rent-attempt:'+key(p),{'next_at':(now+dt.timedelta(days=1)).isoformat()})
+        record_job(store,p,'Processing',now)
         before=client.count
         try:
             data,_=client.get('/avm/rent/long-term',parameters(p),cache=True)
             value=normalize(data,p,client.last_fetched_at,now)
-            if not value:counts['invalid']+=1;continue
-            store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1
+            if not value:counts['invalid']+=1;record_job(store,p,'Awaiting Evidence',now,'provider_response_failed_property_or_comparable_validation');continue
+            store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1;record_job(store,p,'Completed',now)
             tax=store.get_tax(p['id'],now.isoformat())
             if tax and tax[1]==LIVE and tax[0].get('id')==p['id']:
                 from .core import tax_verification
                 state,_,reason=tax_verification(tax[0],now.date());store.set_verification(p['id'],state,[reason] if reason else [])
-        except Exception as exc:store.save_setting('rent-attempt:'+key(p),{'next_at':(now+dt.timedelta(days=1)).isoformat(),'error':type(exc).__name__})
+        except Exception as exc:
+            retry=(now+dt.timedelta(days=1)).isoformat()
+            store.save_setting('rent-attempt:'+key(p),{'next_at':retry,'error':type(exc).__name__})
+            record_job(store,p,'Retry Scheduled',now,type(exc).__name__,retry)
         finally:counts['paid_calls']+=client.count-before
     return counts

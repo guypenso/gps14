@@ -3,7 +3,7 @@ from conftest import listing,taxes
 from rentalsourcing.collector import LIVE
 from rentalsourcing.core import tax_verification,verification
 from rentalsourcing.geography import load_boundary
-from rentalsourcing.rental_intelligence import normalize,cached_estimate,key,enrich
+from rentalsourcing.rental_intelligence import normalize,cached_estimate,key,job_key,enrich
 
 def avm(p,rent=2400):
     return {'rent':rent,'rentRangeLow':2200,'rentRangeHigh':2600,'subjectProperty':p,
@@ -92,3 +92,26 @@ def test_unapproved_avm_calls_never_reach_provider(store,clock,settings,provider
     with pytest.raises(PermissionError,match='activated monthly budget'):
         client.get('/avm/rent/long-term',{'address':'FICTIONAL TEST ADDRESS'})
     assert not provider.calls and client.count==0
+
+def test_new_candidate_persists_budget_block_and_resumes_only_after_approved_activation(store,boundary,clock,settings,monkeypatch):
+    from dataclasses import replace
+    from conftest import Response
+    from rentalsourcing.collector import Client
+    p=listing('avm-budget-fixture',addressLine1='100 Fixture Ave')
+    store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    blocked=enrich(store,boundary,settings,clock())
+    row=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
+    assert blocked['blocked_by_budget']==1 and json.loads(row[0])['state']=='Budget Blocked'
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    clock.advance(days=2)
+    approved=replace(settings,approval_mode='monthly_budget',billing_anchor='2026-10-01T00:00:00Z',billing_baseline=0,monthly_budget_requests=1000,provider_included_requests=1000)
+    class Provider:
+        calls=0
+        def open(self,request,timeout=None):
+            self.calls+=1
+            return Response(avm(p))
+    provider=Provider();client=Client(store,approved,clock,provider,lambda _:None)
+    monkeypatch.setenv('ENABLE_RENT_ESTIMATES','true')
+    result=enrich(store,boundary,approved,clock(),client)
+    assert result['retrieved']==1 and provider.calls==1
+    assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()[0])['state']=='Completed'
