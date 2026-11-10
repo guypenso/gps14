@@ -7,7 +7,7 @@ from .request import NoRedirect
 def _refresh(store,now=None,opener=None,config=None):
     config=config or review_configuration() or configuration()
     if not config:return {'state':'disabled','decisions':0}
-    url,key,token=config;url=url.rsplit('/',1)[0]+('/review-classifications' if url.endswith('/review-sync') else '/classifications')
+    url,key,token=config;url=url.rsplit('/',1)[0]+('/review-classifications' if url.endswith(('/review-sync','/review-reports')) else '/classifications')
     opener=opener or urllib.request.build_opener(NoRedirect);now=now or dt.datetime.now(dt.timezone.utc)
     cursor=None;seen=set();records=[]
     for page in range(20):
