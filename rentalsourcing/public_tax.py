@@ -17,12 +17,14 @@ def norm(text):
 def municipality(value):
     text=norm(value)
     if text in {'bellevue','bellevue boro','bellevue borough'}:return 'Bellevue'
+    if text in {'pleasant hills','pleasant hills borough','pleasant hills boro'}:return 'Pleasant Hills'
+    if text in {'bethel park','bethel park municipality','bethel park boro'}:return 'Bethel Park'
     if text=='pittsburgh' or ('ward' in text and text.endswith('pittsburgh')):return 'Pittsburgh'
     return None
 
 
 def listing_key(p,boundary):
-    muni='Bellevue' if boundary.bellevue.contains(p) else 'Pittsburgh'
+    muni=municipality(boundary.municipality(p)) if hasattr(boundary,'municipality') else 'Bellevue' if boundary.bellevue.contains(p) else 'Pittsburgh'
     street=norm(p.get('addressLine1') or str(p.get('formattedAddress','')).split(',')[0])
     unit=norm(p.get('addressLine2'))
     if unit and not unit.startswith('unit '):unit='unit '+unit

@@ -23,7 +23,7 @@ def reevaluate(store,boundary,now,*,atomic=True):
                     state,_,reason=tax_verification(cached[0],now.date());reasons=[reason] if reason else []
             if state!=old_state or reasons!=json.loads(old_reasons):
                 store.set_verification(identity,state,reasons);changed+=1
-        store.save_setting('criteria',dict(city='Pittsburgh',additional_municipality='Bellevue Borough',zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
     return changed
 
 
@@ -33,9 +33,15 @@ def reconcile_geography(store,boundary,now):
     key='geography_reconciliation:'+POLICY
     prior=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
     if prior:return json.loads(prior[0])
-    affected={};newly_excluded=0;previously_rejected=0;managed=0
+    affected={};newly_excluded=0;previously_rejected=0;managed=0;expanded=[];municipal_counts={name:0 for name in boundary.additional_municipalities}
+    from .tax_backlog import review_deferred
     for identity,payload,state in store.execute('SELECT id,payload,state FROM properties').fetchall():
         p=json.loads(payload);geo,reason=boundary.evaluate(p)
+        municipality=boundary.municipality(p)
+        if municipality in municipal_counts:
+            municipal_counts[municipality]+=1
+            record=store.get_property(identity)
+            if verification(p,boundary)[0]=='Candidate' and recent_timestamp(record['observed_at'],now) and not review_deferred(identity,store):expanded.append(identity)
         if geo!='Rejected' or reason not in {s.replace('-','_')+'_neighborhood' for s in boundary.pink_regions}:continue
         affected[reason]=affected.get(reason,0)+1
         if state=='Rejected':previously_rejected+=1
@@ -46,6 +52,6 @@ def reconcile_geography(store,boundary,now):
             managed+=d.get('status') in ('pursue','monitor','missed_under_contract') or bool(d.get('contract_state'))
     with store.transaction():
         changed=reevaluate(store,boundary,now,atomic=False)
-        result=dict(policy=POLICY,at=now.isoformat(),affected=sum(affected.values()),by_reason=affected,newly_excluded=newly_excluded,previously_rejected=previously_rejected,managed_preserved=managed,records_updated=changed,provider_calls=0)
+        result=dict(policy=POLICY,at=now.isoformat(),affected=sum(affected.values()),by_reason=affected,newly_excluded=newly_excluded,previously_rejected=previously_rejected,managed_preserved=managed,records_updated=changed,provider_calls=0,municipal_stored=municipal_counts,new_reviewable_ids=expanded,expanded_reviewable=len(expanded))
         store.save_setting(key,result)
     return result

@@ -41,7 +41,7 @@ class Client:
             if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(?)',(lock,))
 
     def _get(self,path,params=None,cache=True):
-        if path!='/listings/sale' and not path.startswith('/properties/'):
+        if path not in ('/listings/sale','/avm/rent/long-term') and not path.startswith('/properties/'):
             raise ValueError('Unsupported RentCast endpoint')
         query=urllib.parse.urlencode(sorted((params or {}).items()))
         url='https://api.rentcast.io/v1'+path+('?' + query if query else '')
@@ -51,6 +51,8 @@ class Client:
             if saved and saved[1]==LIVE:
                 body=saved[0];self.cache_hits+=1;self.last_fetched_at=body['fetched_at']
                 return self.wrap(body['data']),body['total']
+        if path=='/avm/rent/long-term' and (self.settings.approval_mode!='monthly_budget' or os.getenv('ENABLE_RENT_ESTIMATES','false').lower()!='true'):
+            raise PermissionError('New rental estimates require activated monthly budget and explicit enrichment enablement')
         deferred=self.store.execute('SELECT retry_after FROM api_attempts WHERE request_key=?',(key,)).fetchone()
         if deferred and deferred[0]>now.isoformat():raise RequestDeferred('Identical API request deferred after an interrupted or failed attempt')
         if not self.settings.enabled:raise PermissionError('Live RentCast collection disabled')
@@ -71,7 +73,7 @@ class Client:
                     if response.status!=200:raise ValueError('Unexpected HTTP status')
                     data=json.load(response);total=response.headers.get('X-Total-Count')
                     if path=='/listings/sale' and not isinstance(data,list):raise ValueError('Listings must be a list')
-                    if path.startswith('/properties/') and not isinstance(data,dict):raise ValueError('Property must be an object')
+                    if (path.startswith('/properties/') or path=='/avm/rent/long-term') and not isinstance(data,dict):raise ValueError('Property must be an object')
                 self.last_fetched_at=self.clock().isoformat()
                 if cache:
                     expires=self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale' else tax_expiry(data,self.clock(),self.settings)

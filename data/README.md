@@ -86,3 +86,22 @@ membership; ZIP codes, street names and descriptive neighborhood mentions do not
 The same snapshot selections are bundled into PENTEN's Worker. Stored source
 records are reevaluated once per geographic policy version with a durable audit;
 manual review settings, listing payloads and price history are unchanged.
+
+## Approved expansion, November 10, 2026
+
+Only Pleasant Hills Borough and Bethel Park Municipality are added. Their exact
+named features were retrieved through the official Allegheny County municipal
+FeatureServer, then validated offline as valid geometries with County control
+IDs 003440 and 003045. Per-feature checksums and original-response provenance
+are stored beside the polygons. Neighboring municipalities and all other
+counties remain excluded. Discovery may use a bounding-circle query; only the
+approved municipal polygons pass backend filtering. Existing ZIP and Pittsburgh
+neighborhood exclusions remain in force.
+
+The standard verified-tax rule remains annual taxes + $100 <= $2,400. A current,
+property-matched RentCast long-term AVM above $2,300 can override only that tax
+ceiling. Unknown/estimated taxes remain Pending Verification. Estimates expire
+after 30 days, require a matching subject, range and at least three supplied
+comparables, and are labeled estimates. New AVM requests require explicitly
+enabled rent enrichment and an activated monthly budget, and preserve reserved
+future listing calls. The current legacy API allowance is not increased.

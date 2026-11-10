@@ -31,7 +31,7 @@ def test_observed_neighborhood_matrix_keeps_sources_and_unknowns_separate(store,
     assert result['unlocated_source_identities']['realscout'] == 1
     assert result['outside_approved_geography']['rentcast'] == 1
     assert result['market_denominator'] is None and result['market_coverage_percent'] is None
-    assert len(result['neighborhoods']) == 91
+    assert len(result['neighborhoods']) == 93
 
 
 def test_unverified_polygon_export_cannot_supply_coverage(store, boundary, tmp_path):

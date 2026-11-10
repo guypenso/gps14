@@ -72,6 +72,10 @@ def snapshot(store, identity, day, items, stats, now, boundary=None):
             listing_observed_at=observed, verified_at=entry.get('verified_at'),
             tax_fetched_at=entry.get('tax_fetched_at')))
         from .listing_enrichment import evidence
+        from .rental_intelligence import cached_estimate
+        rent=cached_estimate(store,p,now)
+        if rent:opportunities[-1]['rent_estimate']=rent
+        if tax and tax.get('eligibility_path'):opportunities[-1]['eligibility_path']=tax['eligibility_path']
         info=evidence(p,observed or now.isoformat())
         if info['condominium_evidence']['state']!='clear':opportunities[-1]['condominium_evidence']=info['condominium_evidence']
         if info.get('description') or info.get('insight_facts') or info['turnkey_evidence']['classified'] or info['agents'] or 'zillow.com/' in str(info.get('zillow_url') or ''):opportunities[-1]['listing_info']=info

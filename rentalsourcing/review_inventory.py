@@ -37,13 +37,16 @@ def select(store,boundary,now,*,source_ids=None,include_verified=False):
                 verified_tax=tax;verified_fetched=cached[2]
         fresh=recent_timestamp(observed,now);counts['fresh' if fresh else 'stale']+=1
         first=store.execute('SELECT MIN(observed_at) FROM price_history WHERE property_id=?',(identity,)).fetchone()[0] or observed
-        muni='Bellevue Borough' if boundary.bellevue.contains(p) else 'Pittsburgh'
+        muni=boundary.municipality(p) if hasattr(boundary,'municipality') else 'Bellevue Borough' if boundary.bellevue.contains(p) else 'Pittsburgh'
         neighborhood='Brighton Heights' if boundary.brighton.contains(p) else 'Spring Hill-City View' if boundary.spring_hill.contains(p) else None
         from .condominium import evidence as condo_evidence
         card=dict(condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),source_id=identity,source='RentCast',source_label='RentCast Sale Listings',address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=None,tax_year=None,tax_status='pending_verification',qualification='pending_verification',section='pending_verification',previous_price=previous_price(store,identity,p.get('price')),listing_url=listing_link(p),reasons=['tax_verification_required']+([] if fresh else ['stale_listing_status_requires_refresh']),discovered_at=first,updated_at=observed,listing_observed_at=observed,verified_at=None,tax_fetched_at=None,last_reported_status=p.get('status'),municipality=muni,neighborhood=neighborhood)
         if verified_tax and fresh:
             card.update(annual_tax=verified_tax['annual'],tax_year=verified_tax['year'],tax_status='provider_verified',tax_source='RentCast Property Records',qualification='verified',section='new',reasons=[],verified_at=now.isoformat(),tax_fetched_at=verified_fetched)
         from .listing_enrichment import evidence
+        from .rental_intelligence import cached_estimate
+        card['rent_estimate']=cached_estimate(store,p,now)
+        card['eligibility_path']=verified_tax.get('eligibility_path') if verified_tax and fresh else None
         card['listing_info']=evidence(p,observed)
         cards.append((card,p));counts['actionable']+=1
     return cards,counts

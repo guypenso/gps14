@@ -101,6 +101,10 @@ def evaluate(store,boundary,records,now,opener=None):
             # cached annual-tax evidence. Keep these independent evidence states.
             cards[-1].update(annual_tax=tax['annual'],tax_year=tax['year'],tax_status='provider_verified',tax_source='RentCast cached Property Records',tax_fetched_at=fetched,verified_at=now.isoformat())
             cards[-1]['reasons']=[reason for reason in cards[-1]['reasons'] if reason!='tax_verification_required']
+        if cards and cards[-1]['source_id']==identity:
+            from .rental_intelligence import cached_estimate
+            cards[-1]['rent_estimate']=cached_estimate(store,p,now)
+            cards[-1]['eligibility_path']=tax.get('eligibility_path') if tax else None
         if cards and cards[-1]['source_id']==identity and p.get('listingDescription'):
             cards[-1]['listing_info']={'source':'RealScout','source_id':identity,'address':p['formattedAddress'],'street_address':p['addressLine1'],'zip_code':p['zipCode'],'retrieved_at':observed,'description':p['listingDescription'],'listing_status':p['status'],'agents':[]}
         result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred,
@@ -175,6 +179,10 @@ def audit(store,boundary,now):
     validation=store.execute('SELECT payload FROM settings WHERE name=?',('realscout_scheduler_validation_v1',)).fetchone()
     from .investment_policy import thresholds
     stats=summary(store);tax_changes=[]
+    from .geography import POLICY
+    policy_row=store.execute('SELECT payload FROM settings WHERE name=?',('geography_reconciliation:'+POLICY,)).fetchone()
+    stats['geographic_expansion']=json.loads(policy_row[0]) if policy_row else None
+    stats['rental_estimate_cache_records']=store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0]
     for identity,raw,observed,tax_raw,source in store.execute('SELECT p.id,p.payload,p.observed_at,t.payload,t.source FROM properties p JOIN tax_history t ON p.id=t.property_id WHERE t.expires_at>?',(now.isoformat(),)).fetchall():
         record=json.loads(tax_raw)
         if source!=LIVE or record.get('id')!=identity or demo_marked(record):continue

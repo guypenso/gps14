@@ -1,0 +1,11 @@
+{
+  "source": "https://data.wprdc.org/dataset/allegheny-county-municipal-boundaries",
+  "download_url": "https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/AlleghenyCountyMunicipalBoundaries/FeatureServer/0/query?where=NAME+IN+%28%27Pleasant+Hills%27%2C%27Bethel+Park%27%29&outFields=%2A&outSR=4326&returnGeometry=true&f=geojson",
+  "retrieved_at": "2026-11-10T14:58:14.710293+00:00",
+  "original_response_sha256": "7e685bc1228247735cfee05921f13dbefec3032d445b99d2a07455019fa38684",
+  "county": "Allegheny",
+  "state": "Pennsylvania",
+  "name": "PLEASANT HILLS",
+  "validation": "Exact named feature from official Allegheny County municipal layer; geometry independently checked offline.",
+  "sha256": "7fec3a05732b01fafceb7473a4dd937d347abaaccd9daa874422ae935864e36b"
+}

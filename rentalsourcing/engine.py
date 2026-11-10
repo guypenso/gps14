@@ -14,9 +14,9 @@ from .storage import BudgetExceeded
 from .telemetry import event
 
 class Engine:
-    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None,allow_paid_tax=True):
+    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None,allow_paid_tax=True,query_parameters=None):
         self.store=store;self.boundary=boundary;self.client=client;self.settings=settings
-        self.allow_paid_tax=allow_paid_tax
+        self.allow_paid_tax=allow_paid_tax;self.query_parameters=query_parameters
         self.on_discovery_complete=on_discovery_complete
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
 
@@ -110,7 +110,7 @@ class Engine:
             pages=0
             while not collection_done and pages<self.settings.max_pages:
                 before_requests=getattr(self.client,'count',0)
-                rows,total=self.client.get('/listings/sale',dict(listing_parameters(self.boundary),limit=self.settings.page_size,offset=offset))
+                rows,total=self.client.get('/listings/sale',dict(self.query_parameters or listing_parameters(self.boundary),limit=self.settings.page_size,offset=offset))
                 stats['discovery_state']='fresh' if getattr(self.client,'count',0)>before_requests else 'cached'
                 stats['listing_observed_at']=getattr(self.client,'last_fetched_at',None)
                 if not isinstance(rows,list):raise ValueError('Listings response must be a list')
@@ -221,6 +221,8 @@ class Engine:
                 if not isinstance(record,dict) or record.get('id')!=identity or demo_marked(record):
                     store.set_verification(identity,'Pending Verification',['tax_identity_or_source_mismatch'])
                     continue
+                rent_saved=store.get_tax(identity,self.clock().isoformat())
+                if rent_saved:record=rent_saved[0]
                 state,tax,reason=tax_verification(record,self.clock().date())
                 if source!=LIVE:state,tax,reason='Pending Verification',None,'non_live_tax_source'
                 with store.transaction():

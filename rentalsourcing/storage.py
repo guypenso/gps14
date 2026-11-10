@@ -214,7 +214,13 @@ class Store:
 
     def get_tax(self,identity,now):
         r=self.execute('SELECT payload,source,fetched_at FROM tax_history WHERE property_id=? AND expires_at>?',(identity,now)).fetchone()
-        return (json.loads(r[0]),r[1],r[2]) if r else None
+        if not r:return None
+        record=json.loads(r[0]);property_row=self.get_property(identity)
+        if property_row and isinstance(record,dict):
+            from .rental_intelligence import cached_estimate
+            rent=cached_estimate(self,property_row['payload'],dt.datetime.fromisoformat(now.replace('Z','+00:00')))
+            if rent:record={**record,'_rentcast_rent':rent}
+        return record,r[1],r[2]
 
     def save_tax(self,identity,payload,source,fetched,expires):
         self.execute('INSERT INTO tax_history VALUES (?,?,?,?,?) ON CONFLICT(property_id) DO UPDATE SET payload=excluded.payload,source=excluded.source,fetched_at=excluded.fetched_at,expires_at=excluded.expires_at',
