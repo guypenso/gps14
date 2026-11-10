@@ -36,7 +36,7 @@ def test_bootstrap_existing_history_is_historical_and_idempotent(store,boundary,
     store.execute('INSERT INTO price_history VALUES (?,?,?,?,?,?)',('source:1',p['id'],p['price'],130000,1,clock().isoformat()))
     seed(store,boundary,clock());seed(store,boundary,clock())
     rows=store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall()
-    assert len(rows)==2 and all(json.loads(r[0])['observation']['historical'] for r in rows)
+    assert len(rows)==1 and all(json.loads(r[0])['observation']['historical'] for r in rows)
 
 def test_batches_fit_receiver_query_budget_without_losing_events(store,clock):
     now=clock().isoformat()

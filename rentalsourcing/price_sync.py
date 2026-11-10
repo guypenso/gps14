@@ -1,7 +1,7 @@
 """Durable price observations using stored history, existing settings and signed sync.
 Never calls RentCast, sends email or changes an investment criterion.
 """
-import datetime as dt,hashlib,json,math,os,urllib.request,logging
+import datetime as dt,hashlib,json,math,os,urllib.request,logging,time,threading
 from decimal import Decimal,InvalidOperation
 from .command_center import review_configuration,signed_request
 from .request import NoRedirect
@@ -27,10 +27,11 @@ def enqueue(store,p,observed,detected,*,observation_id,previous=None,kind='snaps
         if not at.tzinfo or not when.tzinfo:return False
     except (ValueError,TypeError,AttributeError):return False
     body=dict(source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price_cents=price,previous_cents=money(previous),observed_at=at.isoformat(),detected_at=when.isoformat(),observation_id=observation_id,kind=kind,historical=historical,listing_status=p.get('status'),non_tax_eligible=eligible)
-    identity=hashlib.sha256((str(p.get('id'))+'|'+observation_id+'|'+at.isoformat()+'|'+str(price)).encode()).hexdigest();key=PREFIX+identity
+    semantic=('tracked-baseline' if observation_id.startswith('tracked-baseline:') else 'source')
+    identity=hashlib.sha256((str(p.get('id'))+'|'+semantic+'|'+at.isoformat()+'|'+str(price)+'|'+str(p.get('status'))).encode()).hexdigest();key=PREFIX+identity
     old=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
     if old:return False
-    store.save_setting(key,dict(observation=body,attempts=0,synced_at=None,error_type=None));return True
+    return bool(store.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(key,json.dumps(dict(observation=body,attempts=0,synced_at=None,error_type=None)))).rowcount)
 
 def seed(store,boundary,now):
     key='price-history-bootstrap:v1';old=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
@@ -46,42 +47,106 @@ def seed(store,boundary,now):
         for identity,(p,observed) in properties.items():count+=enqueue(store,p,observed,observed,observation_id='snapshot:'+identity+':'+observed,historical=True,eligible=verification(p,boundary)[0]=='Candidate')
         store.save_setting(key,dict(created_at=now.isoformat(),queued=count))
 
-def flush(store,config=None,now=None,opener=None,max_batches=5):
+def queue_counts(store):
+    rows=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall()]
+    pending=[r for r in rows if not r.get('synced_at')]
+    return {'pending':len(pending),'held':sum(bool(r.get('held_at')) for r in pending),
+            'snapshots':sum(r['observation']['kind']=='snapshot' for r in pending),
+            'price_changes':sum(r['observation']['kind']=='price_change' for r in pending)}
+
+
+def flush(store,config=None,now=None,opener=None,max_batches=30,max_seconds=25):
     config=config or review_configuration()
     if not config:return {'state':'disabled'}
+    if store.pg and not store.execute('SELECT pg_try_advisory_lock(73541212)').fetchone()[0]:
+        return {'state':'busy',**queue_counts(store)}
+    from .sync_runtime import DEADLINE
+    deadline=DEADLINE.get();token=DEADLINE.set(min(deadline,time.monotonic()+max_seconds) if deadline else time.monotonic()+max_seconds)
+    try:return _flush(store,config,now,opener,max_batches,max_seconds)
+    finally:
+        DEADLINE.reset(token)
+        if store.pg:store.execute('SELECT pg_advisory_unlock(73541212)')
+
+
+def _flush(store,config,now,opener,max_batches,max_seconds):
     now=now or dt.datetime.now(dt.timezone.utc);opener=opener or urllib.request.build_opener(NoRedirect)
     url,key,token=config;url=url.rsplit('/',1)[0]+'/review-price-observations'
-    pending=[]
-    for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall():
-        row=json.loads(raw)
-        if not row.get('synced_at'):pending.append((name,row))
-    pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
-    sent=0;coverage=None
-    for offset in range(0,min(len(pending),BATCH_SIZE*max_batches),BATCH_SIZE):
-        part=pending[offset:offset+BATCH_SIZE];payload={'observations':[r['observation'] for name,r in part]};payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest();body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
-        for name,row in part:row['attempts']+=1;store.save_setting(name,row)
+    from .sync_runtime import request_json,get,component
+    started=time.monotonic();sent=0;coverage={}
+    for _ in range(max_batches):
+        if time.monotonic()-started>=max_seconds:break
+        frozen=get(store,'price-sync-active-batch')
+        if not frozen:
+            pending=[]
+            for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall():
+                row=json.loads(raw)
+                if not row.get('synced_at') and not row.get('held_at'):pending.append((name,row))
+            pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
+            part=pending[:BATCH_SIZE]
+            if not part:break
+            payload={'observations':[r['observation'] for name,r in part]}
+            payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            frozen={'names':[n for n,r in part],'payload':payload}
+            store.save_setting('price-sync-active-batch',frozen)
+        payload=frozen['payload'];body=json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
         try:
-            from .sync_runtime import request_json
             def validate(result,*args):
                 if result.get('accepted') is not True or result.get('batch_id')!=payload['batch_id']:raise ValueError('Invalid price receipt')
-            result=request_json(store,'price_sync',payload['batch_id'],(url,key,token),body,timeout=30,max_bytes=200000,opener=opener,now=now,validate=validate)
-            for name,row in part:row.update(synced_at=now.isoformat(),error_type=None);store.save_setting(name,row)
-            sent+=len(part);coverage=result.get('coverage')
+                ids=[o['observation_id'] for o in payload['observations']]
+                if 'acknowledged_observation_ids' in result:
+                    ack=result['acknowledged_observation_ids'];bad=result.get('rejected_observation_ids',[])
+                    if not isinstance(ack,list) or not isinstance(bad,list) or set(ack)&set(bad) or not set(ack+bad)<=set(ids):raise ValueError('Invalid observation receipt')
+                elif result.get('counts',{}).get('invalid',0):raise ValueError('Legacy receiver rejected observations')
+            result=request_json(store,'price_sync',payload['batch_id'],(url,key,token),body,
+                timeout=max(.1,min(20,max_seconds-(time.monotonic()-started))),max_bytes=200000,opener=opener,now=now,validate=validate)
+            ack=set(result.get('acknowledged_observation_ids',[o['observation_id'] for o in payload['observations']]))
+            bad=set(result.get('rejected_observation_ids',[]))
+            with store.transaction():
+                for name in frozen['names']:
+                    row=get(store,name);identity=row['observation']['observation_id'];row['attempts']+=1
+                    if identity in ack:row.update(synced_at=now.isoformat(),error_type=None,receiver_disposition='untracked' if identity in result.get('untracked_observation_ids',[]) else 'acknowledged');sent+=1
+                    elif identity in bad:
+                        row.update(held_at=now.isoformat(),error_type='receiver_invalid_observation')
+                        store.save_setting('sync_hold:'+name,{'reason':'receiver_invalid_observation','at':now.isoformat()})
+                    store.save_setting(name,row)
+                store.execute('DELETE FROM settings WHERE name=?',('price-sync-active-batch',))
+            coverage=result.get('coverage',{})
+            if len(ack)+len(bad)<len(payload['observations']):break
         except Exception as exc:
-            for name,row in part:row['error_type']=type(exc).__name__;store.save_setting(name,row)
-            event('price_sync_deferred',error_type=type(exc).__name__,http_status=getattr(exc,'code',None),pending=len(pending)-sent);return {'state':'deferred','sent':sent,'pending':len(pending)-sent}
-    summary={k:v for k,v in (coverage or {}).items() if k!='properties'}
-    event('price_sync_accepted',observations=sent,pending=max(0,len(pending)-sent),coverage=summary)
-    return {'state':'accepted','sent':sent,'pending':max(0,len(pending)-sent),'coverage':summary}
+            event('price_sync_deferred',error_type=type(exc).__name__,pending=queue_counts(store)['pending'])
+            return {'state':'deferred','sent':sent,**queue_counts(store)}
+    counts=queue_counts(store);summary={k:v for k,v in coverage.items() if k!='properties'}
+    component(store,'price_sync','partial' if counts['pending'] else 'success',now=now,processed=sent,pending=counts['pending'],recovery='scheduled' if counts['pending'] else None)
+    event('price_sync_accepted',observations=sent,**counts,coverage=summary)
+    return {'state':'accepted','sent':sent,**counts,'coverage':summary}
+
+
+def start_worker(url):
+    """Independent durable price consumer; never lists properties or sends mail."""
+    if os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()!='true':return
+    def loop():
+        while True:
+            store=None
+            try:
+                store=Store(url,initialize=False);result=safe_flush(store)
+                if result.get('sent') or result.get('pending'):event('price_recovery_worker',**result)
+            except Exception as exc:event('price_recovery_worker_failed',error_type=type(exc).__name__)
+            finally:
+                if store:store.close()
+            time.sleep(15)
+    threading.Thread(target=loop,name='price-observation-recovery',daemon=True).start()
+
 
 def safe_current_baselines(store,boundary):
     """After report imports, establish newly tracked candidates without old alerts."""
     try:
         if not review_configuration():return {'state':'disabled'}
         from .core import verification
+        delivered_sources={(r['observation']['source_id'],r['observation']['observed_at']) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall() for r in [json.loads(raw)] if r.get('synced_at') and r.get('receiver_disposition')=='acknowledged'}
+        pending_sources={r['observation']['source_id'] for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall() for r in [json.loads(raw)] if not r.get('synced_at')}
         for identity,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties WHERE source=?',(LIVE,)).fetchall():
             p=json.loads(raw)
-            if verification(p,boundary)[0]=='Candidate':
+            if identity not in pending_sources and (identity,observed) not in delivered_sources and verification(p,boundary)[0]=='Candidate':
                 enqueue(store,p,observed,observed,observation_id='tracked-baseline:'+identity+':'+observed,historical=True)
         return safe_flush(store)
     except Exception as exc:

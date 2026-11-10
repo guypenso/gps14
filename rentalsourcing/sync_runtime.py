@@ -111,7 +111,7 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
     if response.status!=200 or len(raw)>max_bytes:raise SyncFailure('response_validation',getattr(response,'status',None),False,endpoint,identity)
     result=json.loads(raw)
     if validate:validate(result,raw,response)
-   receipt={k:result[k] for k in ('accepted','report_id','batch_id','counts','next_cursor','summary','audit','accepted_reports','state') if k in result}
+   receipt={k:result[k] for k in ('accepted','report_id','batch_id','counts','next_cursor','summary','audit','accepted_reports','state','acknowledged_observation_ids','rejected_observation_ids','untracked_observation_ids','coverage') if k in result}
    ledger.update(state='success',last_success_at=stamp.isoformat(),error=None,next_attempt_at=None,receipt=receipt);store.save_setting(ledger_key,ledger)
    counts=result.get('counts',{});count=counts.get('received',counts.get('processed',result.get('processed',len(result.get('decisions',[])))))
    store.save_setting('sync_circuit:'+name,{'blocked':False,'configuration':fingerprint})
