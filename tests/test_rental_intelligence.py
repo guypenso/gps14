@@ -112,6 +112,9 @@ def test_new_candidate_persists_budget_block_and_resumes_only_after_approved_act
             return Response(avm(p))
     provider=Provider();client=Client(store,approved,clock,provider,lambda _:None)
     monkeypatch.setenv('ENABLE_RENT_ESTIMATES','true')
+    queued=enrich(store,boundary,approved,clock(),client=None)
+    assert queued['paid_calls']==0 and provider.calls==0
+    assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()[0])['state']=='Pending'
     result=enrich(store,boundary,approved,clock(),client)
     assert result['retrieved']==1 and provider.calls==1
     assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()[0])['state']=='Completed'
