@@ -85,8 +85,10 @@ def enrich(store,boundary,settings,now,client=None):
         candidates.append((0 if potential_exception or first and json.loads(first[0]).get('at','')>=(now-dt.timedelta(days=1)).isoformat() else 1,p))
     permitted=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' and settings.approval_mode=='monthly_budget' and client is not None
     if not permitted:
-        for _,p in candidates:record_job(store,p,'Budget Blocked',now,'monthly_rent_budget_not_approved_or_inactive')
-        counts['blocked_by_budget']=len(candidates);return counts
+        approved=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' and settings.approval_mode=='monthly_budget'
+        for _,p in candidates:record_job(store,p,'Pending' if approved else 'Budget Blocked',now,'awaiting_scheduled_rent_estimate' if approved else 'monthly_rent_budget_not_approved_or_inactive')
+        counts['blocked_by_budget']=0 if approved else len(candidates)
+        return counts
     end=billing_window(settings,now)[1];reserve=future_listing_days(now,end)*settings.listing_requests_per_day
     for _,p in sorted(candidates,key=lambda x:(x[0],x[1]['id']))[:min(3,int(os.getenv('RENT_ESTIMATE_REQUESTS_PER_RUN','1')))]:
         if store.budget_health(settings,now)['remaining']<=reserve:
@@ -113,3 +115,9 @@ def enrich(store,boundary,settings,now,client=None):
             record_job(store,p,'Retry Scheduled',now,type(exc).__name__,retry)
         finally:counts['paid_calls']+=client.count-before
     return counts
+
+def job_summary(store):
+    rows=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('rent-enrichment:%',)).fetchall()]
+    states={state:sum(row.get('state')==state for row in rows) for state in ('Pending','Processing','Completed','Awaiting Evidence','Budget Blocked','Retry Scheduled','Failed')}
+    recent=sorted(rows,key=lambda row:row.get('updated_at',''),reverse=True)[:20]
+    return {'total':len(rows),'by_state':states,'recent':[{'source_id':row.get('source_id'),'state':row.get('state'),'reason':row.get('reason'),'updated_at':row.get('updated_at')} for row in recent]}
