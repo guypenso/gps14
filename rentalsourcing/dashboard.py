@@ -200,7 +200,7 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
             else:return jsonify(error='Unsupported off-market action'),400
             body=json.dumps({'nonce':nonce,**result},sort_keys=True,separators=(',',':'))
         except Exception as exc:
-            return jsonify(error='Off-market source/evaluation unavailable',error_type=type(exc).__name__),503
+            return jsonify(error='Off-market source/evaluation unavailable',error_type=type(exc).__name__,detail=str(exc)[:160] if d.get('action')=='municipal_boundaries' else None),503
         finally:current.close()
         signature='v1='+hmac.new(os.getenv('COMMAND_CENTER_REVIEW_SECRET','').encode(),body.encode(),hashlib.sha256).hexdigest()
         return Response(body,200,{'X-RentalSourcing-Response-Signature':signature},content_type='application/json')
