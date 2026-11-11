@@ -1,0 +1,68 @@
+{
+  "version": "property-type-v2",
+  "fields": [
+    "propertyType",
+    "propertySubType",
+    "propertySubtype",
+    "property_type",
+    "property_subtype",
+    "propertySubtypes",
+    "structureType",
+    "dwellingType",
+    "buildingType",
+    "homeType",
+    "ownershipType",
+    "ownership",
+    "commonInterest",
+    "isCondominium",
+    "isCondo",
+    "attached",
+    "isAttached",
+    "legalOwnership",
+    "ownershipDescription",
+    "architecturalStyle"
+  ],
+  "containers": [
+    "metadata",
+    "listingMetadata",
+    "propertyDetails",
+    "listing",
+    "property",
+    "features",
+    "construction",
+    "details"
+  ],
+  "town_terms": [
+    "townhouse",
+    "townhome",
+    "rowhouse",
+    "rowhome",
+    "terracedhouse",
+    "terracedhome",
+    "terracehouse",
+    "singlefamilyattached",
+    "attachedsinglefamily",
+    "attachedrowhouse",
+    "singlefamilyresidenceattached",
+    "attachedtownhome"
+  ],
+  "condo_terms": [
+    "condo",
+    "condominium",
+    "condominiumownership",
+    "condounit"
+  ],
+  "single_family_terms": [
+    "singlefamily",
+    "singlefamilyresidence",
+    "singlefamilyhome",
+    "singlefamilyresidential",
+    "sfh",
+    "sfr",
+    "detached",
+    "singlefamilydetached",
+    "detachedsinglefamily",
+    "singlefamilyresidencedetached",
+    "detachedsinglefamilyresidence"
+  ]
+}

@@ -28,6 +28,8 @@ class Engine:
         prior=self.store.get_property(row.get('id')) if isinstance(row.get('id'),str) else None
         if prior and condo_evidence(prior['payload'])['state']=='excluded':
             row={**row,'_rentalsourcing_prior_condominium':condo_evidence(prior['payload'])}
+        from .property_types import property_type_evidence
+        if prior and property_type_evidence(prior['payload'])['state']=='excluded':row={**row,'_rentalsourcing_prior_property_type':property_type_evidence(prior['payload'])}
         state,reasons=verification(row,self.boundary)
         if source!=LIVE and state!='Rejected':state,reasons='Pending Verification',['non_live_source']
         identity=row.get('id')

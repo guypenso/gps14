@@ -48,7 +48,7 @@ def test_townhouse_exclusion_everywhere(policy,kind):
 
 def test_subtype_and_ambiguity_do_not_confuse_architectural_style(policy):
  row=at(policy.bellevue,zipCode='15202',propertyType='Single Family',architecturalStyle='Townhouse',style='Townhome')
- assert verification(row,policy)==('Candidate',[])
+ assert verification(row,policy)[0]=='Pending Verification' # Townhouse architecture contradicts broad Single Family; hold, not confirmed rejection.
  assert verification(dict(row,propertySubType='Townhouse'),policy)[0]=='Rejected'
  for change in [dict(propertyType=None),dict(propertyType='Residential'),dict(isAttached=True),dict(structureType='Attached')]:
   candidate=dict(row,**change);assert verification(candidate,policy)[0]=='Pending Verification'
@@ -123,7 +123,7 @@ def test_property_record_type_evidence_cannot_approve_a_townhouse():
  assert tax_verification(dict(record,propertyType='Single Family',propertySubType='Town House'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Unknown'))[0]=='Pending Verification'
  assert tax_verification(dict(taxes(amount=2300.01),propertyType='Unknown'))[0]=='Rejected'
- assert tax_verification(dict(record,propertyType='Single Family',architecturalStyle='Townhouse'))[0]=='Qualified'
+ assert tax_verification(dict(record,propertyType='Single Family',architecturalStyle='Townhouse'))[0]=='Pending Verification'
 
 def test_unverified_geography_cannot_crowd_verified_bellevue_out_of_pending_report(store,settings,clock,policy):
  for i in range(50):
