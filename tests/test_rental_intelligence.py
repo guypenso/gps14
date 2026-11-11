@@ -56,7 +56,7 @@ def test_new_source_queries_are_only_the_two_approved_municipalities():
     from rentalsourcing.request import municipal_queries
     queries=municipal_queries()
     assert [(slug,q['city'],q['zipCode']) for slug,q in queries]==[('pleasant-hills','Pleasant Hills','15236'),('bethel-park','Bethel Park','15102')]
-    assert all(q['state']=='PA' and q['bedrooms']=='3:4' and q['price']=='*:200001' for slug,q in queries)
+    assert all(q['state']=='PA' and q['bedrooms']=='2:4' and q['price']=='*:200001' for slug,q in queries)
 
 def test_authorized_avm_acquisition_accounts_once_and_reuses_cache(store,boundary,clock,settings,monkeypatch):
     from dataclasses import replace

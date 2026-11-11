@@ -201,6 +201,7 @@ def start_watchdog(url,boundary):
   logger.addHandler(logging.StreamHandler())
  logger.setLevel(logging.INFO)
  logger.propagate=False
+ logger.info('DISCOVERY_SCHEDULE '+json.dumps({'timezone':'Asia/Jerusalem','morning':'08:00','morning_trigger':'existing Render cron 0 5,6 * * * with local-time guard','evening':'20:00','evening_trigger':'existing dashboard worker','evening_email':False,'durable_slot_receipts':True}))
  def loop():
   from .storage import Store
   while True:
@@ -218,6 +219,16 @@ def start_watchdog(url,boundary):
       queue_rent(store,boundary,Settings.from_env(),now,client=None)
       store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
+    # Morning remains on the existing Render cron. Evening runs in this existing
+    # worker, using the same database lock and a durable per-slot receipt.
+    try:
+     from .schedule import scheduled_slot
+     slot=scheduled_slot()
+     if slot and slot[1]=='evening' and not get(store,'discovery_run:'+slot[0]+':evening',{}).get('finished_at') and store.lock():
+      from .cloud import daily_discovery
+      from .config import Settings
+      daily_discovery(store,boundary,Settings.from_env(),slot[0],slot='evening')
+    except Exception as error:logger.warning('EVENING_DISCOVERY_DEFERRED '+type(error).__name__)
     local=dt.datetime.now(UTC).astimezone(ISRAEL);protected=(local.hour==7 and local.minute>=50) or (local.hour==8 and local.minute<20)
     if protected:
      try:publish(store)
@@ -236,7 +247,10 @@ def start_watchdog(url,boundary):
      except Exception:pass
    finally:
     if store:store.close()
-   time.sleep(300)
+   local=dt.datetime.now(UTC).astimezone(ISRAEL)
+   target=local.replace(hour=20,minute=0,second=0,microsecond=0)
+   if target<=local:target+=dt.timedelta(days=1)
+   time.sleep(max(1,min(300,(target-local).total_seconds())))
  threading.Thread(target=loop,name='penten-sync-recovery',daemon=True).start()
 
 def reconciliation_healthy(after):

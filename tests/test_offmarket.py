@@ -12,7 +12,7 @@ def test_authoritative_filters_unknown_tax_no_paid_requests(store,boundary,clock
  assert r['criteria_state']=='Pending Verification';assert r['tax']['state']=='unknown'
  assert 'annual_tax_bill_unverified' in r['reasons']
  assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
- for field,value,reason in [('bedrooms',5,'bedrooms'),('bedrooms',2,'bedrooms'),('price',200002,'price'),('propertyType','Condominium','condominium'),('propertyType','Townhome','townhouse'),('description','turn-key investor package','turnkey'),('zipCode','15204','excluded_zip')]:
+ for field,value,reason in [('bedrooms',5,'bedrooms'),('bedrooms',2,'price'),('price',200002,'price'),('propertyType','Condominium','condominium'),('propertyType','Townhome','townhouse'),('description','turn-key investor package','turnkey'),('zipCode','15204','excluded_zip')]:
   d=item();d['property'][field]=value;r=evaluate(store,boundary,[d],clock())[0]
   assert r['criteria_state']=='Rejected';assert reason in r['reasons']
 

@@ -14,7 +14,7 @@ from .geography import load_boundary,POLICY
 from .digest import Digest
 from .engine import Engine
 from .request import diagnose
-from .schedule import scheduled_day,ISRAEL
+from .schedule import scheduled_day,scheduled_slot,ISRAEL
 from .storage import Store
 from .core import EXCLUDED_ZIPS
 from .database import validate_postgres_url
@@ -27,15 +27,28 @@ def scheduled_job(store,day):
     old=store.execute("SELECT id FROM scan_jobs WHERE id LIKE ? AND collection_done=0 AND state IN ('running','partial','failed') ORDER BY day,id LIMIT 1",('daily:%',)).fetchone()
     return old[0] if old else 'daily:'+day
 
+def scheduled_scope(store,day,slot,boundary):
+    """Resume the exact query/offset, then rotate approved geographic scopes."""
+    from .investment_policy import POLICY_VERSION
+    from .request import listing_parameters,municipal_queries
+    scopes=[('pittsburgh-bellevue',listing_parameters(boundary)),*municipal_queries()]
+    prefix='coverage:'+POLICY_VERSION+':'
+    old=store.execute("SELECT id FROM scan_jobs WHERE id LIKE ? AND collection_done=0 AND state IN ('running','partial','failed') ORDER BY day,id LIMIT 1",(prefix+'%',)).fetchone()
+    cursor_row=store.execute('SELECT payload FROM settings WHERE name=?',('coverage_scope:'+POLICY_VERSION,)).fetchone()
+    cursor=json.loads(cursor_row[0]).get('cursor',0) if cursor_row else 0
+    slug=old[0].split(':')[2] if old else scopes[cursor%len(scopes)][0]
+    query=dict(scopes)[slug]
+    return old[0] if old else prefix+slug+':'+day+':'+slot,query,(cursor+1)%len(scopes)
 
-def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
+
+def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=None):
     """Existing cron + collector + outbox. Caller holds the existing scan lock."""
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
     from .price_sync import safe_flush,safe_current_baselines
     safe_flush(store)
     digest=Digest(store,boundary,settings,clock,opener)
     old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
-    if old:
+    if old and slot!='evening':
         # A previously prepared daily email must not suppress later enrichment
         # recovery. This pass is cache-only unless the separate monthly rent
         # budget and feature switch have both been activated.
@@ -69,17 +82,22 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     elif settings.approval_mode not in {'billing_cycle','one_time','monthly_budget'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     else:
         # Reserve before EVERY wire attempt using existing atomic DB counters.
-        effective=replace(settings,retries=0) if settings.approval_mode=='monthly_budget' else replace(settings,per_month=min(50,settings.per_month),retries=0,max_pages=1)
+        effective=replace(settings,retries=0) if settings.approval_mode=='monthly_budget' else replace(settings,per_month=min(50,settings.per_month),retries=0)
         allowance=store.scheduled_allowance(effective,clock())
         if allowance<=0:stats=dict(discovery_state='skipped_budget_exhausted',partial=True)
         else:
             effective=replace(effective,per_run=min(settings.per_run if settings.approval_mode=='monthly_budget' else 4,allowance))
             client=Client(store,effective,clock,opener)
             try:
-                scan_job=scheduled_job(store,day)
-                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true').run(scan_job,day)
+                query=None
+                if slot:scan_job,query,next_scope=scheduled_scope(store,day,slot,boundary)
+                else:scan_job=scheduled_job(store,day)
+                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true',query_parameters=query).run(scan_job,day)
+                if slot and stats.get('discovery_complete'):
+                    from .investment_policy import POLICY_VERSION
+                    store.save_setting('coverage_scope:'+POLICY_VERSION,{'cursor':next_scope,'completed_job':scan_job,'at':clock().isoformat()})
                 stats['supplemental_jobs']=[]
-                if settings.approval_mode=='monthly_budget' and stats.get('discovery_complete'):
+                if not slot and settings.approval_mode=='monthly_budget' and stats.get('discovery_complete'):
                     from .request import municipal_queries
                     scopes=municipal_queries()
                     # Alternate first municipality without increasing the run's approved request cap.
@@ -113,16 +131,28 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         error={'category':'future_inventory_processing','retryable':True}
         component(store,'inventory_sync','partial',now=clock(),pending=1,error=error);incident(store,'inventory_sync',error,now=clock())
     event('future_discovery_verification',**stats['future_discovery'])
-    if settings.email_enabled:
+    if feedback_config or settings.email_enabled:
         from .listing_report import sync_before_report
         try:
-            source_result=sync_before_report(store,day,clock(),opener)
+            source_result=sync_before_report(store,day+(":evening" if slot=="evening" else ""),clock(),opener)
             stats['listing_intake_state']=source_result.get('state')
             if source_result.get('state')=='partial':stats['partial']=True
             event('listing_pre_report',state=source_result.get('state'))
         except Exception as exc:
             stats.update(partial=True,listing_intake_state='failed')
             event('listing_pre_report_failed',error_type=type(exc).__name__)
+    if slot=='evening':
+        # Delivery and authorized Gmail intake operate independently of a digest.
+        if feedback_config:
+            from .review_inventory import run as deliver
+            from .digest import recent_timestamp
+            fresh_ids={i for i,observed in store.execute('SELECT id,observed_at FROM properties').fetchall() if recent_timestamp(observed,clock())}
+            u,k,t=feedback_config
+            receipt=deliver(store,boundary,clock(),execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='evening-inventory:'+day,source_ids=fresh_ids,include_verified=True)
+            stats['evening_inventory_receipt']=receipt.get('receipt_counts',{})
+        store.save_setting('discovery_metrics:'+day+':evening',stats)
+        return dict(status='evening_no_email',outbox_id=None,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+    store.save_setting('discovery_metrics:'+day+':morning',stats)
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     from .command_center import review_configuration
@@ -138,13 +168,17 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
     return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
 
 
-def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
+def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=None):
     from .reliability import begin,stage,finish,publish,snapshot
     from .sync_runtime import get
-    clock=clock or (lambda:dt.datetime.now(dt.timezone.utc));begin(store,day,clock());stage(store,day,'scheduled_run','success',clock())
+    clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
+    run_key='discovery_run:'+day+':'+str(slot)
+    if slot and get(store,run_key,{}).get('finished_at'):return dict(get(store,run_key)['result'],already_executed=True)
+    if slot:store.save_setting(run_key,{'slot':slot,'day':day,'started_at':clock().isoformat(),'state':'processing'})
+    begin(store,day,clock());stage(store,day,'scheduled_run','success',clock())
     store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
     try:
-        result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener)
+        result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener,slot=slot)
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
         scan=result.get('scan','unknown');last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last[0]) if last else {}
         stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') or stats.get('discovery_partial') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
@@ -152,7 +186,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
             stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
         tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
         stage(store,day,'tax_verification','partial' if tax else 'success',clock(),pending=tax,expected=True,coverage='Pending evidence remains unverified; API approval limits preserved')
-        stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent') else 1)
+        if slot!='evening':stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent') else 1)
         status=finish(store,day,clock());result['workflow_status']=status;result['email_status']=result.get('status')
         from .price_sync import queue_counts
         result['price_queue']=queue_counts(store)
@@ -161,6 +195,8 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None):
         except Exception as exc:event('operational_health_deferred',error_type=type(exc).__name__)
         result['workflow_status']=finish(store,day,clock())
         current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
+        if slot:store.save_setting(run_key,{'slot':slot,'day':day,'finished_at':clock().isoformat(),'state':result['workflow_status'],'result':result})
+        event('discovery_slot_result',slot=slot or 'morning',day=day,**result)
         return result
     except Exception as exc:
         from .sync_runtime import classify
@@ -277,12 +313,12 @@ def main(argv=None):
         if args.retry_email:digest.send(args.retry_email);return
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
         if args.scheduled:
-            result=daily_discovery(store,boundary,settings,day);event('daily_discovery_result',**result)
+            result=daily_discovery(store,boundary,settings,day,slot=scheduled_slot()[1]);event('daily_discovery_result',**result)
             if result.get('unresolved_critical') or result.get('workflow_status')=='failed':raise SystemExit(2)
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})
-        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=2,maximum_price_by_bedrooms={2:150000,3:200001,4:200001},bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261111-two-bedroom",single_family_only=True))
         job_id=args.resume or (scheduled_job(store,day) if args.scheduled else 'manual:'+day+':'+str(uuid.uuid4()))
         if args.resume:
             job=store.execute('SELECT day FROM scan_jobs WHERE id=?',(job_id,)).fetchone()
