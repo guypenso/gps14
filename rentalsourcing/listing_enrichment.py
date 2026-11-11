@@ -93,7 +93,7 @@ def main():
 if __name__=='__main__':main()
 
 
-INSIGHTS_JOB='listing-contact-enrichment:2026-11-12:owner-exception-4472-v1'
+INSIGHTS_JOB='listing-contact-enrichment:2026-11-12:owner-exception-4472-v2'
 def initial_insights(store,config=None):
     """Read-only source snapshot, separately locked from paid discovery/recovery."""
     config=config or review_configuration()
