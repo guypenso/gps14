@@ -60,9 +60,11 @@ def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
     # Source labels vary by maintained collector; accept only the exact configured LIVE value.
     from .collector import LIVE
     rows=store.execute('SELECT id,payload,observed_at FROM properties WHERE source=? ORDER BY id',(LIVE,)).fetchall()
+    from .owner_exception import snapshot as exception_snapshot
+    owner_snapshot=exception_snapshot(store,dt.datetime.now(dt.timezone.utc))
     for _ in range(100):
         records=[stored_evidence(store,json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
-        body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
+        body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records,'owner_exception_source':owner_snapshot},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
         from .sync_runtime import request_json
         def validate(result,*args):
             if result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
@@ -91,7 +93,7 @@ def main():
 if __name__=='__main__':main()
 
 
-INSIGHTS_JOB='listing-contact-enrichment:2026-11-11:property-quality-v1'
+INSIGHTS_JOB='listing-contact-enrichment:2026-11-12:owner-exception-4472-v1'
 def initial_insights(store,config=None):
     """Read-only source snapshot, separately locked from paid discovery/recovery."""
     config=config or review_configuration()
