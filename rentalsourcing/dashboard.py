@@ -294,9 +294,16 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.errorhandler(500)
     def unavailable(error):return jsonify(error='הנתונים אינם זמינים כרגע; בדוק את לוג השירות'),503
 
-    if not testing:
-        from .reliability import start_watchdog
-        start_watchdog(url,boundary)
-        from .offmarket import start_scheduler
-        start_scheduler(url)
+    # App construction is safe to preload. Never fork with active import threads.
+    app.extensions['rentalsourcing_runtime']={'url':url,'boundary':boundary,'started':False}
     return app
+
+
+def start_background(app):
+    runtime=app.extensions.get('rentalsourcing_runtime')
+    if app.testing or not runtime or runtime['started']:return
+    runtime['started']=True
+    from .reliability import start_watchdog
+    from .offmarket import start_scheduler
+    start_watchdog(runtime['url'],runtime['boundary'])
+    start_scheduler(runtime['url'])

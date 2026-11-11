@@ -67,3 +67,21 @@ def test_each_scan_runs_stored_quality_audit_without_provider_or_extra_email(sto
  assert seen==['listing-contact-enrichment:'+clock().date().isoformat()+':'+slot+':property-quality-v1']
  assert not provider.messages and not any('api.rentcast.io' in request.full_url for request in provider.calls)
  if slot=='evening':assert result['status']=='evening_no_email'
+def test_background_threads_start_only_in_initialized_workers(monkeypatch):
+ from flask import Flask
+ from types import SimpleNamespace
+ from rentalsourcing.gunicorn_config import post_worker_init
+ import rentalsourcing.reliability as reliability
+ import rentalsourcing.offmarket as offmarket
+ started=[]
+ monkeypatch.setattr(reliability,'start_watchdog',lambda *a:started.append(('watchdog',a)))
+ monkeypatch.setattr(offmarket,'start_scheduler',lambda *a:started.append(('offmarket',a)))
+ app=Flask('isolated-worker');app.extensions['rentalsourcing_runtime']={'url':'isolated-db','boundary':'boundary','started':False}
+ assert not started
+ post_worker_init(SimpleNamespace(wsgi=app));post_worker_init(SimpleNamespace(wsgi=app))
+ assert started==[('watchdog',('isolated-db','boundary')),('offmarket',('isolated-db',))]
+ app.testing=True;app.extensions['rentalsourcing_runtime']['started']=False
+ post_worker_init(SimpleNamespace(wsgi=app));assert len(started)==2
+@pytest.mark.parametrize('row',[{'PropertyType':'Single Family','PropertySubType':'Townhouse'},{'property_type':'Single Family','property_sub_type':'Town Home'},{'Features':{'PROPERTY_SUB_TYPE':'Row House'}},{'propertyType':'Single Family','IS_CONDO':True}])
+def test_provider_field_aliases(row):
+ assert property_type_evidence(row)['state']=='excluded'

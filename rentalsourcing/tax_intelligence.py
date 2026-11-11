@@ -62,10 +62,11 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  quality=json.loads(quality_row[0]) if quality_row else None
  from .property_types import property_type_evidence,reviewed_type
  recent=[]
- for identity,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties ORDER BY observed_at DESC LIMIT 160').fetchall():
+ decisions={name[len('penten_review:'):]:json.loads(raw) for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('penten_review:%',)).fetchall()}
+ for identity,raw,observed,source_state,source_reasons in store.execute('SELECT id,payload,observed_at,state,reasons FROM properties ORDER BY observed_at DESC LIMIT 160').fetchall():
   p=json.loads(raw)
   if p.get('bedrooms')==2 and p.get('price',999999)<=150000 and (verification(p,boundary)[0]!='Rejected' or reviewed_type(p)):
-   recent.append({'source_id':identity,'address':p.get('formattedAddress'),'observed_at':observed,'property_type':property_type_evidence(p)})
+   recent.append({'source_id':identity,'address':p.get('formattedAddress'),'observed_at':observed,'property_type':property_type_evidence(p),'source_state':source_state,'source_reasons':json.loads(source_reasons),'penten_decision':decisions.get(identity)})
  # The funnel's historical owner_review_deferred counter only includes uncached
  # records. Decisions remain authoritative even when a tax cache exists.
  owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
@@ -83,4 +84,4 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'actionable_evidence':summary,'official_dataset':{k:source_manifest.get(k) for k in ('source','sha256','retrieved_at','year')},
          'source_access':{'wprdc':'Saved official assessment batch; current remote availability is not inferred from cached data.'},
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
-         'api_budget':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'property_quality':quality,'recent_source_type_evidence':recent,'qualification_changed':False,'provider_calls':0}
+         'api_budget':{'dashboard_runtime':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'last_scheduled':json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()[0]) if store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone() else None,'ledger':[{'period':r[0],'used':r[1]} for r in store.execute('SELECT period,used FROM usage ORDER BY period').fetchall()],'scope_note':'Dashboard provider calls are disabled. Scheduled cron configuration is separate; ledger and last_scheduled describe stored discovery usage.'},'property_quality':quality,'recent_source_type_evidence':recent,'qualification_changed':False,'provider_calls':0}
