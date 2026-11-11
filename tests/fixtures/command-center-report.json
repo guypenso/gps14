@@ -34,7 +34,20 @@
       "verified_at": "2026-10-16T12:00:00+00:00",
       "tax_fetched_at": "2026-10-16T12:00:00+00:00",
       "latitude": 40.45,
-      "longitude": -80
+      "longitude": -80,
+      "property_type_evidence": {
+        "policy": "property-type-v2",
+        "state": "eligible",
+        "reason": null,
+        "detail_confirmed": false,
+        "evidence": [
+          {
+            "field": "propertyType",
+            "value": "Single Family"
+          }
+        ],
+        "reviewed_source": null
+      }
     },
     {
       "source_id": "contract-b",
@@ -67,7 +80,20 @@
       "verified_at": null,
       "tax_fetched_at": null,
       "latitude": 40.45,
-      "longitude": -80
+      "longitude": -80,
+      "property_type_evidence": {
+        "policy": "property-type-v2",
+        "state": "eligible",
+        "reason": null,
+        "detail_confirmed": false,
+        "evidence": [
+          {
+            "field": "propertyType",
+            "value": "Single Family"
+          }
+        ],
+        "reviewed_source": null
+      }
     }
   ]
 }

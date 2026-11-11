@@ -150,8 +150,28 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             u,k,t=feedback_config
             receipt=deliver(store,boundary,clock(),execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='evening-inventory:'+day,source_ids=fresh_ids,include_verified=True)
             stats['evening_inventory_receipt']=receipt.get('receipt_counts',{})
+        # The same stored-only quality/enrichment audit precedes either digest or evening completion.
+        if feedback_config:
+            try:
+                from .listing_enrichment import run as enrich_listings
+                quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v1')
+                stats['property_quality']=quality.get('summary',{}).get('property_quality',{})
+                event('property_quality_audit',slot=slot,counts=stats['property_quality'].get('counts',{}),review_ready_without_insights=stats['property_quality'].get('review_ready_without_insights'))
+            except Exception as exc:
+                stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
+                event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
         store.save_setting('discovery_metrics:'+day+':evening',stats)
         return dict(status='evening_no_email',outbox_id=None,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+    # The same stored-only quality/enrichment audit precedes either digest or evening completion.
+    if feedback_config:
+        try:
+            from .listing_enrichment import run as enrich_listings
+            quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v1')
+            stats['property_quality']=quality.get('summary',{}).get('property_quality',{})
+            event('property_quality_audit',slot=slot,counts=stats['property_quality'].get('counts',{}),review_ready_without_insights=stats['property_quality'].get('review_ready_without_insights'))
+        except Exception as exc:
+            stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
+            event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
     store.save_setting('discovery_metrics:'+day+':morning',stats)
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'

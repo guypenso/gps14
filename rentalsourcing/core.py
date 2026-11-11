@@ -19,19 +19,11 @@ def property_type_verification(row, *, single_family=False):
     """Structured use/attachment evidence only; architectural style is not a property type."""
     condo=condominium_evidence(row)
     if condo['state']=='excluded':return 'Rejected',condo['reason']
-    fields=('propertyType','propertySubType','propertySubtype','structureType','dwellingType')
-    values=[re.sub(r'[^a-z0-9]+','',str(row[k]).lower()) for k in fields if row.get(k)]
-    town={'townhouse','townhome','townhouses','townhomes','attachedtownhouse','attachedtownhome','rowhouse','rowhome','rowhouses','rowhomes','singlefamilyattached','attachedsinglefamily','singlefamilyresidenceattached','terracedhouse','terracedhome','terracehouse','attachedrowhouse'}
-    if any(v in town or v.startswith(('townhouse','townhome')) or v.endswith(('townhouse','townhome','rowhouse','rowhome','terracedhouse')) for v in values):return 'Rejected','townhouse'
-    if any(v in {'land','commercial','industrial'} for v in values):return 'Rejected','non_residential'
-    if condo['state']=='pending':return 'Pending Verification',condo['reason']
-    if single_family and any(v in {'multifamily','duplex','triplex','fourplex','residentialincome','manufactured','manufacturedhome','mobilehome','commercial','land'} for v in values):return 'Rejected','single_family_only'
-    residential={'singlefamily','singlefamilyresidence','singlefamilydetached','detachedsinglefamily','singlefamilyhome','detached','multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome','singlefamilyresidential','singlefamilyresidencedetached','detachedsinglefamilyresidence','sfh','sfr'}
-    if row.get('propertyType') and re.sub(r'[^a-z0-9]+','',str(row['propertyType']).lower()) in residential:
-        if row.get('attached') is True or row.get('isAttached') is True or any(v in {'attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome'} for v in values):
-            return 'Pending Verification','attached_property_type_unverified'
-        return 'Candidate',None
-    return 'Pending Verification','property_type_unverified'
+    from .property_types import property_type_evidence
+    result=property_type_evidence(row,single_family=single_family)
+    if condo['state']=='pending' and result['state']!='excluded':return 'Pending Verification',condo['reason']
+    return {'eligible':'Candidate','excluded':'Rejected','pending':'Pending Verification'}[result['state']],result['reason']
+
 
 
 def geographic_verification(row,boundary):

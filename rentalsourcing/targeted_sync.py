@@ -60,6 +60,7 @@ def prepare(store,boundary,now):
     # Reuse the exact production serializer without creating a fake email/outbox.
     class Capture:
         payload=None
+        def get_tax(self,*args):return store.get_tax(*args)
         def execute(self,sql,args=()):
             if sql.startswith('INSERT INTO command_center_reports'):self.payload=args[1];return None
             return store.execute(sql,args)

@@ -40,6 +40,9 @@ def evidence(identity,history,estimate,now):
 
 def snapshot(store,boundary,now=None,offset=0,limit=25):
  now=now or dt.datetime.now(UTC)
+ from .config import Settings
+ settings=Settings.from_env()
+ budget=store.budget_health(settings,now,record_warning=False)
  if not isinstance(offset,int) or not isinstance(limit,int) or offset<0 or offset>10000 or not 1<=limit<=25:raise ValueError('Bounded tax queue required')
  ranked=priorities(store,boundary,now)
  public=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
@@ -55,6 +58,14 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
   queue.append({k:v for k,v in item.items() if k!='key'}|{'tax_evidence':result})
  source_manifest=batch.get('manifest') or {}
  coverage=funnel(store,boundary,now)
+ quality_row=store.execute('SELECT payload FROM settings WHERE name=?',('property_quality:last',)).fetchone()
+ quality=json.loads(quality_row[0]) if quality_row else None
+ from .property_types import property_type_evidence,reviewed_type
+ recent=[]
+ for identity,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties ORDER BY observed_at DESC LIMIT 160').fetchall():
+  p=json.loads(raw)
+  if p.get('bedrooms')==2 and p.get('price',999999)<=150000 and (verification(p,boundary)[0]!='Rejected' or reviewed_type(p)):
+   recent.append({'source_id':identity,'address':p.get('formattedAddress'),'observed_at':observed,'property_type':property_type_evidence(p)})
  # The funnel's historical owner_review_deferred counter only includes uncached
  # records. Decisions remain authoritative even when a tax cache exists.
  owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
@@ -72,4 +83,4 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'actionable_evidence':summary,'official_dataset':{k:source_manifest.get(k) for k in ('source','sha256','retrieved_at','year')},
          'source_access':{'wprdc':'Saved official assessment batch; current remote availability is not inferred from cached data.'},
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
-         'qualification_changed':False,'provider_calls':0}
+         'api_budget':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'property_quality':quality,'recent_source_type_evidence':recent,'qualification_changed':False,'provider_calls':0}

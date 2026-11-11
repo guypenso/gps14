@@ -113,6 +113,10 @@ def evaluate(store,boundary,records,now,opener=None):
             cards[-1]['eligibility_path']=tax.get('eligibility_path') if tax else None
         if cards and cards[-1]['source_id']==identity and p.get('listingDescription'):
             cards[-1]['listing_info']={'source':'RealScout','source_id':identity,'address':p['formattedAddress'],'street_address':p['addressLine1'],'zip_code':p['zipCode'],'retrieved_at':observed,'description':p['listingDescription'],'listing_status':p['status'],'agents':[]}
+        if cards and cards[-1]['source_id']==identity:
+            from .listing_enrichment import evidence as listing_evidence
+            info=listing_evidence(p,observed);info['source']='RealScout'
+            cards[-1]['listing_info']=info;cards[-1]['property_type_evidence']=info['property_type_evidence']
         result=dict(source_id=identity,property=p,source_property=raw_evidence,source='realscout-email',observed_at=observed,state=state,reasons=reasons,matched_rentcast=bool(matched),owner_deferred=deferred,
                     external_id=item.get('external_id'),listing_id=item.get('listing_id'),listing_url=item.get('listing_url'),raw_listing_status=item.get('raw_listing_status'),source_neighborhood=item.get('source_neighborhood'),evidence_url=item.get('evidence_url'),
                     tax_status='provider_verified' if tax is not None else 'unknown',tax_evidence=tax,
