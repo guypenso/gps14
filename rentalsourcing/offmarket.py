@@ -199,8 +199,7 @@ def start_scheduler(url):
       ledger=deliver_bedrooms(s,load_boundary(Settings.from_env().boundary_file),now,execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key=bedroom_key,source_ids=set(changed['source_ids']),include_verified=True)
       changed['receipt_counts']=ledger.get('receipt_counts',{})
      s.save_setting(bedroom_key,changed)
-     from .telemetry import event
-     event('bedroom_policy_reconciliation',**{k:v for k,v in changed.items() if k not in ('history','source_ids')})
+     logging.getLogger('rentalsourcing.reliability').info('BEDROOM_POLICY_RECONCILIATION '+json.dumps({k:v for k,v in changed.items() if k not in ('history','source_ids')}))
     criteria_key=POLICY_VERSION+':'+POLICY
     if not get(s,criteria_key):
      from .criteria import reconcile_geography

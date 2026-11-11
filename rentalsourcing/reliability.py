@@ -67,7 +67,7 @@ def snapshot(store,now=None):
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()];opens=[i for i in incidents if i.get('state')=='open']
  effective='failed' if daily.get('state')=='failed' or any(i.get('component') in ('daily_schedule','email_delivery') for i in opens) else 'partial' if pending_reports or pending or blocked or opens or price_pending or inventory_pending or daily.get('state') in ('partial','not_observed','running') else 'success'
  budget=get(store,'health_budget',{})
- return {'runtime':{'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
+ return {'runtime':{'bedroom_policy':{k:v for k,v in get(store,'bedroom_policy_reconciliation:investment-20261111-two-bedroom',{}).items() if k not in ('history','source_ids')},'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
 
 def publish(store,now=None,config=None,opener=None):
  config=config or review_configuration()
@@ -201,7 +201,7 @@ def start_watchdog(url,boundary):
   logger.addHandler(logging.StreamHandler())
  logger.setLevel(logging.INFO)
  logger.propagate=False
- logger.info('DISCOVERY_SCHEDULE '+json.dumps({'timezone':'Asia/Jerusalem','morning':'08:00','morning_trigger':'existing Render cron 0 5,6 * * * with local-time guard','evening':'20:00','evening_trigger':'existing dashboard worker','evening_email':False,'durable_slot_receipts':True}))
+ logger.info('DISCOVERY_SCHEDULE '+json.dumps({'timezone':'Asia/Jerusalem','morning':'08:00','morning_trigger':'existing Render cron with local-time guard','evening':'20:00','evening_trigger':'same Render cron 0 5,6,17,18 * * * with local-time guard','evening_email':False,'durable_slot_receipts':True}))
  def loop():
   from .storage import Store
   while True:
@@ -219,16 +219,6 @@ def start_watchdog(url,boundary):
       queue_rent(store,boundary,Settings.from_env(),now,client=None)
       store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
-    # Morning remains on the existing Render cron. Evening runs in this existing
-    # worker, using the same database lock and a durable per-slot receipt.
-    try:
-     from .schedule import scheduled_slot
-     slot=scheduled_slot()
-     if slot and slot[1]=='evening' and not get(store,'discovery_run:'+slot[0]+':evening',{}).get('finished_at') and store.lock():
-      from .cloud import daily_discovery
-      from .config import Settings
-      daily_discovery(store,boundary,Settings.from_env(),slot[0],slot='evening')
-    except Exception as error:logger.warning('EVENING_DISCOVERY_DEFERRED '+type(error).__name__)
     local=dt.datetime.now(UTC).astimezone(ISRAEL);protected=(local.hour==7 and local.minute>=50) or (local.hour==8 and local.minute<20)
     if protected:
      try:publish(store)
@@ -238,7 +228,7 @@ def start_watchdog(url,boundary):
      value=recover(store,boundary)
      evidence=get(store,'reliability_audit:2026-11-03:v1',{})
      view=snapshot(store)
-     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget']},sort_keys=True))
+     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget'],'bedroom_policy':view['runtime'].get('bedroom_policy')},sort_keys=True))
    except Exception as e:
     logging.getLogger(__name__).error('RELIABILITY_WATCHDOG_FAILED '+type(e).__name__)
     if store:
@@ -247,10 +237,7 @@ def start_watchdog(url,boundary):
      except Exception:pass
    finally:
     if store:store.close()
-   local=dt.datetime.now(UTC).astimezone(ISRAEL)
-   target=local.replace(hour=20,minute=0,second=0,microsecond=0)
-   if target<=local:target+=dt.timedelta(days=1)
-   time.sleep(max(1,min(300,(target-local).total_seconds())))
+   time.sleep(300)
  threading.Thread(target=loop,name='penten-sync-recovery',daemon=True).start()
 
 def reconciliation_healthy(after):
