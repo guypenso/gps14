@@ -1,6 +1,7 @@
 """Read-only stored evidence for the owner's single expressly authorized address."""
 import json,re
 from .public_tax import norm
+from .provenance import demo_marked
 ADDRESS='4472 1st St'
 ZIP='15102'
 KEY='owner-exception-4472-1st-st-20261112'
@@ -24,7 +25,7 @@ def snapshot(store,now):
         if saved and saved[1]==__import__('rentalsourcing.collector',fromlist=['LIVE']).LIVE:
             from .core import tax_verification
             record=json.loads(saved[0]) if isinstance(saved[0],str) else saved[0]
-            if isinstance(record,dict) and record.get('id')==identity and matches(record):
+            if isinstance(record,dict) and record.get('id')==identity and matches(record) and not demo_marked(record):
                 tax_state,tax,_=tax_verification(record,now.date())
                 if tax_state in ('Qualified','Rejected') and tax:cached_tax={'annual':tax['annual'],'year':tax['year'],'fetched_at':saved[2],'source':'RentCast cached property records'}
         found.append({'cached_tax':cached_tax,'source_id':identity,'property':{k:p[k] for k in fields if k in p},'stored_state':state,'stored_reasons':json.loads(reasons),'current_state':verdict,'current_reasons':failures,'observed_at':observed,'cached_rent':cached_estimate(store,p,now)})

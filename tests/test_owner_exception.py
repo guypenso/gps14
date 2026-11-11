@@ -20,3 +20,12 @@ def test_stored_rejected_evidence_lookup_is_readonly_and_no_paid_requests(store,
  before=store.execute('SELECT id,payload,state,reasons FROM properties').fetchall();usage=store.execute('SELECT * FROM usage').fetchall()
  data=snapshot(store,clock());assert data['provider_calls']==0;assert len(data['matches'])==1;assert data['matches'][0]['source_id']==p['id'];assert data['matches'][0]['stored_state']=='Rejected'
  assert store.execute('SELECT id,payload,state,reasons FROM properties').fetchall()==before;assert store.execute('SELECT * FROM usage').fetchall()==usage
+
+def test_demo_cache_cannot_supply_verified_owner_tax(store,clock):
+ from rentalsourcing.collector import LIVE
+ from conftest import listing
+ p=listing(id='owner-demo-guard',addressLine1='4472 1st St',formattedAddress='4472 1st St, Bethel Park, PA 15102',city='Bethel Park',zipCode='15102',squareFootage=980)
+ store.execute('INSERT INTO properties(id,payload,source,observed_at,state,reasons) VALUES (?,?,?,?,?,?)',(p['id'],__import__('json').dumps(p),LIVE,clock().isoformat(),'Rejected','["sqft"]'))
+ record={**p,'demo':True,'propertyTaxes':{str(clock().year):{'total':1455}}}
+ store.save_tax(p['id'],record,LIVE,clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
+ assert snapshot(store,clock())['matches'][0]['cached_tax'] is None
