@@ -5,9 +5,8 @@ Two-bedroom homes have an inclusive $150,000 ceiling. Three/four-bedroom homes
 retain the inclusive $200,001 ceiling. All geography, condition, property-type,
 size, bath, verified-tax and supported high-rent requirements remain in force.
 
-The existing Render cron runs the 08:00 Asia/Jerusalem slot (05:00/06:00 UTC,
-with the local-time guard). The existing dashboard recovery worker wakes for
-20:00 Asia/Jerusalem. No new service or evening email is created. Both use the
+The existing Render cron runs both 08:00 and 20:00 Asia/Jerusalem slots
+(05:00/06:00 and 17:00/18:00 UTC, with the local-time guard). No new service or evening email is created. Both use the
 existing database lock. `discovery_run:<date>:<slot>` records outcome and request
 counts; completed slots cannot fetch twice. Failed sync deliveries retain the
 existing recovery ledger. Source failures and partial/budget-limited scans
