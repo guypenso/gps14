@@ -29,16 +29,16 @@ def property_type_evidence(row,*,single_family=True):
     if review:fields.append({'field':'reviewed.propertySubType','value':review['propertySubType']})
     prior=row.get('_rentalsourcing_prior_property_type')
     if isinstance(prior,dict) and prior.get('state')=='excluded':fields+=prior.get('evidence',[])[:20]
-    values=[compact(f['value']) for f in fields if f['field'].split('.')[-1]!='architecturalStyle' and isinstance(f['value'],str) and not re.search(r'co\W*op|cooperative|unknown|uncertain',f['value'],re.I) and not re.search(r'\b(?:not|non|no)\W+(?:a\W+)?condo(?:minium)?\b',f['value'],re.I)]
+    values=[compact(f['value']) for f in fields if compact(f['field'].split('.')[-1])!='architecturalstyle' and isinstance(f['value'],str) and not re.search(r'co\W*op|cooperative|unknown|uncertain',f['value'],re.I) and not re.search(r'\b(?:not|non|no)\W+(?:a\W+)?condo(?:minium)?\b',f['value'],re.I)]
     def contains(terms):return any(term in value for value in values for term in terms)
-    reason='condominium' if contains(POLICY['condo_terms']) or any(f['field'].split('.')[-1] in ('isCondominium','isCondo') and f['value'] is True for f in fields) else 'townhouse' if contains(POLICY['town_terms']) else None
+    reason='condominium' if contains(POLICY['condo_terms']) or any(compact(f['field'].split('.')[-1]) in ('iscondominium','iscondo') and f['value'] is True for f in fields) else 'townhouse' if contains(POLICY['town_terms']) else None
     if reason:state='excluded'
     elif any(v in ('land','commercial','industrial') for v in values):state,reason='excluded','non_residential'
     elif single_family and any(v in ('duplex','triplex','fourplex','multifamily','manufactured','manufacturedhome','mobilehome','residentialincome') for v in values):state,reason='excluded','single_family_only'
-    elif any(f['field'].split('.')[-1]=='architecturalStyle' and any(term in compact(f['value']) for term in POLICY['town_terms']) for f in fields):state,reason='pending','architectural_attachment_requires_verification'
+    elif any(compact(f['field'].split('.')[-1])=='architecturalstyle' and any(term in compact(f['value']) for term in POLICY['town_terms']) for f in fields):state,reason='pending','architectural_attachment_requires_verification'
     elif review and review.get('type_conflict'):state,reason='pending','conflicting_property_type'
-    elif any(f['field'].split('.')[-1] in ('attached','isAttached') and f['value'] is True for f in fields) or any(v in ('attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome') for v in values):state,reason='pending','attached_property_type_unverified'
+    elif any(compact(f['field'].split('.')[-1]) in ('attached','isattached') and f['value'] is True for f in fields) or any(v in ('attached','semidetached','singlefamilysemidetached','semidetachedsinglefamily','duet','twinhome') for v in values):state,reason='pending','attached_property_type_unverified'
     elif any(v in POLICY['single_family_terms'] or not single_family and v in ('multifamily','duplex','triplex','fourplex','manufactured','manufacturedhome','mobilehome','residentialincome') for v in values):state,reason='eligible',None
     else:state,reason='pending','property_type_unverified'
-    detail=state=='eligible' and any('subtype' in f['field'].lower().replace('_','') and compact(f['value']) in POLICY['single_family_terms'] or compact(f['value']) in ('detached','singlefamilydetached','detachedsinglefamily') or f['field'].split('.')[-1] in ('attached','isAttached') and f['value'] is False for f in fields)
+    detail=state=='eligible' and any('subtype' in compact(f['field']) and compact(f['value']) in POLICY['single_family_terms'] or compact(f['value']) in ('detached','singlefamilydetached','detachedsinglefamily') or compact(f['field'].split('.')[-1]) in ('attached','isattached') and f['value'] is False for f in fields)
     return {'policy':POLICY['version'],'state':state,'reason':reason,'detail_confirmed':bool(detail),'evidence':fields[:40],'reviewed_source':review}
