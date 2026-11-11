@@ -8,10 +8,12 @@ from .digest import recent_timestamp
 
 
 def reevaluate(store,boundary,now,*,atomic=True):
+    from .tax_backlog import review_deferred
     from contextlib import nullcontext
     changed=0
     with store.transaction() if atomic else nullcontext():
         for identity,payload,old_state,old_reasons,source,observed in store.execute('SELECT id,payload,state,reasons,source,observed_at FROM properties').fetchall():
+            if review_deferred(identity,store):continue
             row=json.loads(payload);state,reasons=verification(row,boundary)
             if state=='Candidate':
                 cached=store.get_tax(identity,now.isoformat())
@@ -23,8 +25,38 @@ def reevaluate(store,boundary,now,*,atomic=True):
                     state,_,reason=tax_verification(cached[0],now.date());reasons=[reason] if reason else []
             if state!=old_state or reasons!=json.loads(old_reasons):
                 store.set_verification(identity,state,reasons);changed+=1
-        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=3,bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261107-tax2400-inclusive",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=2,maximum_price_by_bedrooms={2:150000,3:200001,4:200001},bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261111-two-bedroom",single_family_only=True))
     return changed
+
+def reconcile_bedroom_policy(store,boundary,now):
+    """Only automated bedroom rejections; preserve history and owner decisions."""
+    from .investment_policy import POLICY_VERSION
+    from .tax_backlog import review_deferred
+    from .sync_runtime import get
+    key='bedroom_policy_reconciliation:'+POLICY_VERSION
+    prior=get(store,key)
+    if prior:return prior
+    result={'policy':POLICY_VERSION,'at':now.isoformat(),'two_bedroom_records':0,'new_non_tax_eligible':0,'human_decisions_preserved':0,'stale_held':0,'fresh_candidates':0,'qualified':0,'pending_verification':0,'source_ids':[],'provider_calls':0}
+    history=[]
+    for identity,raw,state,reasons,source,observed in store.execute('SELECT id,payload,state,reasons,source,observed_at FROM properties').fetchall():
+        p=json.loads(raw)
+        if p.get('bedrooms')!=2:continue
+        result['two_bedroom_records']+=1
+        if review_deferred(identity,store):result['human_decisions_preserved']+=1;continue
+        if verification(p,boundary)[0]!='Candidate':continue
+        if state!='Rejected' or set(json.loads(reasons))!={'bedrooms'}:continue
+        result['new_non_tax_eligible']+=1
+        history.append({'source_id':identity,'previous_state':state,'previous_reasons':json.loads(reasons),'policy':POLICY_VERSION})
+        if source!=LIVE or not recent_timestamp(observed,now):result['stale_held']+=1;continue
+        tax=store.get_tax(identity,now.isoformat());status='Pending Verification';why=['tax_verification_required']
+        if tax and tax[1]==LIVE and tax[0].get('id')==identity:
+            status,_,reason=tax_verification(tax[0],now.date());why=[reason] if reason else []
+        store.set_verification(identity,status,why)
+        if status=='Rejected':continue
+        result['source_ids'].append(identity);result['fresh_candidates']+=1
+        result['qualified' if status=='Qualified' else 'pending_verification']+=1
+    result['history']=history;store.save_setting(key,result)
+    return result
 
 
 def reconcile_geography(store,boundary,now):

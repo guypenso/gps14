@@ -69,7 +69,7 @@ def test_discovery_circle_covers_both_entire_municipalities_without_extra_reques
  for region in [policy.city,policy.bellevue]:
   polys=list(region.geometry.geoms) if region.geometry.geom_type=='MultiPolygon' else [region.geometry]
   assert all(distance(x,y)<=q['radius'] for poly in polys for x,y in poly.exterior.coords)
- assert q['price']=='*:200001' and q['bedrooms']=='3:4' and q['bathrooms']=='1:*' and q['squareFootage']=='1000:*'
+ assert q['price']=='*:200001' and q['bedrooms']=='2:4' and q['bathrooms']=='1:*' and q['squareFootage']=='1000:*'
 
 def test_region_checksum_and_missing_polygon_fail_closed(tmp_path):
  src=ROOT/'data/bellevue.geojson';target=tmp_path/src.name;target.write_bytes(src.read_bytes()+b' ');target.with_suffix('.source.json').write_bytes(src.with_suffix('.source.json').read_bytes())

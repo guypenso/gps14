@@ -6,9 +6,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PARAMS = dict(city='Pittsburgh', state='PA', status='Active', bedrooms='3:4',
+PARAMS = dict(city='Pittsburgh', state='PA', status='Active', bedrooms='2:4',
               bathrooms='1:*', squareFootage='1000:*', price='*:200001',
-              limit=20, offset=0, includeTotalCount='true')
+              limit=500, offset=0, includeTotalCount='true')
 
 
 def listing_parameters(boundary):

@@ -25,11 +25,15 @@ Current acceptance: 100 real listings, 58 rejected, 39 pending tax, three fully 
 6. Persist one daily Resend digest containing new verified properties or newly observed price reductions.
 7. Save cursors, tasks, observations, price revisions, tax history, configuration, quota usage and delivery state in PostgreSQL.
 
-Current criteria: approved Pittsburgh PA or Bellevue Borough geography, Active/For Sale,
-exactly 3 or 4 bedrooms, at least one bathroom, at least 1,000 sqft and asking price
-at most $200,001. Single-family only; condos, townhomes and turnkey listings are
+Current criteria: approved Pittsburgh PA, Bellevue Borough, Pleasant Hills Borough,
+or Bethel Park Municipality geography, Active/For Sale; exactly 2 bedrooms with
+asking price at most $150,000, or exactly 3 or 4 bedrooms at most $200,001.
+At least one bathroom and 1,000 sqft remain mandatory. Single-family only; condos, townhomes and turnkey listings are
 excluded. Preserve excluded ZIPs 15203/15204/15210/15211 and every neighborhood
-restriction. Verified annual tax + $100 must be at most $2,400. There is no demo fallback.
+restriction. Verified annual tax + $100 must be at most $2,400, with the existing
+supported RentCast high-rent exception unchanged. Discovery runs at 08:00 and
+20:00 Asia/Jerusalem within the approved budget; only the morning sends a digest.
+See [twice-daily discovery](docs/twice-daily-discovery.md). There is no demo fallback.
 
 ## Quick local validation
 

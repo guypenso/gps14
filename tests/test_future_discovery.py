@@ -37,7 +37,7 @@ def test_failed_delivery_persists_frozen_future_batch_without_email(store,bounda
         def open(self,*args,**kwargs):raise TimeoutError()
     report=process(store,boundary,'future',clock(),config=('https://example.test/api/rentalsourcing/sync','s'*32,'fixture'),opener=Unavailable())
     assert report['state']=='pending_recovery'
-    ledger=json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('stored-review-inventory:future:future',)).fetchone()[0])
+    ledger=json.loads(store.execute('SELECT payload FROM settings WHERE name LIKE ?',('stored-review-inventory:future:future:%',)).fetchone()[0])
     assert ledger['delivery_scope']=='daily' and len(ledger['batches'])==1
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
 
@@ -74,5 +74,7 @@ def test_new_qualified_and_pending_delivery_retries_are_idempotent(store,boundar
             assert cards['unknown']['qualification']=='pending_verification'
             return Response(p)
     receiver=Receiver();config=('https://example.test/api/rentalsourcing/sync','s'*32,'fixture')
-    for _ in range(2):assert process(store,boundary,'future',clock(),config=config,opener=receiver)['synced']==2
+    assert process(store,boundary,'future',clock(),config=config,opener=receiver)['synced']==2
+    repeated=process(store,boundary,'future',clock(),config=config,opener=receiver)
+    assert repeated['synced']==0 and repeated['new_source_listings']==0
     assert receiver.calls==1

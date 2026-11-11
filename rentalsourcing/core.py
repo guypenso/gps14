@@ -6,7 +6,7 @@ from pathlib import Path
 from .provenance import demo_marked
 from .turnkey import evidence as turnkey_evidence
 from .condominium import evidence as condominium_evidence
-from .investment_policy import PRICE_MAX, TAX_BUFFER, TAX_CEILING, annual_tax_passes
+from .investment_policy import PRICE_MAX, TAX_BUFFER, TAX_CEILING, annual_tax_passes,bedroom_price_rejection
 
 EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
@@ -55,7 +55,9 @@ def basic_rejection(row):
     if len(zipcode) != 5 or not zipcode.isdigit(): return 'missing_zip'
     if zipcode in EXCLUDED_ZIPS: return 'excluded_zip'
     if property_type_verification(row,single_family=True)[0]=='Rejected':return property_type_verification(row,single_family=True)[1]
-    for field, low, high in [('bedrooms', 3, 4), ('bathrooms', 1, math.inf),
+    bedroom_failure=bedroom_price_rejection(row.get('bedrooms'),row.get('price') if number(row.get('price')) else None)
+    if bedroom_failure:return bedroom_failure
+    for field, low, high in [('bedrooms', 2, 4), ('bathrooms', 1, math.inf),
                               ('squareFootage', 1000, math.inf), ('price', 0.01, PRICE_MAX)]:
         value = row.get(field)
         if not number(value) or not low <= value <= high or field=='bedrooms' and not float(value).is_integer(): return field
@@ -142,12 +144,14 @@ def verification(row, boundary, *, profile="rental", offering=True):
     zipcode=str(row.get('zipCode') or '').split('-')[0]
     if len(zipcode)!=5 or not zipcode.isdigit(): missing.append('zipCode')
     elif zipcode in EXCLUDED_ZIPS: failed.append('excluded_zip')
-    limits=[('bedrooms',3,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf)]
+    limits=[('bedrooms',2,4),('bathrooms',1,math.inf),('squareFootage',1000,math.inf)]
     if offering:limits.append(('price',30000 if profile=='offmarket' else 0.01,PRICE_MAX))
     for field,lo,hi in limits:
         value=row.get(field)
         if not number(value): missing.append(field)
         elif not lo<=value<=hi or field=='bedrooms' and not float(value).is_integer(): failed.append(field)
+    bedroom_failure=bedroom_price_rejection(row.get('bedrooms'),row.get('price') if offering and number(row.get('price')) else None)
+    if bedroom_failure and number(row.get('bedrooms')) and bedroom_failure not in failed:failed.append(bedroom_failure)
     if not isinstance(row.get('formattedAddress'),str) or not row['formattedAddress'].strip(): missing.append('address')
     if not isinstance(row.get('id'),str) or not row['id'].strip(): missing.append('property_id')
     x,y=row.get('longitude'),row.get('latitude')

@@ -187,6 +187,20 @@ def start_scheduler(url):
     from .listing_intake import reconcile_official_identities
     reconcile_official_identities(s,now)
     from .investment_policy import POLICY_VERSION
+    from .criteria import reconcile_bedroom_policy
+    from .geography import load_boundary
+    from .config import Settings
+    bedroom_key='bedroom_delivery:'+POLICY_VERSION
+    if not get(s,bedroom_key):
+     changed=reconcile_bedroom_policy(s,load_boundary(Settings.from_env().boundary_file),now)
+     if changed['source_ids']:
+      from .review_inventory import run as deliver_bedrooms
+      u,k,t=review_configuration()
+      ledger=deliver_bedrooms(s,load_boundary(Settings.from_env().boundary_file),now,execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key=bedroom_key,source_ids=set(changed['source_ids']),include_verified=True)
+      changed['receipt_counts']=ledger.get('receipt_counts',{})
+     s.save_setting(bedroom_key,changed)
+     from .telemetry import event
+     event('bedroom_policy_reconciliation',**{k:v for k,v in changed.items() if k not in ('history','source_ids')})
     criteria_key=POLICY_VERSION+':'+POLICY
     if not get(s,criteria_key):
      from .criteria import reconcile_geography
