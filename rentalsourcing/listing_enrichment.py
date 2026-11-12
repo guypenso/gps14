@@ -35,10 +35,18 @@ def stored_evidence(store,p,observed,now=None):
     out=evidence(p,observed)
     out['insight_facts_provenance']={k:{'source':'RentCast stored listing','observed_at':observed} for k in out['insight_facts']}
     saved=store.get_tax(p.get('id'),(now or dt.datetime.now(dt.timezone.utc)).isoformat())
+    from .rental_intelligence import cached_estimate
+    rent=cached_estimate(store,p,now or dt.datetime.now(dt.timezone.utc))
+    if rent:out['rent_estimate']=rent
     if not saved:return out
     record=json.loads(saved[0]) if isinstance(saved[0],str) else saved[0]
     if saved[1]!=LIVE or not isinstance(record,dict) or record.get('id')!=p.get('id') or demo_marked(record):return out
+    from .tax_intelligence import provider_evidence
+    history=store.execute('SELECT payload,source,fetched_at,expires_at FROM tax_history WHERE property_id=?',(p.get('id'),)).fetchone()
+    tax=provider_evidence(p.get('id'),history,now or dt.datetime.now(dt.timezone.utc))
+    if tax and tax['state']=='provider_verified':out['provider_tax']=dict(tax,source_id=p.get('id'))
     cached=evidence(record,saved[2])
+    if not out['agents'] and cached['agents']:out['agents']=cached['agents']
     if not out['description'] and cached['description']:
         out['description']=cached['description'];out['description_source']='RentCast cached property record';out['description_observed_at']=saved[2]
     if cached['property_type_evidence']['evidence']:
@@ -49,6 +57,17 @@ def stored_evidence(store,p,observed,now=None):
             out['insight_facts'][k]=v
             out['insight_facts_provenance'][k]={'source':'RentCast cached property record','observed_at':saved[2]}
     return out
+
+def research_context(store):
+    from .config import Settings
+    settings=Settings.from_env();at=dt.datetime.now(dt.timezone.utc)
+    cached=store.execute('SELECT payload FROM settings WHERE name=?',('research_budget_context',)).fetchone()
+    if not settings.enabled and cached:return json.loads(cached[0])
+    scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()
+    budget=store.budget_health(settings,at,record_warning=False) if settings.enabled else json.loads(scheduled[0]) if scheduled else {'remaining':0}
+    value={'remaining':budget.get('remaining',0),'approval_cap':settings.approved_requests if settings.enabled else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':settings.enabled and settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
+    if settings.enabled:store.save_setting('research_budget_context',value)
+    return value
 
 def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
     if not config:return {'state':'disabled'}
@@ -64,7 +83,7 @@ def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
     owner_snapshot=exception_snapshot(store,dt.datetime.now(dt.timezone.utc))
     for _ in range(100):
         records=[stored_evidence(store,json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
-        body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records,'owner_exception_source':owner_snapshot},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
+        body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records,'owner_exception_source':owner_snapshot,'research_context':research_context(store)},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
         from .sync_runtime import request_json
         def validate(result,*args):
             if result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
@@ -93,7 +112,7 @@ def main():
 if __name__=='__main__':main()
 
 
-INSIGHTS_JOB='listing-contact-enrichment:2026-11-12:owner-exception-4472-v2'
+INSIGHTS_JOB='listing-contact-enrichment:2026-11-12:continuous-research-v1'
 def initial_insights(store,config=None):
     """Read-only source snapshot, separately locked from paid discovery/recovery."""
     config=config or review_configuration()
