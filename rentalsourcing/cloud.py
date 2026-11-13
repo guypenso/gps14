@@ -312,8 +312,12 @@ def main(argv=None):
     store=Store(url)
     try:
         if not store.lock():
-            if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
-            event('scan_already_running');return
+            if args.scheduled:
+                event('scheduled_scan_waiting_for_lock',timeout_seconds=120)
+                store.wait_for_scan_lock()
+            else:
+                if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
+                event('scan_already_running');return
         store.migrate()
         if args.scheduled and scheduled_slot():
             from .reliability import begin

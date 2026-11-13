@@ -267,3 +267,45 @@ def test_zero_row_response_survives_interruption_without_repurchase(store,bounda
     result,_=run(store,boundary,allocated,'2026-11-13','evening',clock=clock,opener=provider)
     assert provider.calls.count((MAIN,0))==1 and result['requests_consumed']==3
     assert len(result['pages'])==3 and result['discovery_complete']
+
+
+@pytest.mark.parametrize('month',[3,11])
+@pytest.mark.parametrize('hour,minute,expected',[(7,49,False),(7,50,True),(8,19,True),(8,20,False),
+    (19,49,False),(19,50,True),(20,19,True),(20,20,False)])
+def test_watchdog_protects_both_discovery_windows_across_dst(month,hour,minute,expected):
+    from rentalsourcing.schedule import ISRAEL,discovery_protected_window
+    now=dt.datetime(2026,month,28,hour,minute,tzinfo=ISRAEL).astimezone(dt.timezone.utc)
+    assert discovery_protected_window(now) is expected
+
+
+def test_scheduled_scan_waits_for_watchdog_lock_without_duplicate_execution(store):
+    if not store.pg:pytest.skip('PostgreSQL advisory-lock queue')
+    import time
+    other=Store(store.test_url,initialize=False)
+    try:
+        assert store.lock() and not other.lock()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting=pool.submit(other.wait_for_scan_lock,2)
+            deadline=time.monotonic()+1
+            while time.monotonic()<deadline:
+                queued=store.execute('SELECT COUNT(*) FROM pg_locks WHERE pid=? AND granted=false',(other.db.info.backend_pid,)).fetchone()[0]
+                if queued:break
+                time.sleep(.01)
+            assert queued and not waiting.done()
+            store.execute('SELECT pg_advisory_unlock(73541209)')
+            assert waiting.result(timeout=3) is True
+        assert not store.lock()
+        assert other.execute('SHOW statement_timeout').fetchone()[0]=='30s'
+    finally:other.close()
+    assert store.lock()
+
+
+def test_scheduled_lock_timeout_is_an_explicit_failure(store):
+    if not store.pg:pytest.skip('PostgreSQL advisory-lock timeout')
+    other=Store(store.test_url,initialize=False)
+    try:
+        assert store.lock()
+        with pytest.raises(RuntimeError,match='no provider request'):
+            other.wait_for_scan_lock(1)
+        assert other.execute('SHOW statement_timeout').fetchone()[0]=='30s'
+    finally:other.close()
