@@ -230,6 +230,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description='RentalSourcing daily production collector')
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--check',action='store_true',help='Check config, boundary and read-only sync authentication; no provider calls')
+    group.add_argument('--catch-up-discovery',metavar='ISRAEL_DAY',help='One idempotent listing-only catch-up; requires verified supplemental approval; never sends email')
     group.add_argument('--scheduled',action='store_true',help='Explicit collector run in the Israel 08:00 window; requires API approval')
     group.add_argument('--scheduled-email',action='store_true',help='08:00 Israel stored-data email only; never collect')
     group.add_argument('--prepare-email',action='store_true',help='Prepare a saved-data email without sending')
@@ -265,6 +266,8 @@ def main(argv=None):
             observer=None
             try:
                 observer=Store(validate_postgres_url(os.getenv('DATABASE_URL')),initialize=False)
+                reconciliation=observer.reconcile_provider_baseline(settings,dt.datetime.now(dt.timezone.utc))
+                if reconciliation['state']!='not_requested':event('budget_reconciliation',**reconciliation)
                 observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))
             except Exception as exc:event('budget_telemetry_unavailable',error_type=type(exc).__name__)
             finally:
@@ -275,9 +278,13 @@ def main(argv=None):
         if not exists:raise ValueError('Official city boundary missing; run scripts/fetch_boundary.py in the deployment environment')
         return
     day=dt.datetime.now(dt.timezone.utc).astimezone(ISRAEL).date().isoformat()
+    catchup_day=args.catch_up_discovery or (os.getenv('CATCH_UP_DISCOVERY_DAY') if args.scheduled else None)
+    catchup_requested=catchup_day==day
+    if args.catch_up_discovery and not catchup_requested:raise ValueError('Catch-up must target today in Asia/Jerusalem')
     if args.scheduled or args.scheduled_email:
         day=scheduled_day()
-        if day is None:event('outside_israel_schedule');return
+        if day is None and not (args.scheduled and catchup_requested):event('outside_israel_schedule');return
+        if day is None:day=catchup_day
     administrative=args.scheduled or args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
@@ -288,11 +295,15 @@ def main(argv=None):
             if args.migrate:raise RuntimeError('Database is busy; migrations did not run. Retry deployment after the active job completes.')
             event('scan_already_running');return
         store.migrate()
-        if args.scheduled:
+        if args.scheduled and scheduled_slot():
             from .reliability import begin
             begin(store,day,dt.datetime.now(dt.timezone.utc))
         boundary=load_boundary(settings.boundary_file)
         if args.migrate:event('migrations_complete');return
+        if catchup_requested:
+            from .catch_up import run as catch_up
+            result=catch_up(store,boundary,settings,day);event('catch_up_discovery',**result)
+            if args.catch_up_discovery or not scheduled_slot():return
         from .tax_backlog import reconcile
         event('tax_cache_recovery',**reconcile(store,settings,dt.datetime.now(dt.timezone.utc)))
         from .criteria import reevaluate

@@ -30,6 +30,8 @@ class Settings:
     boundary_file: str = 'data/pittsburgh.geojson'
     monthly_budget_requests: int = 0
     provider_included_requests: int = 0
+    supplemental_requests: int = 0
+    approval_expires_at: str = ''
 
     def __post_init__(self):
         for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout','listing_requests_per_day','negative_tax_cache_hours'):
@@ -44,6 +46,18 @@ class Settings:
             if self.billing_baseline < 0:raise ValueError('BILLING_USAGE_BASELINE must include current account usage before activation')
         if self.approval_mode=='monthly_budget' and min(self.monthly_budget_requests,self.provider_included_requests)<=0:
             raise ValueError('Monthly budget and verified provider included quota are required; overages are disabled')
+        if self.supplemental_requests:
+            import datetime as dt
+            if self.approval_mode!='monthly_budget' or not 1<=self.supplemental_requests<=11:
+                raise ValueError('Supplemental approval requires monthly_budget and at most 11 additional requests')
+            if self.provider_included_requests>50 or self.request_ceiling>50:
+                raise ValueError('Supplemental approval cannot exceed the verified free-plan ceiling of 50')
+            try:
+                end=dt.datetime.fromisoformat(self.approval_expires_at.replace('Z','+00:00'))
+                anchor=dt.datetime.fromisoformat(self.billing_anchor.replace('Z','+00:00'))
+                from .billing import billing_window
+                if end.tzinfo is None or not anchor<end<=billing_window(self,anchor)[1]:raise ValueError
+            except (ValueError,TypeError):raise ValueError('Supplemental approval needs a timezone-aware cutoff within its verified billing cycle') from None
         if self.email_enabled and (self.environment != 'production' or not self.email_to or not self.email_from):
             raise ValueError('Email requires production environment and sender/recipient')
 
@@ -57,7 +71,7 @@ class Settings:
           'retries':'NETWORK_RETRIES','billing_day':'BILLING_DAY','billing_anchor':'BILLING_CYCLE_ANCHOR',
           'billing_baseline':'BILLING_USAGE_BASELINE','listing_requests_per_day':'LISTING_REQUESTS_PER_DAY',
           'negative_tax_cache_hours':'NEGATIVE_TAX_CACHE_HOURS','email_approval_id':'EMAIL_APPROVAL_ID','environment':'APP_ENV',
-          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE','monthly_budget_requests':'MONTHLY_API_REQUEST_BUDGET','provider_included_requests':'PROVIDER_INCLUDED_REQUESTS'}
+          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE','monthly_budget_requests':'MONTHLY_API_REQUEST_BUDGET','provider_included_requests':'PROVIDER_INCLUDED_REQUESTS','supplemental_requests':'SUPPLEMENTAL_API_REQUESTS','approval_expires_at':'API_APPROVAL_EXPIRES_AT'}
         defaults=cls(); values={}
         for field,env in mapping.items():
             default=getattr(defaults,field)

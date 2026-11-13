@@ -121,13 +121,31 @@ class Store:
         row=self.execute('SELECT used FROM usage WHERE period=?',(period,)).fetchone()
         return row[0] if row else 0
 
-    def reserve_api(self,settings,now=None,*,tax_request=False):
+    def reconcile_provider_baseline(self,settings,now):
+        """Seed the account-wide baseline and retain all overlapping legacy ledgers."""
+        from .billing import billing_window,cycle_key
+        start,end,anchor=billing_window(settings,now)
+        if not settings.supplemental_requests:return {'state':'not_requested'}
+        cutoff=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00'))
+        if start!=anchor or not anchor<=now<cutoff:return {'state':'expired'}
+        with self.transaction():
+            if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
+            daily=self.execute('SELECT COALESCE(SUM(used),0) FROM usage WHERE period>=? AND period<?',('day:'+start.date().isoformat(),'day:'+end.date().isoformat())).fetchone()[0]
+            baseline=max(settings.billing_baseline,daily)
+            self.execute('INSERT INTO usage VALUES (?,?) ON CONFLICT(period) DO UPDATE SET used=CASE WHEN usage.used<excluded.used THEN excluded.used ELSE usage.used END',(cycle_key(settings,now),baseline))
+            body={'state':'reconciled','at':now.isoformat(),'provider_confirmed_used':settings.billing_baseline,'app_reserved_attempts_in_date_window':daily,'unreconciled_account_delta':settings.billing_baseline-daily,'cycle_key':cycle_key(settings,now),'additional_limit':settings.supplemental_requests,'expires_at':settings.approval_expires_at,'legacy_ledgers_preserved':True,'provider_calls':0}
+            self.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',('budget_reconciliation:'+anchor.isoformat(),json.dumps(body)))
+        return body
+
+    def reserve_api(self,settings,now=None,*,tax_request=False,scope=None):
         from .billing import cycle_key, billing_window, future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
         if settings.approval_mode!='monthly_budget' and (not settings.approval_id or settings.approved_requests<=0):raise BudgetExceeded('No approved live API allowance')
         start,end,anchor=billing_window(settings,now)
         if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:
             raise BudgetExceeded('Approved subscription cycle has not started')
+        if settings.supplemental_requests and (start!=anchor or now>=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00'))):
+            raise BudgetExceeded('Current-cycle supplemental approval expired; new provider verification and approval required')
         periods=[(now.strftime('day:%Y-%m-%d'),settings.per_day),
                  (cycle_key(settings,now),settings.per_month),
                  ('approval:'+settings.approval_id,settings.approved_requests)]
@@ -141,6 +159,9 @@ class Store:
                              (cycle_key(settings,now),baseline))
                 # The cycle is incremented once; changing an approval cannot reset it.
                 periods=[periods[0],(cycle_key(settings,now),settings.request_ceiling)]
+                if settings.supplemental_requests:
+                    # This grant is independent of the baseline and cannot reset on approval renaming.
+                    periods.append(('supplemental:'+anchor.isoformat(),settings.supplemental_requests))
                 if tax_request:
                     future_days=future_listing_days(now,end)
                     if settings.request_ceiling-self.count_usage(cycle_key(settings,now))<=future_days*settings.listing_requests_per_day:
@@ -149,6 +170,10 @@ class Store:
                 periods=periods[:2]
                 if self.rolling_usage(now)>=settings.approved_requests:
                     raise BudgetExceeded('Rolling 32-day approved API allowance reached')
+            if scope:
+                name,limit=scope
+                if not isinstance(name,str) or len(name)>200 or not isinstance(limit,int) or limit<1:raise ValueError('Invalid durable request scope')
+                periods.append(('request_scope:'+name,limit))
             for key,limit in periods:
                 self.execute('INSERT INTO usage VALUES (?,0) ON CONFLICT(period) DO NOTHING',(key,))
                 if not self.execute('UPDATE usage SET used=used+1 WHERE period=? AND used<? RETURNING used',(key,limit)).fetchone():
@@ -171,13 +196,17 @@ class Store:
         else:
             approval_used=self.rolling_usage(now) if settings.approval_mode=='rolling_32_days' else self.count_usage('approval:'+settings.approval_id)
         remaining=max(0,settings.request_ceiling-used) if settings.approval_mode=='monthly_budget' else max(0,min(settings.per_month-used,settings.approved_requests-approval_used))
+        supplemental_used=self.count_usage('supplemental:'+anchor.isoformat()) if settings.supplemental_requests else 0
+        if settings.supplemental_requests:
+            remaining=min(remaining,max(0,settings.supplemental_requests-supplemental_used))
+            if cycle!=anchor or now>=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00')):remaining=0
         if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None
         if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
         if warning and record_warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
-        return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning)
+        return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning,**({'supplemental_used':supplemental_used,'supplemental_limit':settings.supplemental_requests,'approval_expires_at':settings.approval_expires_at,'provider_baseline':settings.billing_baseline} if settings.supplemental_requests else {}))
 
     def scheduled_allowance(self,settings,now=None):
         now=now or dt.datetime.now(dt.timezone.utc)
