@@ -26,7 +26,7 @@ def _summary(value):
               'new_three_four_bedroom_candidates', 'new_parcel_matches',
               'new_verified_tax', 'new_estimated_tax', 'new_unknown_tax',
               'new_qualified', 'new_pending', 'new_rejected', 'synced', 'sent',
-              'pending', 'held', 'acknowledged', 'untracked', 'paid_tax_calls'}
+              'pending', 'held', 'acknowledged', 'untracked', 'paid_tax_calls', 'next_scope'}
     return {k: v for k, v in value.items() if k in fields and
             (v is None or isinstance(v, (str, int, float, bool)))}
 
@@ -57,6 +57,11 @@ def snapshot(store, now, boundary=None, page_size=500):
     stats = json.loads(row[4])
     result['job'] = dict(job_id=job_id, day=row[0], state=row[1], offset=row[2],
                          collection_done=bool(row[3]), updated_at=row[5], stats=_summary(stats))
+    result['job']['pending_verification_tasks'] = store.execute(
+        'SELECT COUNT(*) FROM scan_tasks WHERE job_id=? AND done=0', (job_id,)).fetchone()[0]
+    from .investment_policy import POLICY_VERSION
+    cursor = _setting(store, 'coverage_scope:' + POLICY_VERSION)
+    result['coverage_cursor'] = {k: cursor[k] for k in ('cursor', 'completed_job', 'at') if k in cursor}
     result['future_discovery'] = _summary(_setting(store, 'future_discovery_report:' + job_id))
     disposed = _setting(store, 'future_discovery_disposed:' + job_id)
     result['disposed_source_count'] = len(disposed.get('source_ids', []))
