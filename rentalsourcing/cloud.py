@@ -48,7 +48,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     safe_flush(store)
     digest=Digest(store,boundary,settings,clock,opener)
     old=store.execute('SELECT id,state FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
-    if old and slot!='evening':
+    if old and slot is None:
         # A previously prepared daily email must not suppress later enrichment
         # recovery. This pass is cache-only unless the separate monthly rent
         # budget and feature switch have both been activated.
@@ -80,6 +80,10 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
 
     if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
     elif settings.approval_mode not in {'billing_cycle','one_time','monthly_budget'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
+    elif slot:
+        from .partition_discovery import run as discover_partitions
+        stats,client=discover_partitions(store,boundary,settings,day,slot,clock=clock,opener=opener)
+        scan_job=stats['job_ids'][0] if stats.get('job_ids') else 'daily:'+day
     else:
         # Reserve before EVERY wire attempt using existing atomic DB counters.
         effective=replace(settings,retries=0) if settings.approval_mode=='monthly_budget' else replace(settings,per_month=min(50,settings.per_month),retries=0)
@@ -89,13 +93,8 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             effective=replace(effective,per_run=min(settings.per_run if settings.approval_mode=='monthly_budget' else 4,allowance))
             client=Client(store,effective,clock,opener)
             try:
-                query=None
-                if slot:scan_job,query,next_scope=scheduled_scope(store,day,slot,boundary)
-                else:scan_job=scheduled_job(store,day)
-                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true',query_parameters=query).run(scan_job,day)
-                if slot and stats.get('discovery_complete'):
-                    from .investment_policy import POLICY_VERSION
-                    store.save_setting('coverage_scope:'+POLICY_VERSION,{'cursor':next_scope,'completed_job':scan_job,'at':clock().isoformat()})
+                scan_job=scheduled_job(store,day)
+                stats=Engine(store,boundary,client,effective,clock,on_discovery_complete=lambda:safe_flush(store),allow_paid_tax=feedback_ok and os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true').run(scan_job,day)
                 stats['supplemental_jobs']=[]
                 if not slot and settings.approval_mode=='monthly_budget' and stats.get('discovery_complete'):
                     from .request import municipal_queries
@@ -124,13 +123,23 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),client)
     from .future_discovery import process as process_future
     try:
-        stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener)
-        stats['supplemental_verification']=[process_future(store,boundary,j,clock(),config=configuration(),opener=opener) for j in stats.get('supplemental_jobs',[])]
+        stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None)
+        stats['supplemental_verification']=[process_future(store,boundary,j,clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None) for j in stats.get('supplemental_jobs',[])]
     except Exception as exc:
         stats['future_discovery']={'state':'pending_recovery','error_type':type(exc).__name__}
         error={'category':'future_inventory_processing','retryable':True}
         component(store,'inventory_sync','partial',now=clock(),pending=1,error=error);incident(store,'inventory_sync',error,now=clock())
     event('future_discovery_verification',**stats['future_discovery'])
+    if slot:
+        # Store post-delivery business outcomes alongside the page receipts.
+        reports=[stats['future_discovery'],*stats.get('supplemental_verification',[])]
+        stats['delivery_totals']={k:sum(r.get(k,0) for r in reports) for k in
+            ('new_source_listings','recovered_source_listings','new_non_tax_pass','new_qualified','new_pending','new_rejected','synced')}
+        stats['penten_receipts']={k:sum(r.get('receipt_counts',{}).get(k,0) for r in reports) for k in
+            ('inserted','updated','rejected','excluded','duplicate_cards')}
+        store.save_setting('multi-discovery:'+day+':'+slot,stats)
+        store.save_setting('multi-discovery:last',stats)
+        event('partition_delivery_result',day=day,slot=slot,requests=stats.get('requests_consumed',0),**stats['delivery_totals'])
     if feedback_config or settings.email_enabled:
         from .listing_report import sync_before_report
         try:
@@ -200,7 +209,10 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
     try:
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener,slot=slot)
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
-        scan=result.get('scan','unknown');last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last[0]) if last else {}
+        scan=result.get('scan','unknown')
+        last=store.execute('SELECT payload FROM settings WHERE name=?',('multi-discovery:'+day+':'+str(slot),)).fetchone() if slot else None
+        if not last:last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone()
+        stats=json.loads(last[0]) if last else {}
         stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') or stats.get('discovery_partial') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
         for name in ('listing_processing','eligibility_filtering','property_storage','price_history'):
             stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
@@ -268,8 +280,16 @@ def main(argv=None):
                 observer=Store(validate_postgres_url(os.getenv('DATABASE_URL')),initialize=False)
                 reconciliation=observer.reconcile_provider_baseline(settings,dt.datetime.now(dt.timezone.utc))
                 if reconciliation['state']!='not_requested':event('budget_reconciliation',**reconciliation)
+                from .discovery_allocation import activate
+                allocation=activate(observer,settings,dt.datetime.now(dt.timezone.utc))
+                if allocation['state']!='not_requested':event('discovery_allocation',**allocation)
+                if allocation['state'] in {'active','already_active'}:
+                    from .partition_discovery import preflight
+                    event('discovery_scheduler_preflight',**preflight(observer,boundary,settings,dt.datetime.now(dt.timezone.utc)))
                 observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))
-            except Exception as exc:event('budget_telemetry_unavailable',error_type=type(exc).__name__)
+            except Exception as exc:
+                event('budget_telemetry_unavailable',error_type=type(exc).__name__)
+                if os.getenv('DISCOVERY_ALLOCATION_ID'):raise
             finally:
                 if observer:observer.close()
         event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
@@ -373,6 +393,8 @@ def main(argv=None):
     finally:store.close()
 
 if __name__=='__main__':
+    from .telemetry import configure_cli
+    configure_cli()
     try:main()
     except Exception as exc:
         event('command_failed',**diagnose(exc));raise SystemExit(1)

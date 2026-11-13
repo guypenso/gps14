@@ -61,7 +61,8 @@ class Client:
         request=urllib.request.Request(url,headers={'X-Api-Key':os.environ['RENTCAST_API_KEY'],'Accept':'application/json'})
         for attempt in range(self.settings.retries+1):
             if self.count>=self.settings.per_run:raise BudgetExceeded('Run API allowance reached')
-            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path.startswith('/properties/'),scope=self.request_scope)
+            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path.startswith('/properties/'),scope=self.request_scope,
+                purpose='listing' if path=='/listings/sale' else 'rent' if path=='/avm/rent/long-term' else 'tax')
             if health['warning']:event('budget_warning',**health)
             self.count+=1
             if self.count>1:self.sleep(1)

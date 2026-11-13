@@ -7,6 +7,21 @@ from rentalsourcing.future_discovery import process
 class Provider:
     source=LIVE
 
+def test_resumed_old_job_is_recovered_without_counting_old_properties_as_new(store,boundary,settings,clock,monkeypatch):
+    engine=Engine(store,boundary,Provider(),settings,clock)
+    engine.ingest('resumed',listing('old-observation'))
+    clock.advance(hours=1)
+    started=clock().isoformat()
+    engine.ingest('resumed',listing('new-observation'))
+    def accepted(*a,**kw):
+        return {'batches':[{'payload':json.dumps({'opportunities':[{},{}]})}],
+                'receipt_counts':{'inserted':1,'updated':1}}
+    monkeypatch.setattr('rentalsourcing.future_discovery.run',accepted)
+    result=process(store,boundary,'resumed',clock(),config=('https://fixture.test','key','token'),new_since=started)
+    assert result['new_source_listings']==1 and result['recovered_source_listings']==1
+    assert result['new_pending']==1 and result['synced']==2
+    assert result['receipt_counts']=={'inserted':1,'updated':1}
+
 def test_first_discovery_is_durable_and_old_decisions_are_not_reopened(store,boundary,settings,clock):
     engine=Engine(store,boundary,Provider(),settings,clock)
     engine.ingest('future',listing('new'))
