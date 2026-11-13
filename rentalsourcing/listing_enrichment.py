@@ -65,7 +65,7 @@ def research_context(store):
     if not settings.enabled and cached:return json.loads(cached[0])
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()
     budget=store.budget_health(settings,at,record_warning=False) if settings.enabled else json.loads(scheduled[0]) if scheduled else {'remaining':0}
-    value={'remaining':budget.get('remaining',0),'approval_cap':settings.approved_requests if settings.enabled else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':settings.enabled and settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
+    value={'remaining':budget.get('remaining',0),'approval_cap':settings.request_ceiling if settings.enabled else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':settings.enabled and settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
     if settings.enabled:store.save_setting('research_budget_context',value)
     return value
 

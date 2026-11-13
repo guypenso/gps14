@@ -24,11 +24,12 @@ def tax_expiry(record,now,settings):
 
 class Client:
     source=LIVE
-    def __init__(self,store,settings=None,clock=None,opener=None,sleep=time.sleep):
+    def __init__(self,store,settings=None,clock=None,opener=None,sleep=time.sleep,*,request_scope=None):
         self.store=store;self.settings=settings or Settings.from_env()
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
         self.opener=opener or urllib.request.build_opener(NoRedirect)
         self.sleep=sleep;self.count=0;self.cache_hits=0;self.last_fetched_at=None;self.last_error=None
+        self.request_scope=request_scope
 
     def get(self,path,params=None,cache=True):
         # A session lock covers cache lookup, reservation and response persistence.
@@ -60,7 +61,7 @@ class Client:
         request=urllib.request.Request(url,headers={'X-Api-Key':os.environ['RENTCAST_API_KEY'],'Accept':'application/json'})
         for attempt in range(self.settings.retries+1):
             if self.count>=self.settings.per_run:raise BudgetExceeded('Run API allowance reached')
-            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path.startswith('/properties/'))
+            health=self.store.reserve_api(self.settings,self.clock(),tax_request=path.startswith('/properties/'),scope=self.request_scope)
             if health['warning']:event('budget_warning',**health)
             self.count+=1
             if self.count>1:self.sleep(1)
