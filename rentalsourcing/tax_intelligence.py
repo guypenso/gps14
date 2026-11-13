@@ -71,6 +71,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  # records. Decisions remain authoritative even when a tax cache exists.
  owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
                     for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall() if source==LIVE)
+ from .discovery_audit import snapshot as discovery_snapshot
  return {'as_of':now.isoformat(),'source_records':coverage['counts'].get('stored_unique',0),
          'non_tax_pass':coverage['counts'].get('non_tax_pass',0),
          'non_tax_rejected':coverage['counts'].get('non_tax_rejected',0),
@@ -84,4 +85,5 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'actionable_evidence':summary,'official_dataset':{k:source_manifest.get(k) for k in ('source','sha256','retrieved_at','year')},
          'source_access':{'wprdc':'Saved official assessment batch; current remote availability is not inferred from cached data.'},
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
+         'discovery_execution':discovery_snapshot(store,now,boundary,settings.page_size),
          'api_budget':{'dashboard_runtime':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'last_scheduled':json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()[0]) if store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone() else None,'ledger':[{'period':r[0],'used':r[1]} for r in store.execute('SELECT period,used FROM usage ORDER BY period').fetchall()],'scope_note':'Dashboard provider calls are disabled. Scheduled cron configuration is separate; ledger and last_scheduled describe stored discovery usage.'},'property_quality':quality,'recent_source_type_evidence':recent,'owner_exception_source':__import__('rentalsourcing.owner_exception',fromlist=['snapshot']).snapshot(store,now),'qualification_changed':False,'provider_calls':0}
