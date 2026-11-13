@@ -38,6 +38,11 @@ class Store:
 
     def reserve(self, day_limit, month_limit, now=None, total_limit=40):
         now = now or dt.datetime.now(dt.timezone.utc)
+        # Legacy callers cannot bypass a protected listing allocation.
+        has_settings=self.execute("SELECT to_regclass('settings')").fetchone()[0] if self.pg else self.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
+        if has_settings:
+            from .discovery_allocation import saved
+            if saved(self):raise BudgetExceeded('Legacy accounting cannot bypass the protected listing allocation')
         periods = [(now.strftime('day:%Y-%m-%d'), day_limit), (now.strftime('month:%Y-%m'), month_limit), ('all_time', total_limit)]
         self.execute('BEGIN' if self.pg else 'BEGIN IMMEDIATE')
         try:
@@ -137,7 +142,7 @@ class Store:
             self.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',('budget_reconciliation:'+anchor.isoformat(),json.dumps(body)))
         return body
 
-    def reserve_api(self,settings,now=None,*,tax_request=False,scope=None):
+    def reserve_api(self,settings,now=None,*,tax_request=False,scope=None,purpose=None):
         from .billing import cycle_key, billing_window, future_listing_days
         now=now or dt.datetime.now(dt.timezone.utc)
         if settings.approval_mode!='monthly_budget' and (not settings.approval_id or settings.approved_requests<=0):raise BudgetExceeded('No approved live API allowance')
@@ -151,6 +156,8 @@ class Store:
                  ('approval:'+settings.approval_id,settings.approved_requests)]
         with self.transaction():
             if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
+            from .discovery_allocation import reservation_periods
+            allocation_periods=reservation_periods(self,settings,now,purpose,scope)
             if settings.approval_mode in {'billing_cycle','monthly_budget'}:
                 # Seed the already consumed account usage once, without resetting
                 # persisted app usage when an approval ID or process changes.
@@ -174,6 +181,7 @@ class Store:
                 name,limit=scope
                 if not isinstance(name,str) or len(name)>200 or not isinstance(limit,int) or limit<1:raise ValueError('Invalid durable request scope')
                 periods.append(('request_scope:'+name,limit))
+            periods.extend(allocation_periods)
             for key,limit in periods:
                 self.execute('INSERT INTO usage VALUES (?,0) ON CONFLICT(period) DO NOTHING',(key,))
                 if not self.execute('UPDATE usage SET used=used+1 WHERE period=? AND used<? RETURNING used',(key,limit)).fetchone():

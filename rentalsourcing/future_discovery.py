@@ -8,7 +8,7 @@ from .review_inventory import run,select
 from .sync_runtime import component,incident
 
 
-def process(store,boundary,job_id,now,*,config=None,opener=None):
+def process(store,boundary,job_id,now,*,config=None,opener=None,new_since=None):
     first=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchall()]
     seen_key='future_discovery_disposed:'+job_id
     old=store.execute('SELECT payload FROM settings WHERE name=?',(seen_key,)).fetchone()
@@ -16,15 +16,20 @@ def process(store,boundary,job_id,now,*,config=None,opener=None):
     records=[r for r in first if r['job_id']==job_id and r['source_id'] not in disposed]
     identities={r['source_id'] for r in records}
     cards,counts=select(store,boundary,now,source_ids=identities,include_verified=True)
+    # Historical recovery is delivered, but is never reported as a new discovery.
+    new_records=[r for r in records if new_since is None or r.get('at','')>=new_since]
+    new_identities={r['source_id'] for r in new_records}
+    new_cards,new_counts=select(store,boundary,now,source_ids=new_identities,include_verified=True) if new_since else (cards,counts)
     batch=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
     estimates=json.loads(batch[0]).get('estimates',{}) if batch else {}
-    verified=sum(c['tax_status']=='provider_verified' for c,p in cards)
-    estimated=sum(c['tax_status']!='provider_verified' and estimates.get(c['source_id'],{}).get('state')=='estimated' for c,p in cards)
-    report={'job_id':job_id,'new_source_listings':len(records),'new_non_tax_pass':sum(r['non_tax_state']=='Candidate' for r in records),
-            'new_two_bedroom_candidates':sum(p.get('bedrooms')==2 for c,p in cards),'new_three_four_bedroom_candidates':sum(p.get('bedrooms') in (3,4) for c,p in cards),
-            'new_parcel_matches':sum(estimates.get(i,{}).get('match_status')=='unique_parcel' for i in identities),
-            'new_verified_tax':verified,'new_estimated_tax':estimated,'new_unknown_tax':len(cards)-verified-estimated,
-            'new_qualified':verified,'new_pending':len(cards)-verified,'new_rejected':counts['hard_rejected']+counts['tax_rejected'],
+    verified=sum(c['tax_status']=='provider_verified' for c,p in new_cards)
+    estimated=sum(c['tax_status']!='provider_verified' and estimates.get(c['source_id'],{}).get('state')=='estimated' for c,p in new_cards)
+    report={'job_id':job_id,'new_source_listings':len(new_records),'recovered_source_listings':len(records)-len(new_records),
+            'new_non_tax_pass':sum(r['non_tax_state']=='Candidate' for r in new_records),
+            'new_two_bedroom_candidates':sum(p.get('bedrooms')==2 for c,p in new_cards),'new_three_four_bedroom_candidates':sum(p.get('bedrooms') in (3,4) for c,p in new_cards),
+            'new_parcel_matches':sum(estimates.get(i,{}).get('match_status')=='unique_parcel' for i in new_identities),
+            'new_verified_tax':verified,'new_estimated_tax':estimated,'new_unknown_tax':len(new_cards)-verified-estimated,
+            'new_qualified':verified,'new_pending':len(new_cards)-verified,'new_rejected':new_counts['hard_rejected']+new_counts['tax_rejected'],
             'synced':0,'paid_tax_calls':0,'state':'not_configured' if not config else 'pending',
             'source_limitations':['No validated automated official annual-bill source is connected. Assessment estimates do not verify annual liability.']}
     key='future_discovery_report:'+job_id
@@ -36,7 +41,7 @@ def process(store,boundary,job_id,now,*,config=None,opener=None):
         try:
             ledger=run(store,boundary,now,execute=True,config=config,opener=opener,
                        job_key='stored-review-inventory:future:'+job_id+':'+hashlib.sha256(json.dumps(sorted(identities)).encode()).hexdigest(),source_ids=identities,include_verified=True,refresh_decisions=False)
-            report.update(state='accepted',synced=sum(len(json.loads(b['payload'])['opportunities']) for b in ledger['batches']))
+            report.update(state='accepted',synced=sum(len(json.loads(b['payload'])['opportunities']) for b in ledger['batches']),receipt_counts=ledger.get('receipt_counts',{}))
             component(store,'inventory_sync','success',now=now,processed=report['synced'])
             incident(store,'inventory_sync',None,now=now,resolved=True)
             store.save_setting(seen_key,{'source_ids':sorted(disposed|identities)})
