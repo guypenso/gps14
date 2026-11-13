@@ -21,6 +21,9 @@ def seed(store, clock, *, received=2, cached=True, old=False):
                'delivery': {'state': 'no_new_reviewable_records', 'new_source_listings': 0, 'synced': 0},
                'secret': 'must never leave storage'}
     store.save_setting('catchup-discovery:' + day, receipt)
+    from rentalsourcing.investment_policy import POLICY_VERSION
+    store.save_setting('coverage_scope:' + POLICY_VERSION, {'cursor': 2, 'completed_job': job, 'at': clock().isoformat()})
+    store.execute('INSERT INTO scan_tasks VALUES (?,?,0,?,?)', (job, 'older-unverified', 2, None))
     store.execute('INSERT INTO usage VALUES (?,?)', ('request_scope:catchup-discovery:' + day, 1))
     params = dict(receipt['query'], limit=500, offset=500)
     key = hashlib.sha256(('https://api.rentcast.io/v1/listings/sale?' + urlencode(sorted(params.items()))).encode()).hexdigest()
@@ -47,6 +50,8 @@ def test_audit_proves_saved_response_and_resumed_cursor_without_writes(store, cl
     assert result['response']['records'] == 2
     assert result['query']['offset'] == 500
     assert result['job']['offset'] == 502
+    assert result['job']['pending_verification_tasks'] == 1
+    assert result['coverage_cursor']['cursor'] == 2
     assert result['new_source_count'] == 0
     assert result['returned_dispositions']['current_states'] == {'Pending Verification': 1, 'Rejected': 1}
     assert result['request_reservations'] == 1 and result['provider_calls'] == 0
