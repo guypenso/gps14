@@ -219,7 +219,8 @@ def start_watchdog(url,boundary):
       queue_rent(store,boundary,Settings.from_env(),now,client=None)
       store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
-    local=dt.datetime.now(UTC).astimezone(ISRAEL);protected=(local.hour==7 and local.minute>=50) or (local.hour==8 and local.minute<20)
+    from .schedule import discovery_protected_window
+    protected=discovery_protected_window(dt.datetime.now(UTC))
     if protected:
      try:publish(store)
      except Exception:pass

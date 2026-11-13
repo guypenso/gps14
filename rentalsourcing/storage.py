@@ -36,6 +36,23 @@ class Store:
             return bool(self.execute('SELECT pg_try_advisory_lock(73541209)').fetchone()[0])
         return True  # SQLite is local testing only; cloud requires PostgreSQL.
 
+    def wait_for_scan_lock(self,timeout_seconds=120):
+        """Queue behind a watchdog; never silently discard a scheduled scan."""
+        if not self.pg:return True
+        if not 1<=timeout_seconds<=120:raise ValueError('Bounded scan-lock timeout required')
+        statement=self.execute('SHOW statement_timeout').fetchone()[0]
+        lock=self.execute('SHOW lock_timeout').fetchone()[0]
+        try:
+            self.execute("SELECT set_config('statement_timeout',?,false)",(str((timeout_seconds+5)*1000),))
+            self.execute("SELECT set_config('lock_timeout',?,false)",(str(timeout_seconds*1000),))
+            self.execute('SELECT pg_advisory_lock(73541209)')
+            return True
+        except Exception:
+            raise RuntimeError('Scheduled scan lock unavailable; no provider request attempted') from None
+        finally:
+            self.execute("SELECT set_config('statement_timeout',?,false)",(statement,))
+            self.execute("SELECT set_config('lock_timeout',?,false)",(lock,))
+
     def reserve(self, day_limit, month_limit, now=None, total_limit=40):
         now = now or dt.datetime.now(dt.timezone.utc)
         # Legacy callers cannot bypass a protected listing allocation.
