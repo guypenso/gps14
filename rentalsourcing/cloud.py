@@ -300,10 +300,10 @@ def main(argv=None):
             begin(store,day,dt.datetime.now(dt.timezone.utc))
         boundary=load_boundary(settings.boundary_file)
         if args.migrate:event('migrations_complete');return
-        if catchup_requested:
+        if catchup_requested and (args.catch_up_discovery or not scheduled_slot()):
             from .catch_up import run as catch_up
             result=catch_up(store,boundary,settings,day);event('catch_up_discovery',**result)
-            if args.catch_up_discovery or not scheduled_slot():return
+            return
         from .tax_backlog import reconcile
         event('tax_cache_recovery',**reconcile(store,settings,dt.datetime.now(dt.timezone.utc)))
         from .criteria import reevaluate
