@@ -143,9 +143,21 @@ def claim_schedule(store,now):
  from .schedule import ISRAEL
  local=now.astimezone(ISRAEL);day=local.date().isoformat()
  pre_report=local.hour==7 and local.minute>=45 and get(store,'listing_pre_report_day')!=day
- if previous.get('next_at','')>now.isoformat() and not pre_report:return False
+ attempted=previous.get('attempted_at','')
+ claim_started=previous.get('claim_started_at') or attempted
+ stale_running=(previous.get('state')=='running' and bool(claim_started)
+                and claim_started<=(now-dt.timedelta(minutes=10)).isoformat())
+ if previous.get('next_at','')>now.isoformat() and not (pre_report or stale_running):return False
  if pre_report:store.save_setting('listing_pre_report_day',day)
- store.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':(now+dt.timedelta(hours=6)).isoformat(),'state':'running','validation_id':previous.get('validation_id')})
+ # A dashboard restart can strand an in-flight free-source refresh. Reuse its
+ # operation ID so the remote backend can return the same idempotent receipt.
+ claim_at=attempted if stale_running and not pre_report else now.isoformat()
+ store.save_setting('offmarket_scheduler',{'attempted_at':claim_at,'next_at':(now+dt.timedelta(hours=6)).isoformat(),
+                                         'state':'running','claim_started_at':now.isoformat(),
+                                         'validation_id':previous.get('validation_id'),
+                                         'recovered_stale_claim':bool(stale_running and not pre_report)})
+ if stale_running and not pre_report:
+  logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_STALE_CLAIM_RECOVERED operation_id_reused=true')
  return True
 
 def request_listing_validation(store,now):
