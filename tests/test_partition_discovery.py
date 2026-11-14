@@ -257,6 +257,33 @@ def test_expired_budget_never_opens_a_new_cursor_generation(store,boundary,alloc
     assert all(get(store,PREFIX+slug)==state for slug,state in states.items())
 
 
+def test_expired_allocation_does_not_crash_later_evening_slot(store,boundary,allocated,clock):
+    """Reproduces the November 14 20:00 production TypeError."""
+    clock.value=dt.datetime(2026,11,14,18,2,tzinfo=dt.timezone.utc)
+    provider=AreaProvider()
+    report,client=run(store,boundary,allocated,'2026-11-14','evening',clock=clock,opener=provider)
+    assert client.count==0 and provider.calls==[]
+    assert report['request_limit']==0
+    assert report['discovery_state']=='skipped_budget_exhausted'
+    assert report['discovery_partial'] and not report['fresh_request_made']
+    assert all(p['state']=='budget_blocked' for p in report['partitions'].values())
+
+
+def test_scheduler_exception_records_failure_and_continues_stored_processing(store,boundary,allocated,clock,monkeypatch):
+    from rentalsourcing.cloud import daily_discovery
+    monkeypatch.delenv('ENABLE_REVIEW_INVENTORY_SYNC',raising=False)
+    monkeypatch.delenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK',raising=False)
+    clock.value=dt.datetime(2026,11,14,18,2,tzinfo=dt.timezone.utc)
+    def broken(*args,**kwargs):raise TypeError('fixture scheduler defect')
+    monkeypatch.setattr('rentalsourcing.partition_discovery.run',broken)
+    result=daily_discovery(store,boundary,replace(allocated,email_enabled=False),'2026-11-14',slot='evening',clock=clock)
+    assert result['scan']=='failed' and result['requests']==0
+    receipt=get(store,'multi-discovery:2026-11-14:evening')
+    assert receipt['discovery_state']=='failed' and receipt['requests_consumed']==0
+    assert receipt['error_type']=='TypeError'
+    assert store.execute('SELECT COUNT(*) FROM usage WHERE period LIKE ?',('cycle:%',)).fetchone()[0]==1
+
+
 def test_cli_evidence_is_visible_when_host_logging_is_warning_only():
     import subprocess,sys
     script="""import logging
