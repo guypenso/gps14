@@ -45,6 +45,8 @@ def render(day,items,stats,health,operations):
     lines=[f'RentalSourcing — {day}',('מבוסס על נתונים שמורים בלבד; לא בוצעה סריקה חדשה.' if stats.get('saved_data_only') else f'מצב הסריקה: {status}')]
     scan_labels={'previous_scan':'Previous persisted scan reused; no fresh discovery request in this run.','verification_only':'Existing listing evidence rechecked; no fresh discovery request in this run.','fresh':'Fresh listing discovery completed; filtering and tax verification follow.','cached':'Cached listing response reused; no fresh discovery request completed.','skipped_disabled':'Discovery skipped: collection disabled.','skipped_billing_configuration':'Discovery skipped: provider billing cycle/baseline not configured.','skipped_budget_exhausted':'Discovery skipped: internal API allowance exhausted.','failed':'Discovery failed; no successful fresh scan is claimed.'}
     zero_message=('הגילוי הצליח; אימות המס חלקי ולכן עדיין לא ניתן לקבוע שאין עסקאות מתאימות.' if stats.get('discovery_state')=='fresh' and incomplete else ('לא ניתן לקבוע שאין עסקאות חדשות: הסריקה נכשלה או לא הושלמה.' if incomplete else 'אין נכסים חדשים או הורדות מחיר חדשות שעברו את כל בדיקות האימות.'))
+    if stats.get('discovery_state') in {'verification_only','previous_scan','cached'}:
+        zero_message='לא בוצעה בקשת מודעות חדשה בהרצה זו. נבדקו נתונים שמורים; אין להסיק מכך שאין הזדמנויות חדשות בשוק.'
     summary=None
     if stats.get('funnel') and not stats['funnel'].get('diagnostic_error'):
         counts=stats['funnel']['counts']
@@ -162,6 +164,7 @@ class Digest:
         health=self.store.budget_health(self.settings,self.clock())
         text,markup=render(day,items,stats,health,[] if stats.get('discovery_state') else self.store.operations())
         status='תקלה בסריקה' if stats.get('error_type') else ('סריקה חלקית' if stats.get('partial') else f'{len(items)} נכסים מאומתים')
+        if not stats.get('error_type') and stats.get('discovery_state') in {'verification_only','previous_scan','cached'}:status='ללא סריקה חדשה'
         body=dict(from_=self.settings.email_from,to=[self.settings.email_to],
                   subject=f'RentalSourcing | {day} | {status}',text=text,html=markup)
         body['from']=body.pop('from_')

@@ -59,7 +59,8 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  source_manifest=batch.get('manifest') or {}
  coverage=funnel(store,boundary,now)
  quality_row=store.execute('SELECT payload FROM settings WHERE name=?',('property_quality:last',)).fetchone()
- quality=json.loads(quality_row[0]) if quality_row else None
+ from .execution_evidence import compact_quality
+ quality=compact_quality(json.loads(quality_row[0])) if quality_row else None
  from .property_types import property_type_evidence,reviewed_type
  recent=[]
  decisions={name[len('penten_review:'):]:json.loads(raw) for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('penten_review:%',)).fetchall()}
@@ -87,4 +88,5 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
          'discovery_execution':discovery_snapshot(store,now,boundary,settings.page_size),
          'discovery_coverage':__import__('rentalsourcing.partition_discovery',fromlist=['snapshot']).snapshot(store,now),
+         'execution_evidence':__import__('rentalsourcing.execution_evidence',fromlist=['snapshot']).snapshot(store,now,boundary),
          'api_budget':{'dashboard_runtime':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'last_scheduled':json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()[0]) if store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone() else None,'ledger':[{'period':r[0],'used':r[1]} for r in store.execute('SELECT period,used FROM usage ORDER BY period').fetchall()],'scope_note':'Dashboard provider calls are disabled. Scheduled cron configuration is separate; ledger and last_scheduled describe stored discovery usage.'},'property_quality':quality,'recent_source_type_evidence':recent,'owner_exception_source':__import__('rentalsourcing.owner_exception',fromlist=['snapshot']).snapshot(store,now),'qualification_changed':False,'provider_calls':0}
