@@ -49,3 +49,16 @@ def test_watchdog_rejects_new_candidates_without_delivery(store):
         'penten_receipts':{}})
     checked=audit_scheduled_slots(store,now)['morning']
     assert checked['reason']=='new_opportunities_not_delivered'
+
+
+def test_read_only_inspection_exposes_persisted_slot_audit(store,boundary,settings,monkeypatch):
+    from rentalsourcing.config import Settings
+    from rentalsourcing.tax_intelligence import snapshot
+    now=dt.datetime(2026,11,15,6,41,tzinfo=dt.timezone.utc)
+    audit_scheduled_slots(store,now)
+    monkeypatch.setattr(Settings,'from_env',classmethod(lambda cls:settings))
+    result=snapshot(store,boundary,now)
+    assert result['scheduled_slot_audits']['2026-11-15:morning']['state']=='missing'
+    assert result['rental_estimates']['saved_estimates']==0
+    assert result['realscout_intake']['properties']==0
+    assert result['provider_calls']==0

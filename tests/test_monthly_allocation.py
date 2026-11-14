@@ -93,6 +93,12 @@ def test_one_paced_page_and_fair_rotation_without_provider_overrun(store,boundar
     clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
     fourth,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
     assert fourth['requests_consumed']==1 and provider.calls[-1]==('Pleasant Hills',0)
+    clock.value=dt.datetime(2026,11,17,18,tzinfo=dt.timezone.utc)
+    fifth,_=run(store,boundary,s,'2026-11-17','evening',clock=clock,opener=provider)
+    assert fifth['requests_consumed']==1 and provider.calls[-1]==(MAIN,2)
+    clock.value=dt.datetime(2026,11,18,6,tzinfo=dt.timezone.utc)
+    sixth,_=run(store,boundary,s,'2026-11-18','morning',clock=clock,opener=provider)
+    assert sixth['requests_consumed']==1 and provider.calls[-1]==(MAIN,4)
 
 
 def test_concurrent_reservations_are_bounded_by_atomic_rent_allocation(store,settings,clock):

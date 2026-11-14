@@ -118,6 +118,14 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                         max_pages=1, retries=0, email_enabled=False)
     client = ListingClient(store, effective, clock, opener, request_scope=scope)
     states = {slug: _state(store, slug, query) for slug, query in scopes(boundary).items()}
+    weighted = not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests
+    if weighted:
+        from .billing import cycle_key
+        selection_cycle = cycle_key(settings, now)
+        for slug, state in states.items():
+            if state.get('selection_cycle') != selection_cycle:
+                state.update(selection_cycle=selection_cycle, selection_pages=0)
+                store.save_setting(PREFIX + slug, state)
     report = prior or {'version': VERSION, 'run_key': key, 'started_at': now.isoformat(),
                       'pages': [], 'job_ids': [], 'new_source_ids': [], 'partitions': {}}
     report.update(request_limit=remaining, discovery_state='skipped_budget_exhausted' if not remaining else 'verification_only')
@@ -141,7 +149,10 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     # Under small budgets, least recently served areas go first. With enough
     # capacity every area gets a first turn, then Pittsburgh gets extra pages.
     if not special:
-        eligible.sort(key=lambda slug: (states[slug].get('last_success_at') or '', ORDER.index(slug)))
+        if weighted:
+            eligible.sort(key=lambda slug: (states[slug].get('selection_pages', 0) / (2 if slug == MAIN else 1), ORDER.index(slug)))
+        else:
+            eligible.sort(key=lambda slug: (states[slug].get('last_success_at') or '', ORDER.index(slug)))
     first_turns = list(eligible)
     extra = [MAIN, MAIN, 'bethel-park', 'pleasant-hills']
     attempts = 0
@@ -207,6 +218,8 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                     'offset_after': row[0], 'records': received, 'requests': client.count - request_before,
                     'fetched_at': client.last_fetched_at, 'duplicates': duplicates, 'changed': changed,
                     'query_complete': bool(row[1])}
+            if weighted:
+                state['selection_pages'] += page['requests']
             report['pages'].append(page)
             report['discovery_state'] = 'fresh' if any(p['requests'] for p in report['pages']) else 'cached'
             report['partitions'][slug].update(state='query_complete' if row[1] else 'pagination_pending',
