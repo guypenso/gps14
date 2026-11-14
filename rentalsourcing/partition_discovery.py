@@ -16,7 +16,7 @@ from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v1'
+VERSION = 'multi-partition-v2'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -79,13 +79,11 @@ def _prepare(store, state, day, slot, now, special):
     if state.get('query_complete'):
         if state.get('generation_run_key') == day + ':' + slot:
             return 'query_already_complete'
-        # The owner's morning recovery completes unfinished work, without
-        # repurchasing the completed pages from tonight's coverage pass.
-        if special and day == '2026-11-14':
-            return 'query_already_complete'
-        last = state.get('last_complete_at')
-        if not (special and day == '2026-11-13') and last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=12):
-            return 'query_fresh'
+        # Completion belongs to one collection generation, not every future
+        # scheduled slot. A later slot must check for new/changed inventory.
+        # The previous scan job and its terminal offset remain untouched.
+        state['previous_generation'] = {k: state.get(k) for k in
+            ('job_id','offset','generation_run_key','last_complete_at')}
         state['job_id'] = None
     if not state.get('job_id'):
         state.update(job_id='coverage:' + POLICY_VERSION + ':' + state['partition'] + ':' + day + ':' + slot + ':' + state['query_hash'][:8],
@@ -117,13 +115,14 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     report.update(request_limit=scope[1], discovery_state='skipped_budget_exhausted' if not remaining else 'verification_only')
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
+    unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}
     for slug in ORDER:
         recovered = states[slug].pop('_checkpoint_recovery', None)
         if recovered and recovered.get('fetched_at') and recovered['fetched_at'] >= report['started_at']:
             if not any(p['job_id'] == recovered['job_id'] and p['offset_after'] == recovered['offset_after'] for p in report['pages']):
                 report['pages'].append(recovered)
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
-        reason = _prepare(store, states[slug], day, slot, now, special)
+        reason = _prepare(store, states[slug], day, slot, now, special) if remaining else 'budget_blocked'
         report['partitions'][slug] = {'state': reason or ('budget_blocked' if not remaining else 'awaiting_turn'), 'query': states[slug]['query'],
             'offset_before': states[slug]['offset'], 'coverage_claim': 'configured_provider_query_only',
             'geographic_completeness': 'not_verified'}
@@ -138,7 +137,11 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     extra = [MAIN, MAIN, 'bethel-park', 'pleasant-hills']
     attempts = 0
     while remaining > client.count and eligible and attempts < max(20, settings.max_pages):
-        if first_turns:
+        resumed_priority = next((slug for slug in ORDER if slug in unfinished and slug in eligible), None) if special and slot=='morning' else None
+        if resumed_priority:
+            slug = resumed_priority
+            if slug in first_turns:first_turns.remove(slug)
+        elif first_turns:
             slug = first_turns.pop(0)
         else:
             for _ in range(len(extra)):
@@ -214,10 +217,12 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     report.update(finished_at=clock().isoformat(), requests_this_invocation=client.count,
                   received_this_run=sum(p['records'] for p in report['pages']),
                   requests_consumed=report.get('requests', 0),
-                  discovery_complete=all(s['query_complete'] for s in states.values()),
+                  discovery_complete=all(s['query_complete'] and (s.get('generation_run_key')==day+':'+slot or any(p['partition']==slug for p in report['pages'])) for slug,s in states.items()),
                   supplemental_jobs=report['job_ids'][1:],
                   remaining_budget=store.budget_health(settings, clock(), record_warning=False)['remaining'])
     report['discovery_partial'] = report['partial'] = not report['discovery_complete']
+    report['fresh_request_made'] = any(p['requests'] for p in report['pages'])
+    report['latest_listing_observation_at'] = max((p['fetched_at'] for p in report['pages'] if p.get('fetched_at')), default=None)
     if not report['pages'] and any(p['state'] in {'source_blocked','retry_scheduled'} for p in report['partitions'].values()):
         report['discovery_state'] = 'failed'
     # This also recovers first-discovery identities persisted before an interruption.
@@ -245,7 +250,8 @@ def snapshot(store, now):
     last = get(store, 'multi-discovery:last', {})
     last = {k: v for k, v in last.items() if k in {'version','run_key','started_at','finished_at','request_limit',
         'requests','requests_consumed','received_this_run','remaining_budget','discovery_state',
-        'discovery_complete','discovery_partial','pages','partitions','delivery_totals','penten_receipts'}}
+        'discovery_complete','discovery_partial','pages','partitions','delivery_totals','penten_receipts',
+        'fresh_request_made','latest_listing_observation_at'}}
     return {'version': VERSION, 'allocation': allocation_snapshot(store, now),
             'partitions': states, 'last_run': last,
             'provider_calls': 0, 'geographic_completeness': 'not_verified'}

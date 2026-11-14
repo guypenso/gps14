@@ -213,7 +213,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
         last=store.execute('SELECT payload FROM settings WHERE name=?',('multi-discovery:'+day+':'+str(slot),)).fetchone() if slot else None
         if not last:last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone()
         stats=json.loads(last[0]) if last else {}
-        stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') or stats.get('discovery_partial') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
+        stage(store,day,'discovery','failed' if scan=='failed' else 'partial' if scan.startswith('skipped_') or scan in {'verification_only','previous_scan','cached'} or stats.get('discovery_partial') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)),expected=scan.startswith('skipped_'),coverage=scan)
         for name in ('listing_processing','eligibility_filtering','property_storage','price_history'):
             stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
         tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
@@ -286,6 +286,8 @@ def main(argv=None):
                 if allocation['state'] in {'active','already_active'}:
                     from .partition_discovery import preflight
                     event('discovery_scheduler_preflight',**preflight(observer,boundary,settings,dt.datetime.now(dt.timezone.utc)))
+                from .execution_evidence import snapshot as execution_snapshot
+                event('scheduled_execution_evidence',**execution_snapshot(observer,dt.datetime.now(dt.timezone.utc),boundary))
                 observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))
             except Exception as exc:
                 event('budget_telemetry_unavailable',error_type=type(exc).__name__)

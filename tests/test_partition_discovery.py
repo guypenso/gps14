@@ -66,21 +66,30 @@ def test_five_evening_four_morning_with_independent_cursors(store,boundary,alloc
     clock.advance(hours=12)
     morning, _ = run(store,boundary,allocated,'2026-11-14','morning',clock=clock,opener=provider)
     assert provider.calls[5:] == [(MAIN,6),(MAIN,8),(MAIN,10),(MAIN,12)]
-    assert morning['requests'] == 4 and morning['discovery_complete']
+    assert morning['requests'] == 4 and not morning['discovery_complete']
+    assert get(store,PREFIX+MAIN)['query_complete'] is True
+    assert morning['partitions']['bethel-park']['state']=='budget_not_reached'
     assert store.budget_health(allocated,clock())['used'] == 50
     assert store.count_usage('allocation:'+ID) == 9
     assert store.execute('SELECT COUNT(*) FROM properties').fetchone()[0] == 15
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] == 0
 
 
-def test_stops_early_and_never_rebuys_completed_morning_pages(store,boundary,allocated,clock):
+def test_completed_evening_queries_refresh_on_next_scheduled_slot(store,boundary,allocated,clock):
+    clock.advance(minutes=1)
     provider = AreaProvider(main=1)
     first,_ = run(store,boundary,allocated,'2026-11-13','evening',clock=clock,opener=provider)
     assert first['requests'] == 3 and first['discovery_complete']
-    clock.advance(hours=12)
+    old_job=get(store,PREFIX+MAIN)['job_id']
+    provider.rows[MAIN].append(listing('overnight-new'))
+    clock.advance(hours=11,minutes=59)
     second,_ = run(store,boundary,allocated,'2026-11-14','morning',clock=clock,opener=provider)
-    assert second['requests_consumed'] == 0 and second['discovery_complete']
-    assert len(provider.calls) == 3
+    assert second['requests_consumed'] == 3 and second['discovery_complete']
+    assert len(provider.calls) == 6 and second['new_source_ids']==['overnight-new']
+    assert second['fresh_request_made'] is True
+    state=get(store,PREFIX+MAIN)
+    assert state['job_id']!=old_job and state['previous_generation']['job_id']==old_job
+    assert store.execute('SELECT offset_value FROM scan_jobs WHERE id=?',(old_job,)).fetchone()[0]==1
 
 
 def test_unscoped_jobs_tax_rent_wrong_day_and_legacy_cannot_spend(store,allocated,clock):
@@ -210,7 +219,42 @@ def test_transient_failure_resumes_same_cursor_in_next_slot(store,boundary,alloc
     provider.fail_main=None
     second,_=run(store,boundary,allocated,'2026-11-14','morning',clock=clock,opener=provider)
     assert second['discovery_complete'] and provider.calls.count((MAIN,0))==2
-    assert store.budget_health(allocated,clock())['used']==46
+    assert second['requests_consumed']==4
+    assert store.budget_health(allocated,clock())['used']==48
+
+
+def test_completed_morning_receipt_is_not_replayed_by_deployment(store,boundary,allocated,clock):
+    clock.advance(hours=12)
+    key='multi-discovery:2026-11-14:morning'
+    frozen={'version':'multi-partition-v1','run_key':key,'finished_at':clock().isoformat(),
+            'requests_consumed':0,'pages':[],'discovery_state':'verification_only'}
+    store.save_setting(key,frozen)
+    provider=AreaProvider()
+    result,client=run(store,boundary,allocated,'2026-11-14','morning',clock=clock,opener=provider)
+    assert result['already_executed'] and client.count==0 and provider.calls==[]
+    assert get(store,key)==frozen
+
+
+def test_actual_incident_ledger_allows_morning_before_expiry(store,allocated,clock):
+    scope=allocation_scope('2026-11-13','evening')
+    for _ in range(4):store.reserve_api(allocated,clock(),purpose='listing',scope=scope)
+    clock.value=dt.datetime(2026,11,14,6,2,tzinfo=dt.timezone.utc)
+    assert store.budget_health(allocated,clock())['used']==45
+    assert store.budget_health(allocated,clock())['remaining']==5
+    assert allowance(store,allocated,clock(),'2026-11-14','morning')==4
+    clock.value=dt.datetime(2026,11,14,10,tzinfo=dt.timezone.utc)
+    assert allowance(store,allocated,clock(),'2026-11-14','morning')==0
+
+
+def test_expired_budget_never_opens_a_new_cursor_generation(store,boundary,allocated,clock):
+    provider=AreaProvider(main=1)
+    run(store,boundary,allocated,'2026-11-13','evening',clock=clock,opener=provider)
+    states={slug:get(store,PREFIX+slug) for slug in (MAIN,'bethel-park','pleasant-hills')}
+    clock.value=dt.datetime(2026,11,14,10,tzinfo=dt.timezone.utc)
+    report,client=run(store,boundary,allocated,'2026-11-14','morning',clock=clock,opener=provider)
+    assert client.count==0 and report['discovery_partial'] and not report['fresh_request_made']
+    assert report['discovery_state']=='skipped_budget_exhausted'
+    assert all(get(store,PREFIX+slug)==state for slug,state in states.items())
 
 
 def test_cli_evidence_is_visible_when_host_logging_is_warning_only():
