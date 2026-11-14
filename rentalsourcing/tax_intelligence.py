@@ -72,6 +72,19 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  # records. Decisions remain authoritative even when a tax cache exists.
  owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
                     for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall() if source==LIVE)
+ from .schedule import ISRAEL
+ local_day=now.astimezone(ISRAEL).date()
+ slot_audits={}
+ for day in (local_day-dt.timedelta(days=1),local_day):
+  for slot in ('morning','evening'):
+   key='scheduled_slot_audit:'+day.isoformat()+':'+slot
+   row=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
+   if row:slot_audits[day.isoformat()+':'+slot]=json.loads(row[0])
+ from .rental_intelligence import job_summary
+ rental_summary={'saved_estimates':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
+                 'jobs':job_summary(store),'provider_calls':0}
+ from .listing_report import listing_report
+ listing_intake=listing_report(store,boundary,now)
  from .discovery_audit import snapshot as discovery_snapshot
  return {'as_of':now.isoformat(),'source_records':coverage['counts'].get('stored_unique',0),
          'non_tax_pass':coverage['counts'].get('non_tax_pass',0),
@@ -88,5 +101,8 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
          'discovery_execution':discovery_snapshot(store,now,boundary,settings.page_size),
          'discovery_coverage':__import__('rentalsourcing.partition_discovery',fromlist=['snapshot']).snapshot(store,now),
+         'scheduled_slot_audits':slot_audits,
+         'rental_estimates':rental_summary,
+         'realscout_intake':{k:listing_intake[k] for k in ('properties','observations','last_attempt_at','state','last_observation')},
          'execution_evidence':__import__('rentalsourcing.execution_evidence',fromlist=['snapshot']).snapshot(store,now,boundary),
          'api_budget':{'dashboard_runtime':dict(budget,approval_cap=settings.approved_requests,rentcast_enabled=settings.enabled,email_enabled=settings.email_enabled),'last_scheduled':json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()[0]) if store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone() else None,'last_scheduled_allocation':json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('monthly_allocation:last',)).fetchone()[0]) if store.execute('SELECT payload FROM settings WHERE name=?',('monthly_allocation:last',)).fetchone() else None,'ledger':[{'period':r[0],'used':r[1]} for r in store.execute('SELECT period,used FROM usage ORDER BY period').fetchall()],'scope_note':'Dashboard provider calls are disabled. Scheduled cron configuration is separate; ledger and last_scheduled describe stored discovery usage.'},'property_quality':quality,'recent_source_type_evidence':recent,'owner_exception_source':__import__('rentalsourcing.owner_exception',fromlist=['snapshot']).snapshot(store,now),'qualification_changed':False,'provider_calls':0}
