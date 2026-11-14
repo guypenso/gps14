@@ -82,7 +82,24 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     elif settings.approval_mode not in {'billing_cycle','one_time','monthly_budget'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     elif slot:
         from .partition_discovery import run as discover_partitions
-        stats,client=discover_partitions(store,boundary,settings,day,slot,clock=clock,opener=opener)
+        try:
+            stats,client=discover_partitions(store,boundary,settings,day,slot,clock=clock,opener=opener)
+        except Exception as exc:
+            # A scheduler defect must leave an honest receipt while cached
+            # evidence, RealScout intake and pending PENTEN delivery continue.
+            failure=type(exc).__name__
+            run_key='multi-discovery:'+day+':'+slot
+            prior=store.execute('SELECT payload FROM settings WHERE name=?',(run_key,)).fetchone()
+            stats=json.loads(prior[0]) if prior else {}
+            stats.update(version=stats.get('version') or 'multi-partition-v2',run_key=run_key,
+                         started_at=stats.get('started_at') or clock().isoformat(),
+                         finished_at=clock().isoformat(),discovery_state='failed',
+                         discovery_partial=True,partial=True,error_type=failure,
+                         requests_consumed=store.count_usage('request_scope:'+run_key))
+            store.save_setting(run_key,stats)
+            store.save_setting('multi-discovery:last',stats)
+            event('multi_partition_discovery_failed',day=day,slot=slot,error_type=failure,
+                  requests_consumed=stats['requests_consumed'])
         scan_job=stats['job_ids'][0] if stats.get('job_ids') else 'daily:'+day
     else:
         # Reserve before EVERY wire attempt using existing atomic DB counters.

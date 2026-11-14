@@ -105,7 +105,10 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     special_limit = allowance(store, settings, now, day, slot)
     special = special_limit is not None
     remaining = special_limit if special else store.scheduled_allowance(settings, now)
-    scope = allocation_scope(day, slot) if special else (key, settings.per_run)
+    # An expired allocation can still return a zero allowance for a later
+    # scheduled slot. That slot has no allocation scope; keep the run alive
+    # for cached evidence, RealScout intake and delivery recovery.
+    scope = (allocation_scope(day, slot) or (key, 0)) if special else (key, settings.per_run)
     from .approved_catchup import DAY as MANUAL_DAY,SLOT as MANUAL_SLOT,LIMITS as MANUAL_LIMITS
     manual=(day,slot)==(MANUAL_DAY,MANUAL_SLOT)
     effective = replace(settings, per_run=max(1, remaining), per_day=(6 if day=='2026-11-13' else 4) if special else settings.per_day,
