@@ -65,6 +65,24 @@ def test_independent_schedule_is_persistent_and_not_claimed_twice(store,clock,mo
  assert claim_schedule(store,clock())
 
 
+def test_interrupted_free_listing_claim_recovers_with_same_operation_id(store,clock):
+ from rentalsourcing.offmarket import claim_schedule,listing_operation_id
+ from rentalsourcing.sync_runtime import get
+ assert claim_schedule(store,clock())
+ original=get(store,'offmarket_scheduler')
+ first=listing_operation_id(original['attempted_at'])
+ clock.advance(minutes=9)
+ assert not claim_schedule(store,clock())
+ clock.advance(minutes=2)
+ assert claim_schedule(store,clock())
+ recovered=get(store,'offmarket_scheduler')
+ assert recovered['recovered_stale_claim'] is True
+ assert recovered['attempted_at']==original['attempted_at']
+ assert listing_operation_id(recovered['attempted_at'])==first
+ assert not claim_schedule(store,clock())
+ assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
 def test_non_live_cached_tax_never_becomes_verified(store,boundary,clock):
  p=item()['property'];store.save_property(p['id'],p,'Pending Verification',[],'rentcast-live',1,clock().isoformat())
  store.save_tax(p['id'],taxes(p['id']),'unverified-supplier',clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
