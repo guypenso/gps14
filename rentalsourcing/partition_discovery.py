@@ -105,6 +105,9 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     special_limit = allowance(store, settings, now, day, slot)
     special = special_limit is not None
     remaining = special_limit if special else store.scheduled_allowance(settings, now)
+    if not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests:
+        from .monthly_allocation import available
+        remaining = min(remaining, available(store, settings, now, 'listing'))
     # An expired allocation can still return a zero allowance for a later
     # scheduled slot. That slot has no allocation scope; keep the run alive
     # for cached evidence, RealScout intake and delivery recovery.
@@ -117,7 +120,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     states = {slug: _state(store, slug, query) for slug, query in scopes(boundary).items()}
     report = prior or {'version': VERSION, 'run_key': key, 'started_at': now.isoformat(),
                       'pages': [], 'job_ids': [], 'new_source_ids': [], 'partitions': {}}
-    report.update(request_limit=scope[1], discovery_state='skipped_budget_exhausted' if not remaining else 'verification_only')
+    report.update(request_limit=remaining, discovery_state='skipped_budget_exhausted' if not remaining else 'verification_only')
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
     unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}

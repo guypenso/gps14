@@ -175,6 +175,8 @@ class Store:
             if self.pg:self.execute('SELECT pg_advisory_xact_lock(73541210)')
             from .discovery_allocation import reservation_periods
             allocation_periods=reservation_periods(self,settings,now,purpose,scope)
+            from .monthly_allocation import reservation_periods as monthly_periods
+            allocation_periods.extend(monthly_periods(self,settings,now,purpose,scope))
             if settings.approval_mode in {'billing_cycle','monthly_budget'}:
                 # Seed the already consumed account usage once, without resetting
                 # persisted app usage when an approval ID or process changes.
@@ -225,6 +227,9 @@ class Store:
         if settings.supplemental_requests:
             remaining=min(remaining,max(0,settings.supplemental_requests-supplemental_used))
             if cycle!=anchor or now>=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00')):remaining=0
+        elif settings.approval_mode=='monthly_budget':
+            from .monthly_allocation import active
+            if not active(settings,now):remaining=0
         if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None

@@ -53,7 +53,9 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
         # recovery. This pass is cache-only unless the separate monthly rent
         # budget and feature switch have both been activated.
         from .rental_intelligence import enrich as enrich_rent
-        rent_client=Client(store,settings,clock,opener) if settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' else None
+        from .monthly_allocation import active as cycle_grant_active
+        rent_client=(Client(store,settings,clock,opener) if settings.enabled and cycle_grant_active(settings,clock())
+                     and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' else None)
         rental_intelligence=enrich_rent(store,boundary,settings,clock(),rent_client)
         result=digest.send(old[0]) if settings.email_enabled else 'prepared_not_sent'
         if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
@@ -137,7 +139,14 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     from .diagnostics import funnel,safe_read
     stats['funnel']=safe_read(funnel,store,boundary,clock());store.save_setting('health_funnel',stats['funnel'])
     from .rental_intelligence import enrich as enrich_rent
-    stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),client)
+    from .monthly_allocation import active as cycle_grant_active
+    # ListingClient is deliberately listing-only. Rent estimates use a separate
+    # client and the independently reserved rent allocation after discovery.
+    rent_client=(Client(store,settings,clock,opener)
+                 if settings.enabled and settings.approval_mode=='monthly_budget'
+                 and not settings.supplemental_requests and cycle_grant_active(settings,clock())
+                 and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' else None)
+    stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),rent_client)
     from .future_discovery import process as process_future
     try:
         stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None)
@@ -187,7 +196,8 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
                 stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
                 event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
         store.save_setting('discovery_metrics:'+day+':evening',stats)
-        return dict(status='evening_no_email',outbox_id=None,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+        return dict(status='evening_no_email',outbox_id=None,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,
+                    rent_requests=rent_client.count if rent_client else 0,error=failure)
     # The same stored-only quality/enrichment audit precedes either digest or evening completion.
     if feedback_config:
         try:
@@ -211,7 +221,8 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             enrich_listings(store,config,job_key='listing-contact-enrichment:'+day+':daily:v1')
     except Exception as exc:event('stored_review_sync_deferred',error_type=type(exc).__name__)
     if result in {'sent','already_sent'}:safe_current_baselines(store,boundary)
-    return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,error=failure)
+    return dict(status=result,outbox_id=message,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,
+                rent_requests=rent_client.count if rent_client else 0,error=failure)
 
 
 def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=None):
@@ -223,9 +234,14 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
     if slot:store.save_setting(run_key,{'slot':slot,'day':day,'started_at':clock().isoformat(),'state':'processing'})
     begin(store,day,clock());stage(store,day,'scheduled_run','success',clock())
     store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
+    if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
+        from .monthly_allocation import snapshot as monthly_snapshot
+        store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))
     try:
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener,slot=slot)
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
+        if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
+            store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))
         scan=result.get('scan','unknown')
         last=store.execute('SELECT payload FROM settings WHERE name=?',('multi-discovery:'+day+':'+str(slot),)).fetchone() if slot else None
         if not last:last=store.execute('SELECT stats FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone()
@@ -309,6 +325,11 @@ def main(argv=None):
                 from .execution_evidence import snapshot as execution_snapshot
                 event('scheduled_execution_evidence',**execution_snapshot(observer,dt.datetime.now(dt.timezone.utc),boundary))
                 observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))
+                if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
+                    from .monthly_allocation import snapshot as monthly_snapshot
+                    value=monthly_snapshot(observer,settings,dt.datetime.now(dt.timezone.utc))
+                    observer.save_setting('monthly_allocation:last',value)
+                    event('monthly_allocation_preflight',**value)
             except Exception as exc:
                 event('budget_telemetry_unavailable',error_type=type(exc).__name__)
                 if os.getenv('DISCOVERY_ALLOCATION_ID'):raise

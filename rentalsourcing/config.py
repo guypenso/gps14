@@ -32,6 +32,7 @@ class Settings:
     provider_included_requests: int = 0
     supplemental_requests: int = 0
     approval_expires_at: str = ''
+    provider_cycle_verified_at: str = ''
 
     def __post_init__(self):
         for name in ('per_run','per_day','per_month','page_size','max_pages','tax_cache_hours','listing_cache_minutes','timeout','listing_requests_per_day','negative_tax_cache_hours'):
@@ -71,7 +72,7 @@ class Settings:
           'retries':'NETWORK_RETRIES','billing_day':'BILLING_DAY','billing_anchor':'BILLING_CYCLE_ANCHOR',
           'billing_baseline':'BILLING_USAGE_BASELINE','listing_requests_per_day':'LISTING_REQUESTS_PER_DAY',
           'negative_tax_cache_hours':'NEGATIVE_TAX_CACHE_HOURS','email_approval_id':'EMAIL_APPROVAL_ID','environment':'APP_ENV',
-          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE','monthly_budget_requests':'MONTHLY_API_REQUEST_BUDGET','provider_included_requests':'PROVIDER_INCLUDED_REQUESTS','supplemental_requests':'SUPPLEMENTAL_API_REQUESTS','approval_expires_at':'API_APPROVAL_EXPIRES_AT'}
+          'email_to':'EMAIL_TO','email_from':'EMAIL_FROM','boundary_file':'CITY_BOUNDARY_FILE','monthly_budget_requests':'MONTHLY_API_REQUEST_BUDGET','provider_included_requests':'PROVIDER_INCLUDED_REQUESTS','supplemental_requests':'SUPPLEMENTAL_API_REQUESTS','approval_expires_at':'API_APPROVAL_EXPIRES_AT','provider_cycle_verified_at':'PROVIDER_CYCLE_VERIFIED_AT'}
         defaults=cls(); values={}
         for field,env in mapping.items():
             default=getattr(defaults,field)

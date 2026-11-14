@@ -8,6 +8,44 @@ from .geography import POLICY
 UTC=dt.timezone.utc
 
 def stages(store):return [json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE ?",('health_component:%',)).fetchall()]
+
+def audit_scheduled_slots(store,now=None):
+ """Persist an honest morning/evening receipt audit without provider or email work."""
+ now=now or dt.datetime.now(UTC)
+ local=now.astimezone(ISRAEL)
+ day=local.date().isoformat()
+ results={}
+ for slot,hour in (('morning',8),('evening',20)):
+  if local < dt.datetime.combine(local.date(),dt.time(hour,40),tzinfo=ISRAEL):continue
+  run=get(store,'discovery_run:'+day+':'+slot,{})
+  receipt=get(store,'multi-discovery:'+day+':'+slot,{})
+  requests=receipt.get('requests_consumed',0)
+  pages=receipt.get('pages',[])
+  delivery=receipt.get('delivery_totals') or {}
+  acks=receipt.get('penten_receipts') or {}
+  if not run.get('finished_at') or not receipt.get('finished_at'):
+   state,reason='missing','scheduled_slot_or_discovery_receipt_missing'
+  elif receipt.get('discovery_state')=='fresh' and requests>0 and pages:
+   if (delivery.get('new_pending',0)+delivery.get('new_qualified',0)>0 and delivery.get('synced',0)==0):
+    state,reason='delivery_unacknowledged','new_opportunities_not_delivered'
+   elif delivery.get('synced',0)>0 and not sum(acks.get(k,0) for k in ('inserted','updated','rejected')):
+    state,reason='delivery_unacknowledged','penten_acknowledgment_missing'
+   else:state,reason='fresh','persisted_provider_pages_and_delivery_disposition'
+  elif receipt.get('discovery_state')=='skipped_budget_exhausted':
+   state,reason='budget_blocked','approved_provider_budget_unavailable'
+  elif receipt.get('discovery_state')=='failed':
+   state,reason='failed','discovery_exception'
+  else:state,reason='partial','no_fresh_listing_page'
+  value={'day':day,'slot':slot,'state':state,'reason':reason,
+         'requests':requests,'pages':len(pages),'records':receipt.get('received_this_run',0),
+         'penten_receipts':acks,'checked_at':now.isoformat(),'provider_calls':0}
+  key='scheduled_slot_audit:'+day+':'+slot
+  if get(store,key)!=value:store.save_setting(key,value)
+  component_name='discovery_slot_'+slot
+  healthy=state=='fresh'
+  incident(store,component_name,None if healthy else {'category':reason,'retryable':state in {'missing','partial','failed','delivery_unacknowledged'}},now=now,resolved=healthy)
+  results[slot]=value
+ return results
 def begin(store,day,now):
  key='daily_health:'+day;old=get(store,key,{})
  if old.get('state')=='running' and old.get('started_at','')>(now-dt.timedelta(minutes=45)).isoformat():return old
@@ -220,11 +258,13 @@ def start_watchdog(url,boundary):
       store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
     from .schedule import discovery_protected_window
-    protected=discovery_protected_window(dt.datetime.now(UTC))
+    current=dt.datetime.now(UTC)
+    protected=discovery_protected_window(current)
     if protected:
      try:publish(store)
      except Exception:pass
-    elif store.lock() and get(store,'watchdog_lease',{}).get('at','')<(dt.datetime.now(UTC)-dt.timedelta(seconds=240)).isoformat():
+    elif store.lock() and get(store,'watchdog_lease',{}).get('at','')<(current-dt.timedelta(seconds=240)).isoformat():
+     audit_scheduled_slots(store,current)
      store.save_setting('watchdog_lease',{'at':dt.datetime.now(UTC).isoformat()})
      value=recover(store,boundary)
      evidence=get(store,'reliability_audit:2026-11-03:v1',{})

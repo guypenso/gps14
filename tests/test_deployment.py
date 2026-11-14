@@ -13,12 +13,15 @@ def test_render_has_two_slots_and_preserves_runtime_owned_financial_settings():
     assert config['databases'][0]['ipAllowList']==[]
     common={v['key']:v.get('value') for v in config['envVarGroups'][0]['envVars']}
     runtime={v['key']:v for v in config['envVarGroups'][0]['envVars']}
-    for key in ('APPROVED_API_REQUESTS','API_APPROVAL_MODE','MAX_API_REQUESTS_PER_DAY','MAX_API_REQUESTS_PER_MONTH','BILLING_DAY'):
+    for key in ('APPROVED_API_REQUESTS','API_APPROVAL_MODE','API_APPROVAL_ID','BILLING_CYCLE_ANCHOR',
+                'BILLING_USAGE_BASELINE','PROVIDER_INCLUDED_REQUESTS','MONTHLY_API_REQUEST_BUDGET',
+                'SUPPLEMENTAL_API_REQUESTS','API_APPROVAL_EXPIRES_AT','PROVIDER_CYCLE_VERIFIED_AT',
+                'MAX_API_REQUESTS_PER_DAY','MAX_API_REQUESTS_PER_MONTH','BILLING_DAY'):
         assert runtime[key].get('sync') is False and 'value' not in runtime[key]
     assert not common.get('API_APPROVAL_ID')
     cron={v.get('key'):v for v in services['cron']['envVars']}
     web={v.get('key'):v for v in services['web']['envVars']}
-    assert cron['ENABLE_RENTCAST']['sync'] is False and cron['ENABLE_EMAIL']['sync'] is False
+    assert all(cron[key]['sync'] is False for key in ('ENABLE_RENTCAST','ENABLE_EMAIL','ENABLE_RENT_ESTIMATES'))
     assert 'value' not in cron['ENABLE_RENTCAST'] and 'value' not in cron['ENABLE_EMAIL']
     assert web['DASHBOARD_PASSWORD']['generateValue'] is True
     assert 'RENTCAST_API_KEY' not in web and 'RESEND_API_KEY' not in web

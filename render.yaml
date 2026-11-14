@@ -14,7 +14,23 @@ envVarGroups:
         value: data/pittsburgh.geojson
       - key: API_APPROVAL_MODE
         sync: false
+      - key: API_APPROVAL_ID
+        sync: false
       - key: APPROVED_API_REQUESTS
+        sync: false
+      - key: BILLING_CYCLE_ANCHOR
+        sync: false
+      - key: BILLING_USAGE_BASELINE
+        sync: false
+      - key: PROVIDER_INCLUDED_REQUESTS
+        sync: false
+      - key: MONTHLY_API_REQUEST_BUDGET
+        sync: false
+      - key: SUPPLEMENTAL_API_REQUESTS
+        sync: false
+      - key: API_APPROVAL_EXPIRES_AT
+        sync: false
+      - key: PROVIDER_CYCLE_VERIFIED_AT
         sync: false
       - key: MAX_API_REQUESTS_PER_RUN
         sync: false
@@ -75,6 +91,8 @@ services:
       - key: ENABLE_RENTCAST
         sync: false
       - key: ENABLE_EMAIL
+        sync: false
+      - key: ENABLE_RENT_ESTIMATES
         sync: false
       # Add RENTCAST_API_KEY, RESEND_API_KEY, EMAIL_FROM and EMAIL_TO privately
       # on this service before activation. Disabled providers need no secrets
