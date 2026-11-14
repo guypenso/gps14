@@ -283,6 +283,9 @@ def main(argv=None):
                 from .discovery_allocation import activate
                 allocation=activate(observer,settings,dt.datetime.now(dt.timezone.utc))
                 if allocation['state']!='not_requested':event('discovery_allocation',**allocation)
+                from .approved_catchup import activate as activate_catchup
+                catchup=activate_catchup(observer,settings,dt.datetime.now(dt.timezone.utc))
+                if catchup['state']!='not_requested':event('approved_catchup_preflight',**catchup)
                 if allocation['state'] in {'active','already_active'}:
                     from .partition_discovery import preflight
                     event('discovery_scheduler_preflight',**preflight(observer,boundary,settings,dt.datetime.now(dt.timezone.utc)))

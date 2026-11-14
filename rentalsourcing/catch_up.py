@@ -14,6 +14,8 @@ class ListingOnlyClient(Client):
 
 def run(store,boundary,settings,day,*,clock=None,opener=None,deliver=True):
     """Caller holds Store.lock(). Request-scope reservation survives interrupted runs."""
+    from .approved_catchup import DAY,enabled,run as approved_run
+    if day==DAY and enabled():return approved_run(store,boundary,settings,day,clock=clock,opener=opener,deliver=deliver)
     from .cloud import scheduled_scope
     from .command_center import review_configuration
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc));now=clock()
