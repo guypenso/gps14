@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 from dataclasses import replace
 import pytest
@@ -39,13 +40,15 @@ def test_price_consumer_lock_is_separate_from_discovery_lock(store,clock):
     finally:
         store.execute('SELECT pg_advisory_unlock(73541212)');second.close()
 
-def test_recurring_budget_ignores_old_lifetime_approval_but_caps_provider_quota(store,clock):
-    settings=Settings(approval_mode='monthly_budget',billing_anchor=clock().isoformat(),billing_baseline=24,
+def test_cycle_grant_ignores_old_lifetime_approval_but_never_renews_itself(store,clock):
+    expires=(clock()+dt.timedelta(days=31)).isoformat()
+    settings=Settings(approval_mode='monthly_budget',billing_anchor=clock().isoformat(),billing_baseline=49,
                       monthly_budget_requests=100,provider_included_requests=50,per_month=100,
-                      per_day=100,per_run=10,approved_requests=0,approval_id='')
-    for _ in range(26):store.reserve_api(settings,clock())
-    with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock())
+                      per_day=100,per_run=10,approved_requests=0,approval_id='fixture-cycle-grant',
+                      approval_expires_at=expires,provider_cycle_verified_at=clock().isoformat())
+    store.reserve_api(settings,clock(),purpose='targeted')
+    with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock(),purpose='targeted')
     assert store.budget_health(settings,clock())['used']==50
     clock.advance(days=32)
-    store.reserve_api(settings,clock())
-    assert store.budget_health(settings,clock())['used']==1
+    with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock())
+    assert store.budget_health(settings,clock())['remaining']==0

@@ -57,7 +57,6 @@ def cached_estimate(store,p,now):
 def enrich(store,boundary,settings,now,client=None):
     from .core import verification
     from .tax_backlog import review_deferred
-    from .billing import billing_window,future_listing_days
     from .collector import LIVE
     counts={'cached':0,'retrieved':0,'invalid':0,'paid_calls':0,'blocked_by_budget':0}
     candidates=[]
@@ -82,18 +81,24 @@ def enrich(store,boundary,settings,now,client=None):
         high_tax=store.get_tax(source_id,now.isoformat())
         from .core import tax_verification
         potential_exception=high_tax and tax_verification(high_tax[0],now.date())[2]=='annual_tax_too_high'
-        candidates.append((0 if potential_exception or first and json.loads(first[0]).get('at','')>=(now-dt.timedelta(days=1)).isoformat() else 1,p))
-    permitted=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' and settings.approval_mode=='monthly_budget' and client is not None
+        review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+source_id,)).fetchone()
+        status=json.loads(review[0]).get('status') if review else 'new'
+        fresh=bool(first and json.loads(first[0]).get('at','')>=(now-dt.timedelta(days=1)).isoformat())
+        priority=0 if status=='pursue' else 1 if status=='new' and fresh else 2 if potential_exception else 3 if status=='monitor' else 4
+        candidates.append((priority,p))
+    from .monthly_allocation import available
+    approved=(os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true'
+              and settings.approval_mode=='monthly_budget' and not settings.supplemental_requests
+              and available(store,settings,now,'rent')>0)
+    permitted=approved and client is not None
     if not permitted:
-        approved=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' and settings.approval_mode=='monthly_budget'
         for _,p in candidates:record_job(store,p,'Pending' if approved else 'Budget Blocked',now,'awaiting_scheduled_rent_estimate' if approved else 'monthly_rent_budget_not_approved_or_inactive')
         counts['blocked_by_budget']=0 if approved else len(candidates)
         return counts
-    end=billing_window(settings,now)[1];reserve=future_listing_days(now,end)*settings.listing_requests_per_day
     for _,p in sorted(candidates,key=lambda x:(x[0],x[1]['id']))[:min(3,int(os.getenv('RENT_ESTIMATE_REQUESTS_PER_RUN','1')))]:
-        if store.budget_health(settings,now)['remaining']<=reserve:
+        if available(store,settings,now,'rent')<=0:
             for _,remaining in candidates:
-                if not cached_estimate(store,remaining,now):record_job(store,remaining,'Budget Blocked',now,'listing_request_reserve')
+                if not cached_estimate(store,remaining,now):record_job(store,remaining,'Budget Blocked',now,'rent_allocation_exhausted')
             counts['blocked_by_budget']=len(candidates)-counts['retrieved'];break
         old=store.execute('SELECT payload FROM settings WHERE name=?',('rent-attempt:'+key(p),)).fetchone()
         if old and json.loads(old[0]).get('next_at','')>now.isoformat():record_job(store,p,'Retry Scheduled',now,'provider_retry_cooldown',json.loads(old[0])['next_at']);continue

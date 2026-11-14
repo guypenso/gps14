@@ -65,7 +65,7 @@ def test_authorized_avm_acquisition_accounts_once_and_reuses_cache(store,boundar
     from rentalsourcing.rental_intelligence import parameters
     p=listing('avm-authorized-fixture',addressLine1='100 Fixture Ave')
     store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
-    settings=replace(settings,approval_mode='monthly_budget',billing_anchor='2026-10-01T00:00:00Z',billing_baseline=0,monthly_budget_requests=1000,provider_included_requests=1000)
+    settings=replace(settings,approval_mode='monthly_budget',billing_anchor='2026-10-01T00:00:00Z',billing_baseline=0,monthly_budget_requests=1000,provider_included_requests=1000,approval_expires_at='2026-11-01T00:00:00Z',provider_cycle_verified_at='2026-10-01T00:00:00Z')
     class AuthorizedFixtureProvider:
         count=0
         def open(self,request,timeout=None):
@@ -104,7 +104,7 @@ def test_new_candidate_persists_budget_block_and_resumes_only_after_approved_act
     assert blocked['blocked_by_budget']==1 and json.loads(row[0])['state']=='Budget Blocked'
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     clock.advance(days=2)
-    approved=replace(settings,approval_mode='monthly_budget',billing_anchor='2026-10-01T00:00:00Z',billing_baseline=0,monthly_budget_requests=1000,provider_included_requests=1000)
+    approved=replace(settings,approval_mode='monthly_budget',billing_anchor='2026-10-01T00:00:00Z',billing_baseline=0,monthly_budget_requests=1000,provider_included_requests=1000,approval_expires_at='2026-11-01T00:00:00Z',provider_cycle_verified_at='2026-10-01T00:00:00Z')
     class Provider:
         calls=0
         def open(self,request,timeout=None):
