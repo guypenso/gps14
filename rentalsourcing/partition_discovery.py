@@ -106,6 +106,8 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     special = special_limit is not None
     remaining = special_limit if special else store.scheduled_allowance(settings, now)
     scope = allocation_scope(day, slot) if special else (key, settings.per_run)
+    from .approved_catchup import DAY as MANUAL_DAY,SLOT as MANUAL_SLOT,LIMITS as MANUAL_LIMITS
+    manual=(day,slot)==(MANUAL_DAY,MANUAL_SLOT)
     effective = replace(settings, per_run=max(1, remaining), per_day=(6 if day=='2026-11-13' else 4) if special else settings.per_day,
                         max_pages=1, retries=0, email_enabled=False)
     client = ListingClient(store, effective, clock, opener, request_scope=scope)
@@ -123,6 +125,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 report['pages'].append(recovered)
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
         reason = _prepare(store, states[slug], day, slot, now, special) if remaining else 'budget_blocked'
+        if manual and store.count_usage('request_scope:'+key+':'+slug)>=MANUAL_LIMITS[slug]:reason='partition_limit_reached'
         report['partitions'][slug] = {'state': reason or ('budget_blocked' if not remaining else 'awaiting_turn'), 'query': states[slug]['query'],
             'offset_before': states[slug]['offset'], 'coverage_claim': 'configured_provider_query_only',
             'geographic_completeness': 'not_verified'}
@@ -137,8 +140,15 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     extra = [MAIN, MAIN, 'bethel-park', 'pleasant-hills']
     attempts = 0
     while remaining > client.count and eligible and attempts < max(20, settings.max_pages):
+        if manual:
+            from .approved_catchup import EXPIRES
+            if clock()>=EXPIRES:
+                for slug in eligible:report['partitions'][slug]['state']='approval_expired'
+                break
         resumed_priority = next((slug for slug in ORDER if slug in unfinished and slug in eligible), None) if special and slot=='morning' else None
-        if resumed_priority:
+        if manual:
+            slug=next(slug for slug in ORDER if slug in eligible)
+        elif resumed_priority:
             slug = resumed_priority
             if slug in first_turns:first_turns.remove(slug)
         elif first_turns:
@@ -150,6 +160,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 if slug in eligible:
                     break
         state = states[slug]
+        if manual:client.request_scope=(key+':'+slug,MANUAL_LIMITS[slug])
         job_id = state['job_id']
         if job_id not in report['job_ids']:
             report['job_ids'].append(job_id)
@@ -212,6 +223,9 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             store.save_setting(PREFIX + slug, state)
             report['requests'] = store.count_usage('request_scope:' + scope[0])
             report['requests_this_invocation'] = client.count
+            if manual and store.count_usage('request_scope:'+key+':'+slug)>=MANUAL_LIMITS[slug] and slug in eligible:
+                eligible.remove(slug)
+                report['partitions'][slug].update(state='partition_limit_reached')
             report['new_source_ids'] = sorted(set(report['new_source_ids']) | ({r[0] for r in store.execute('SELECT id FROM properties').fetchall()} - before))
             store.save_setting(key, report)
     report.update(finished_at=clock().isoformat(), requests_this_invocation=client.count,

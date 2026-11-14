@@ -47,6 +47,8 @@ def activate(store, settings, now):
 
 
 def allocation_scope(day, slot):
+    from .approved_catchup import DAY,SLOT,RUN
+    if (day,slot)==(DAY,SLOT):return (RUN,4)
     key = day + ':' + str(slot)
     return ('multi-discovery:' + key, SLOTS[key]) if key in SLOTS else None
 
@@ -61,6 +63,11 @@ def reservation_periods(store, settings, now, purpose, scope):
         if settings.approval_id == plan['approval_id'] or cycle_key(settings,now) == plan['cycle_key']:
             raise BudgetExceeded('Non-renewing listing allocation expired')
         return []
+    from .approved_catchup import reservation_periods as catchup_periods
+    manual=catchup_periods(store,settings,now,purpose,scope)
+    if manual is not None:
+        if settings.approval_id!=plan['approval_id']:raise BudgetExceeded('Catch-up approval identity changed')
+        return [('allocation:'+ID,plan['additional_limit']),*manual]
     slot = scheduled_slot(now)
     expected = allocation_scope(*slot) if slot else None
     if (purpose != 'listing' or not expected or scope != expected
@@ -78,6 +85,8 @@ def allowance(store, settings, now, day, slot):
     plan = saved(store)
     if not plan:
         return None
+    from .approved_catchup import DAY,SLOT,remaining
+    if (day,slot)==(DAY,SLOT):return remaining(store,settings,now)
     if now >= EXPIRES:
         from .billing import cycle_key
         return None if settings.approval_id != plan['approval_id'] and cycle_key(settings,now) != plan['cycle_key'] else 0
@@ -99,7 +108,8 @@ def snapshot(store, now):
     if not plan:
         return {'state': 'not_active'}
     used = store.count_usage('allocation:' + ID)
-    return {**plan, 'state': 'expired' if now >= EXPIRES else 'active', 'used': used,
+    from .approved_catchup import snapshot as catchup_snapshot
+    return {**plan, 'catchup':catchup_snapshot(store,now), 'state': 'expired' if now >= EXPIRES else 'active', 'used': used,
             'remaining': 0 if now >= EXPIRES else min(plan['additional_limit'] - used,
                 max(0, 50 - store.count_usage(plan['cycle_key']))),
             'run_allowances': {k: {'limit': n, 'used': store.count_usage('request_scope:multi-discovery:' + k),
