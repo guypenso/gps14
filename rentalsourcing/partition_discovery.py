@@ -128,7 +128,14 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 store.save_setting(PREFIX + slug, state)
     report = prior or {'version': VERSION, 'run_key': key, 'started_at': now.isoformat(),
                       'pages': [], 'job_ids': [], 'new_source_ids': [], 'partitions': {}}
-    report.update(request_limit=remaining, discovery_state='skipped_budget_exhausted' if not remaining else 'verification_only')
+    health=store.budget_health(settings,now,record_warning=False)
+    if weighted:
+        from .monthly_allocation import limits,period
+        listing_exhausted=store.count_usage(period(settings,now,'listing'))>=limits(settings)['listing']
+    else:listing_exhausted=False
+    paced=not remaining and health['remaining']>0 and weighted and not listing_exhausted and available(store,settings,now,'listing')==0
+    report.update(request_limit=remaining, discovery_state='scheduled_pacing_no_listing_request' if paced else 'skipped_budget_exhausted' if not remaining else 'verification_only',
+                  budget_reason='monthly_listing_pacing' if paced else health.get('block_reason') or ('listing_purpose_allocation_exhausted' if listing_exhausted else 'account_or_daily_allowance_exhausted' if not remaining else None))
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
     unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}
@@ -138,7 +145,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             if not any(p['job_id'] == recovered['job_id'] and p['offset_after'] == recovered['offset_after'] for p in report['pages']):
                 report['pages'].append(recovered)
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
-        reason = _prepare(store, states[slug], day, slot, now, special) if remaining else 'budget_blocked'
+        reason = _prepare(store, states[slug], day, slot, now, special) if remaining else 'monthly_pacing' if paced else 'budget_blocked'
         if manual and store.count_usage('request_scope:'+key+':'+slug)>=MANUAL_LIMITS[slug]:reason='partition_limit_reached'
         report['partitions'][slug] = {'state': reason or ('budget_blocked' if not remaining else 'awaiting_turn'), 'query': states[slug]['query'],
             'offset_before': states[slug]['offset'], 'coverage_claim': 'configured_provider_query_only',
@@ -284,7 +291,7 @@ def snapshot(store, now):
     last = {k: v for k, v in last.items() if k in {'version','run_key','started_at','finished_at','request_limit',
         'requests','requests_consumed','received_this_run','remaining_budget','discovery_state',
         'discovery_complete','discovery_partial','pages','partitions','delivery_totals','penten_receipts',
-        'fresh_request_made','latest_listing_observation_at'}}
+        'fresh_request_made','latest_listing_observation_at','budget_reason'}}
     return {'version': VERSION, 'allocation': allocation_snapshot(store, now),
             'partitions': states, 'last_run': last,
             'provider_calls': 0, 'geographic_completeness': 'not_verified'}

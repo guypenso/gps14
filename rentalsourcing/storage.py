@@ -147,7 +147,11 @@ class Store:
         """Seed the account-wide baseline and retain all overlapping legacy ledgers."""
         from .billing import billing_window,cycle_key
         start,end,anchor=billing_window(settings,now)
-        if not settings.supplemental_requests:return {'state':'not_requested'}
+        monthly=settings.approval_mode=='monthly_budget' and not settings.supplemental_requests
+        if monthly:
+            from .monthly_allocation import active
+            if not active(settings,now):return {'state':'inactive_current_cycle_grant','provider_calls':0}
+        elif not settings.supplemental_requests:return {'state':'not_requested'}
         cutoff=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00'))
         if start!=anchor or not anchor<=now<cutoff:return {'state':'expired'}
         with self.transaction():
@@ -233,10 +237,13 @@ class Store:
         if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None
-        if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
+        if remaining<days*settings.listing_requests_per_day:warning='Approved free allowance cannot fund fresh listing pages in every remaining window; cached and free-source processing continues.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
         if warning and record_warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
-        return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning,**({'supplemental_used':supplemental_used,'supplemental_limit':settings.supplemental_requests,'approval_expires_at':settings.approval_expires_at,'provider_baseline':settings.billing_baseline} if settings.supplemental_requests else {}))
+        from .monthly_allocation import block_reason
+        reason=block_reason(settings,now)
+        if settings.supplemental_requests and not remaining and (cycle!=anchor or now>=dt.datetime.fromisoformat(settings.approval_expires_at.replace('Z','+00:00'))):reason='supplemental_approval_expired'
+        return dict(cycle_start=cycle.isoformat(),cycle_end=end.isoformat(),used=used,remaining=remaining,days_remaining=days,warning=warning,block_reason=reason,**({'supplemental_used':supplemental_used,'supplemental_limit':settings.supplemental_requests,'approval_expires_at':settings.approval_expires_at,'provider_baseline':settings.billing_baseline} if settings.supplemental_requests else {}))
 
     def scheduled_allowance(self,settings,now=None):
         now=now or dt.datetime.now(dt.timezone.utc)

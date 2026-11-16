@@ -239,6 +239,9 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
         store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))
     try:
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener,slot=slot)
+        # A later completed workflow resolves the old orchestration exception;
+        # discovery and delivery stages still report their own partial/failures.
+        stage(store,day,'daily_workflow','failed' if result.get('error') else 'success',clock())
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
         if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
             store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))
@@ -307,7 +310,7 @@ def main(argv=None):
             event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=listing_parameters(boundary))
         from .sync_probe import inspect
         event('sync_authentication_probe',**inspect())
-        if settings.enabled and os.getenv('DATABASE_URL'):
+        if os.getenv('DATABASE_URL'):
             observer=None
             try:
                 observer=Store(validate_postgres_url(os.getenv('DATABASE_URL')),initialize=False)
@@ -330,12 +333,16 @@ def main(argv=None):
                     value=monthly_snapshot(observer,settings,dt.datetime.now(dt.timezone.utc))
                     observer.save_setting('monthly_allocation:last',value)
                     event('monthly_allocation_preflight',**value)
+                from .runtime_readiness import snapshot as runtime_snapshot
+                event('runtime_readiness',**runtime_snapshot(observer,settings,dt.datetime.now(dt.timezone.utc)))
             except Exception as exc:
                 event('budget_telemetry_unavailable',error_type=type(exc).__name__)
                 if os.getenv('DISCOVERY_ALLOCATION_ID'):raise
             finally:
                 if observer:observer.close()
-        event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
+        from .monthly_allocation import active as monthly_active
+        approved=monthly_active(settings,dt.datetime.now(dt.timezone.utc)) if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests else settings.approved_requests>0 and bool(settings.approval_id)
+        event('preflight',boundary_valid=exists,api_approved=approved,
               configured=settings.public(),database_configured=bool(os.getenv('DATABASE_URL')),
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
         if not exists:raise ValueError('Official city boundary missing; run scripts/fetch_boundary.py in the deployment environment')

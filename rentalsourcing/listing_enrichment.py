@@ -62,11 +62,13 @@ def research_context(store):
     from .config import Settings
     settings=Settings.from_env();at=dt.datetime.now(dt.timezone.utc)
     cached=store.execute('SELECT payload FROM settings WHERE name=?',('research_budget_context',)).fetchone()
-    if not settings.enabled and cached:return json.loads(cached[0])
+    if not settings.enabled and cached and settings.approval_mode!='monthly_budget':return json.loads(cached[0])
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()
-    budget=store.budget_health(settings,at,record_warning=False) if settings.enabled else json.loads(scheduled[0]) if scheduled else {'remaining':0}
-    value={'remaining':budget.get('remaining',0),'approval_cap':settings.request_ceiling if settings.enabled else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':settings.enabled and settings.approval_mode=='monthly_budget' and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
-    if settings.enabled:store.save_setting('research_budget_context',value)
+    monthly=settings.approval_mode=='monthly_budget'
+    budget=store.budget_health(settings,at,record_warning=False) if settings.enabled or monthly else json.loads(scheduled[0]) if scheduled else {'remaining':0}
+    from .monthly_allocation import active
+    value={'remaining':budget.get('remaining',0),'approval_cap':settings.request_ceiling if settings.enabled or monthly else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':monthly and active(settings,at) and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
+    if settings.enabled or monthly:store.save_setting('research_budget_context',value)
     return value
 
 def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):

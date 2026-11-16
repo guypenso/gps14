@@ -46,8 +46,13 @@ def test_cycle_grant_ignores_old_lifetime_approval_but_never_renews_itself(store
                       monthly_budget_requests=100,provider_included_requests=50,per_month=100,
                       per_day=100,per_run=10,approved_requests=0,approval_id='fixture-cycle-grant',
                       approval_expires_at=expires,provider_cycle_verified_at=clock().isoformat())
-    store.reserve_api(settings,clock(),purpose='targeted')
+    # With only one verified request left, the reduced grant reserves it for
+    # discovery. Optional targeted work cannot spend that last request.
     with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock(),purpose='targeted')
+    clock.value=clock().replace(hour=17)
+    scope=('multi-discovery:2026-10-16:evening',1)
+    store.reserve_api(settings,clock(),purpose='listing',scope=scope)
+    with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock(),purpose='listing',scope=scope)
     assert store.budget_health(settings,clock())['used']==50
     clock.advance(days=32)
     with pytest.raises(BudgetExceeded):store.reserve_api(settings,clock())

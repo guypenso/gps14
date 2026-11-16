@@ -38,14 +38,27 @@ def active(settings, now):
 
 
 def limits(settings):
-    total = settings.request_ceiling
+    # Already consumed provider-wide requests are outside this new grant.
+    total = max(0, settings.request_ceiling-settings.billing_baseline)
     if total < 10:
         return {'listing': total, 'rent': 0, 'targeted': 0, 'recovery': 0}
-    listing = total * 72 // 100
-    rent = total * 16 // 100
-    targeted = total * 8 // 100
-    return {'listing': listing, 'rent': rent, 'targeted': targeted,
-            'recovery': total-listing-rent-targeted}
+    weights = {'listing': 36, 'rent': 8, 'targeted': 4, 'recovery': 2}
+    caps = {kind: total*weight//50 for kind,weight in weights.items()}
+    order = sorted(weights, key=lambda kind: -(total*weights[kind] % 50))
+    for kind in order[:total-sum(caps.values())]:caps[kind] += 1
+    return caps
+
+
+def block_reason(settings, now):
+    if settings.approval_mode != 'monthly_budget' or settings.supplemental_requests:
+        return None
+    if not settings.provider_cycle_verified_at:
+        return 'provider_cycle_verification_required'
+    window = grant_window(settings)
+    if not window:return 'current_cycle_approval_invalid'
+    if now >= window[1]:return 'cycle_approval_expired'
+    if not active(settings, now):return 'current_cycle_approval_inactive'
+    return None
 
 
 def _slots(anchor, expires):
