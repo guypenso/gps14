@@ -84,3 +84,31 @@ def test_paced_slot_is_explicit_without_an_exhaustion_incident(store):
     assert audit['state']=='paced' and audit['reason']=='monthly_listing_allocation_reserved_for_future_slots'
     row=store.execute('SELECT payload FROM settings WHERE name=?',('health_incident:discovery_slot_morning',)).fetchone()
     assert row is None or '"open"' not in row[0]
+
+
+def test_free_listing_recovery_replays_exact_payload_and_never_spends_provider_budget(store,clock,monkeypatch):
+    import hashlib,json
+    from rentalsourcing.reliability import recover_listing_operations
+    from rentalsourcing.sync_runtime import get
+    config=('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'fixture-token')
+    monkeypatch.setattr('rentalsourcing.reliability.review_configuration',lambda:config)
+    identity='stale-free-refresh';body=json.dumps({'action':'refresh','operation_id':identity},separators=(',',':')).encode()
+    name='sync_operation:offmarket_refresh:'+hashlib.sha256(identity.encode()).hexdigest()
+    store.save_setting(name,{'id':identity,'component':'offmarket_refresh','state':'pending',
+        'digest':hashlib.sha256(body).hexdigest(),'endpoint':'/api/rentalsourcing/offmarket-refresh',
+        'last_attempt_at':(clock()-dt.timedelta(hours=1)).isoformat(),'attempts':1})
+    class Response:
+        status=200
+        def read(self,n):return b'{"state":"success","counts":{"received":0}}'
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+    class FreeReceiver:
+        calls=0
+        def open(self,request,timeout):
+            self.calls+=1;assert request.full_url.endswith('/offmarket-refresh');assert request.data==body
+            return Response()
+    receiver=FreeReceiver();result=recover_listing_operations(store,clock(),receiver)
+    assert result['recovered']==1 and receiver.calls==1 and get(store,name)['state']=='success'
+    assert recover_listing_operations(store,clock(),receiver)['recovered']==0 and receiver.calls==1
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0

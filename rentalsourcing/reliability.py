@@ -156,11 +156,44 @@ def reconcile_completed_enrichment(store,now=None):
   incident(store,'listing_enrichment',None,now=now,resolved=True)
  return {'reconciled':resolved,'unmatched_pending':unmatched}
 
+def recover_listing_operations(store,now,opener=None,limit=1):
+ """Replay only reconstructable, idempotent free-source operations, never mail."""
+ config=review_configuration()
+ if not config:return {'state':'not_configured','recovered':0,'provider_calls':0}
+ url,key,token=config
+ candidates=[]
+ for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+  operation=json.loads(raw)
+  if operation.get('state')!='pending' or operation.get('component') not in {'offmarket_refresh','listing_pre_report'}:continue
+  if operation.get('next_attempt_at') and operation['next_attempt_at']>now.isoformat():continue
+  if operation.get('last_attempt_at','')>(now-dt.timedelta(minutes=10)).isoformat():continue
+  identity=operation.get('id')
+  if not isinstance(identity,str) or len(identity)>200:continue
+  body=json.dumps({'action':'refresh','operation_id':identity} if operation['component']=='offmarket_refresh' else
+                  {'action':'listing_refresh','operation_id':'pre-report:'+identity},separators=(',',':')).encode()
+  # A reconstructed request must match the exact original frozen payload.
+  if hashlib.sha256(body).hexdigest()!=operation.get('digest'):continue
+  if operation.get('endpoint')!='/api/rentalsourcing/offmarket-refresh':continue
+  candidates.append((operation.get('last_attempt_at',''),operation,body))
+ recovered=0
+ for _,operation,body in sorted(candidates,key=lambda r:r[0])[:limit]:
+  def validate(value,*args):
+   if value.get('state') not in {'success','partial'}:raise ValueError('Free listing recovery receipt incomplete')
+  try:
+   request_json(store,operation['component'],operation['id'],(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),
+                body,timeout=60,opener=opener,now=now,validate=validate)
+   recovered+=1
+  except Exception:pass # request_json persists the exact error and next retry.
+ return {'state':'recovered' if recovered else 'pending' if candidates else 'complete','recovered':recovered,
+         'eligible_pending':len(candidates),'provider_calls':0,'email_sends':0}
+
+
 @bounded_recovery
 def recover(store,boundary,now=None,opener=None):
  """Only saved sync operations; explicitly never sends emails or calls a listing provider."""
  now=now or dt.datetime.now(UTC);result={}
  result['completed_job_reconciliation']=reconcile_completed_enrichment(store,now)
+ result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
  from .review_feedback import refresh
  manual=get(store,'manual_recovery_requested',{})
  if manual.get('state')=='queued_no_email_or_provider_calls':
