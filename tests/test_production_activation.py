@@ -45,6 +45,22 @@ def test_free_plan_ceiling_cannot_be_raised_by_conflicting_configuration(setting
     assert s.request_ceiling==50 and sum(limits(s).values())==50
 
 
+def test_dashboard_research_context_resumes_a_verified_grant_without_enabling_provider_calls(store,settings,monkeypatch):
+    from rentalsourcing.config import Settings
+    from rentalsourcing.billing import billing_window
+    from rentalsourcing.listing_enrichment import research_context
+    now=dt.datetime.now(dt.timezone.utc)
+    anchor=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
+    s=replace(grant(settings),enabled=False,billing_anchor=anchor.isoformat())
+    s=replace(s,approval_expires_at=billing_window(s,now)[1].isoformat(),provider_cycle_verified_at=now.isoformat())
+    monkeypatch.setattr(Settings,'from_env',classmethod(lambda cls:s))
+    monkeypatch.setenv('ENABLE_RENT_ESTIMATES','true')
+    store.save_setting('research_budget_context',{'approval_id':'expired','remaining':0,'rent_authorized':False})
+    context=research_context(store)
+    assert context['approval_id']==s.approval_id and context['remaining']==50 and context['rent_authorized']
+    assert not s.enabled and store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
 def test_exhausted_listing_purpose_is_distinguished_from_pacing(store,settings,boundary,clock):
     from rentalsourcing.monthly_allocation import period
     from rentalsourcing.partition_discovery import run
