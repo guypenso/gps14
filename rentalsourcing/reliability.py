@@ -156,7 +156,47 @@ def reconcile_completed_enrichment(store,now=None):
   incident(store,'listing_enrichment',None,now=now,resolved=True)
  return {'reconciled':resolved,'unmatched_pending':unmatched}
 
-def recover_listing_operations(store,now,opener=None,limit=3):
+def reconcile_completed_source_refreshes(store,now):
+ """Supersede obsolete refresh intents only with later source AND delivery proof.
+
+ This never claims an acknowledgment for the original interrupted request.
+ """
+ source=get(store,'offmarket_scheduler',{});result=source.get('result') or {}
+ email=result.get('email') or {};messages=email.get('results') or []
+ disposition=(result.get('realscout_audit') or {}).get('counts') or {}
+ audit=get(store,'health_last_audit',{});inventory=(audit.get('result') or {}).get('current_inventory') or {}
+ at=source.get('attempted_at') or '';counts=result.get('counts') or {}
+ accounted=sum(disposition.get(k,0) for k in ('delivered_new','represented_existing','preserved_owner_decision','rejected_hard_criterion','pending_additional_evidence'))
+ source_complete=(source.get('state')==result.get('state')=='success' and not result.get('partial')
+     and email.get('authorized_accounts',0)>0 and len(messages)==email['authorized_accounts']
+     and all(m.get('state')=='success' and not any(m.get(k) for k in ('more','pending_reparse','failed','unresolved_errors')) for m in messages)
+     and disposition.get('observed',0)>0 and accounted==disposition['observed'] and not disposition.get('pending_retry')
+     and isinstance(counts.get('received'),int))
+ destination_complete=(audit.get('at','')>=at and inventory and all(k in inventory and inventory[k]==0 for k in
+     ('missing','rejected_at_destination','tax_status_mismatch','pending_tax_status_mismatch')))
+ if not at or not source_complete or not destination_complete:return {'reconciled':0,'evidence_complete':False,'provider_calls':0}
+ reconciled=0;components=set()
+ for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+  operation=json.loads(raw);identity=operation.get('id');kind=operation.get('component')
+  if operation.get('state')!='pending' or kind not in {'offmarket_refresh','listing_pre_report'} or not isinstance(identity,str):continue
+  if not operation.get('created_at') or operation['created_at']>=at:continue
+  body=json.dumps({'action':'refresh','operation_id':identity} if kind=='offmarket_refresh' else
+                  {'action':'listing_refresh','operation_id':'pre-report:'+identity},separators=(',',':')).encode()
+  if operation.get('endpoint')!='/api/rentalsourcing/offmarket-refresh' or hashlib.sha256(body).hexdigest()!=operation.get('digest'):continue
+  store.save_setting(name,{**operation,'state':'reconciled','reconciled_at':now.isoformat(),
+      'original_execution_confirmed':False,'reconciliation_reason':'superseded_by_later_complete_source_and_destination_audit',
+      'reconciliation_evidence':{'source_attempted_at':at,'source_counts':counts,'source_dispositions':disposition,
+                                 'destination_audited_at':audit['at'],'missing_actionable':0}})
+  reconciled+=1;components.add(kind)
+ remaining=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall()]
+ for kind in components:
+  if not any(r.get('component')==kind and r.get('state') in {'pending','dead_letter'} for r in remaining):
+   component(store,kind,'success',now=now,recovery='later_complete_source_and_destination_audit')
+   incident(store,kind,None,now=now,resolved=True)
+ return {'reconciled':reconciled,'evidence_complete':True,'source_attempted_at':at,'provider_calls':0,'email_sends':0}
+
+
+def recover_listing_operations(store,now,opener=None,limit=1):
  """Replay only reconstructable, idempotent free-source operations, never mail."""
  config=review_configuration()
  if not config:return {'state':'not_configured','recovered':0,'provider_calls':0}
@@ -175,15 +215,25 @@ def recover_listing_operations(store,now,opener=None,limit=3):
   if hashlib.sha256(body).hexdigest()!=operation.get('digest'):continue
   if operation.get('endpoint')!='/api/rentalsourcing/offmarket-refresh':continue
   candidates.append((operation.get('last_attempt_at',''),operation,body))
+ from .sync_runtime import DEADLINE
+ # Slow source callbacks must not consume the health/delivery recovery budget.
+ deadline=DEADLINE.get();started=time.monotonic()
+ token_deadline=DEADLINE.set(min(deadline if deadline is not None else float('inf'),started+40))
  recovered=0
- for _,operation,body in sorted(candidates,key=lambda r:r[0])[:limit]:
-  def validate(value,*args):
-   if value.get('state') not in {'success','partial'}:raise ValueError('Free listing recovery receipt incomplete')
-  try:
-   request_json(store,operation['component'],operation['id'],(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),
-                body,timeout=60,opener=opener,now=now,validate=validate)
-   recovered+=1
-  except Exception:pass # request_json persists the exact error and next retry.
+ try:
+  for _,operation,body in sorted(candidates,key=lambda r:r[0])[:limit]:
+   try:
+    if budget_timeout(40)<1:break
+   except SyncFailure:break
+   def validate(value,*args):
+    if value.get('state') in {'rate_limited','busy','processing'}:raise SyncFailure('source_refresh_deferred',429,True)
+    if value.get('state') not in {'success','partial'}:raise ValueError('Free listing recovery receipt incomplete')
+   try:
+    request_json(store,operation['component'],operation['id'],(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),
+                 body,timeout=40,opener=opener,now=now,validate=validate)
+    recovered+=1
+   except Exception:pass # request_json persists the exact error and next retry.
+ finally:DEADLINE.reset(token_deadline)
  return {'state':'recovered' if recovered else 'pending' if candidates else 'complete','recovered':recovered,
          'eligible_pending':len(candidates),'provider_calls':0,'email_sends':0}
 
@@ -193,7 +243,7 @@ def recover(store,boundary,now=None,opener=None):
  """Only saved sync operations; explicitly never sends emails or calls a listing provider."""
  now=now or dt.datetime.now(UTC);result={}
  result['completed_job_reconciliation']=reconcile_completed_enrichment(store,now)
- result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
+ result['completed_source_reconciliation']=reconcile_completed_source_refreshes(store,now)
  from .review_feedback import refresh
  manual=get(store,'manual_recovery_requested',{})
  if manual.get('state')=='queued_no_email_or_provider_calls':
@@ -260,6 +310,8 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as exc:result['roundtrip']={'state':'deferred','category':type(exc).__name__}
  try:result['health']=publish(store,now,opener=opener)
  except Exception as e:result['health']={'state':'deferred','category':type(e).__name__}
+ # Core feedback, inventory, roundtrip and health acknowledgments run first.
+ result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
  return result
 
 def start_watchdog(url,boundary):
@@ -304,7 +356,7 @@ def start_watchdog(url,boundary):
      value=recover(store,boundary)
      evidence=get(store,'reliability_audit:2026-11-03:v1',{})
      view=snapshot(store)
-     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget'],'bedroom_policy':view['runtime'].get('bedroom_policy')},sort_keys=True))
+     logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'listing_operation_recovery':value.get('listing_operation_recovery'),'completed_source_reconciliation':value.get('completed_source_reconciliation'),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget'],'bedroom_policy':view['runtime'].get('bedroom_policy')},sort_keys=True))
    except Exception as e:
     logging.getLogger(__name__).error('RELIABILITY_WATCHDOG_FAILED '+type(e).__name__)
     if store:

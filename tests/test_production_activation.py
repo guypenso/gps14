@@ -159,3 +159,80 @@ def test_free_listing_recovery_replays_exact_payload_and_never_spends_provider_b
     assert recover_listing_operations(store,clock(),receiver)['recovered']==0 and receiver.calls==1
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('result',['timeout','rate_limited'])
+def test_slow_or_busy_listing_recovery_keeps_health_budget_and_retryable_evidence(store,clock,monkeypatch,result):
+    import hashlib,json
+    from rentalsourcing.reliability import recover_listing_operations
+    from rentalsourcing.sync_runtime import DEADLINE,get,request_json
+    from conftest import Response
+    config=('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'fixture-token')
+    monkeypatch.setattr('rentalsourcing.reliability.review_configuration',lambda:config)
+    tick=[0.0]
+    monkeypatch.setattr('rentalsourcing.reliability.time.monotonic',lambda:tick[0])
+    for identity in ('old-a','old-b'):
+        body=json.dumps({'action':'refresh','operation_id':identity},separators=(',',':')).encode()
+        name='sync_operation:offmarket_refresh:'+hashlib.sha256(identity.encode()).hexdigest()
+        store.save_setting(name,{'id':identity,'component':'offmarket_refresh','state':'pending','attempts':1,
+            'digest':hashlib.sha256(body).hexdigest(),'endpoint':'/api/rentalsourcing/offmarket-refresh',
+            'last_attempt_at':(clock()-dt.timedelta(hours=1)).isoformat()})
+    class Wire:
+        calls=[]
+        def open(self,request,timeout):
+            self.calls.append(request.full_url)
+            if request.full_url.endswith('/offmarket-refresh'):
+                assert timeout<=40
+                if result=='timeout':
+                    tick[0]=41.0
+                    raise TimeoutError()
+                return Response({'state':'rate_limited'})
+            return Response({'accepted':True})
+    wire=Wire();parent=DEADLINE.set(120.0)
+    try:
+        receipt=recover_listing_operations(store,clock(),wire)
+        assert receipt['recovered']==0 and DEADLINE.get()==120.0
+        assert request_json(store,'health_delivery','health-after-slow-source',config,b'{}',opener=wire,now=clock())['accepted']
+    finally:DEADLINE.reset(parent)
+    a=get(store,'sync_operation:offmarket_refresh:'+hashlib.sha256(b'old-a').hexdigest())
+    b=get(store,'sync_operation:offmarket_refresh:'+hashlib.sha256(b'old-b').hexdigest())
+    assert a['state']=='pending' and a['next_attempt_at'] and b['attempts']==1
+    assert wire.calls.count('https://fixture.test/api/rentalsourcing/offmarket-refresh')==1
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('gap',[None,'partial_source','pending_disposition','missing_destination','missing_email_check'])
+def test_obsolete_free_refresh_reconciliation_requires_later_complete_source_and_delivery_proof(store,clock,gap):
+    import hashlib,json
+    from rentalsourcing.reliability import reconcile_completed_source_refreshes
+    from rentalsourcing.sync_runtime import get
+    source_at=(clock()-dt.timedelta(hours=1)).isoformat()
+    source={'attempted_at':source_at,'state':'success','result':{'state':'success','partial':False,
+        'counts':{'received':26,'duplicates':26},'email':{'authorized_accounts':1,'results':[{'state':'success','more':False}]},
+        'realscout_audit':{'counts':{'observed':111,'delivered_new':2,'preserved_owner_decision':52,
+            'rejected_hard_criterion':54,'pending_additional_evidence':3,'pending_retry':0}}}}
+    destination={'at':clock().isoformat(),'result':{'current_inventory':{'missing':0,'rejected_at_destination':0,
+        'tax_status_mismatch':0,'pending_tax_status_mismatch':0}}}
+    if gap=='partial_source':source['result']['partial']=True
+    if gap=='pending_disposition':source['result']['realscout_audit']['counts']['pending_retry']=1
+    if gap=='missing_destination':destination['result']['current_inventory']['missing']=1
+    if gap=='missing_email_check':source['result']['email']['results']=[]
+    store.save_setting('offmarket_scheduler',source);store.save_setting('health_last_audit',destination)
+    names={}
+    original_error={'category':'network','retryable':True}
+    for identity,created in (('older',clock()-dt.timedelta(hours=2)),('newer',clock())):
+        body=json.dumps({'action':'refresh','operation_id':identity},separators=(',',':')).encode()
+        name='sync_operation:offmarket_refresh:'+hashlib.sha256(identity.encode()).hexdigest();names[identity]=name
+        store.save_setting(name,{'id':identity,'component':'offmarket_refresh','state':'pending','attempts':3,
+            'created_at':created.isoformat(),'last_attempt_at':clock().isoformat(),'error':original_error,
+            'endpoint':'/api/rentalsourcing/offmarket-refresh','digest':hashlib.sha256(body).hexdigest()})
+    result=reconcile_completed_source_refreshes(store,clock())
+    older=get(store,names['older'])
+    assert result['reconciled']==(0 if gap else 1)
+    assert older['state']==('pending' if gap else 'reconciled')
+    assert older['error']==original_error and older['attempts']==3 and not older.get('receipt')
+    if not gap:assert older['original_execution_confirmed'] is False and older['reconciliation_evidence']['source_attempted_at']==source_at
+    assert get(store,names['newer'])['state']=='pending'
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
