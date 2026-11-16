@@ -159,3 +159,44 @@ def test_free_listing_recovery_replays_exact_payload_and_never_spends_provider_b
     assert recover_listing_operations(store,clock(),receiver)['recovered']==0 and receiver.calls==1
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('result',['timeout','rate_limited'])
+def test_slow_or_busy_listing_recovery_keeps_health_budget_and_retryable_evidence(store,clock,monkeypatch,result):
+    import hashlib,json
+    from rentalsourcing.reliability import recover_listing_operations
+    from rentalsourcing.sync_runtime import DEADLINE,get,request_json
+    from conftest import Response
+    config=('https://fixture.test/api/rentalsourcing/review-sync','s'*32,'fixture-token')
+    monkeypatch.setattr('rentalsourcing.reliability.review_configuration',lambda:config)
+    tick=[0.0]
+    monkeypatch.setattr('rentalsourcing.reliability.time.monotonic',lambda:tick[0])
+    for identity in ('old-a','old-b'):
+        body=json.dumps({'action':'refresh','operation_id':identity},separators=(',',':')).encode()
+        name='sync_operation:offmarket_refresh:'+hashlib.sha256(identity.encode()).hexdigest()
+        store.save_setting(name,{'id':identity,'component':'offmarket_refresh','state':'pending','attempts':1,
+            'digest':hashlib.sha256(body).hexdigest(),'endpoint':'/api/rentalsourcing/offmarket-refresh',
+            'last_attempt_at':(clock()-dt.timedelta(hours=1)).isoformat()})
+    class Wire:
+        calls=[]
+        def open(self,request,timeout):
+            self.calls.append(request.full_url)
+            if request.full_url.endswith('/offmarket-refresh'):
+                assert timeout<=40
+                if result=='timeout':
+                    tick[0]=41.0
+                    raise TimeoutError()
+                return Response({'state':'rate_limited'})
+            return Response({'accepted':True})
+    wire=Wire();parent=DEADLINE.set(120.0)
+    try:
+        receipt=recover_listing_operations(store,clock(),wire)
+        assert receipt['recovered']==0 and DEADLINE.get()==120.0
+        assert request_json(store,'health_delivery','health-after-slow-source',config,b'{}',opener=wire,now=clock())['accepted']
+    finally:DEADLINE.reset(parent)
+    a=get(store,'sync_operation:offmarket_refresh:'+hashlib.sha256(b'old-a').hexdigest())
+    b=get(store,'sync_operation:offmarket_refresh:'+hashlib.sha256(b'old-b').hexdigest())
+    assert a['state']=='pending' and a['next_attempt_at'] and b['attempts']==1
+    assert wire.calls.count('https://fixture.test/api/rentalsourcing/offmarket-refresh')==1
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
