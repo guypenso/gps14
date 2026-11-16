@@ -337,7 +337,9 @@ def main(argv=None):
                 if os.getenv('DISCOVERY_ALLOCATION_ID'):raise
             finally:
                 if observer:observer.close()
-        event('preflight',boundary_valid=exists,api_approved=settings.approved_requests>0 and bool(settings.approval_id),
+        from .monthly_allocation import active as monthly_active
+        approved=monthly_active(settings,dt.datetime.now(dt.timezone.utc)) if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests else settings.approved_requests>0 and bool(settings.approval_id)
+        event('preflight',boundary_valid=exists,api_approved=approved,
               configured=settings.public(),database_configured=bool(os.getenv('DATABASE_URL')),
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
         if not exists:raise ValueError('Official city boundary missing; run scripts/fetch_boundary.py in the deployment environment')
