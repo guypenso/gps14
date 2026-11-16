@@ -45,6 +45,18 @@ def test_free_plan_ceiling_cannot_be_raised_by_conflicting_configuration(setting
     assert s.request_ceiling==50 and sum(limits(s).values())==50
 
 
+def test_dashboard_snapshot_reports_the_effective_monthly_cap(store,settings,boundary,clock,monkeypatch):
+    from rentalsourcing.config import Settings
+    from rentalsourcing.tax_intelligence import snapshot as tax_snapshot
+    clock.value=dt.datetime(2026,11,16,9,tzinfo=dt.timezone.utc)
+    s=replace(grant(settings),enabled=False,approved_requests=0)
+    monkeypatch.setattr(Settings,'from_env',classmethod(lambda cls:s))
+    budget=tax_snapshot(store,boundary,clock())['api_budget']['dashboard_runtime']
+    assert budget['approval_cap']==50 and budget['remaining']==50
+    assert budget['approval_id']==s.approval_id and budget['approval_mode']=='monthly_budget'
+    assert budget['approval_expires_at']==s.approval_expires_at and not budget['rentcast_enabled']
+
+
 def test_dashboard_research_context_resumes_a_verified_grant_without_enabling_provider_calls(store,settings,monkeypatch):
     from rentalsourcing.config import Settings
     from rentalsourcing.billing import billing_window
