@@ -239,6 +239,9 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
         store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))
     try:
         result=_daily_discovery(store,boundary,settings,day,clock=clock,opener=opener,slot=slot)
+        # A later completed workflow resolves the old orchestration exception;
+        # discovery and delivery stages still report their own partial/failures.
+        stage(store,day,'daily_workflow','failed' if result.get('error') else 'success',clock())
         store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
         if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
             store.save_setting('monthly_allocation:last',monthly_snapshot(store,settings,clock()))

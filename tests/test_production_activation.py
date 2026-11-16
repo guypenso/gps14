@@ -5,6 +5,25 @@ from rentalsourcing.billing import cycle_key
 from rentalsourcing.monthly_allocation import limits
 from rentalsourcing.runtime_readiness import snapshot
 from test_monthly_allocation import grant
+import pytest
+
+
+@pytest.mark.parametrize('failure',[None,'provider_failed'])
+def test_later_workflow_resolves_only_recovered_orchestration_incident(store,settings,boundary,clock,monkeypatch,failure):
+    from rentalsourcing.cloud import daily_discovery
+    from rentalsourcing.sync_runtime import incident,get
+    clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
+    incident(store,'daily_workflow',{'category':'response_validation','retryable':False},now=clock()-dt.timedelta(days=2))
+    historical={'day':'2026-11-14','slot':'evening','state':'failed','finished_at':'2026-11-14T18:05:00+00:00'}
+    store.save_setting('discovery_run:2026-11-14:evening',historical)
+    monkeypatch.setattr('rentalsourcing.cloud._daily_discovery',lambda *a,**k:{'status':'processed_without_email','scan':'failed' if failure else 'fresh','error':failure})
+    monkeypatch.setattr('rentalsourcing.reliability.publish',lambda *a,**k:None)
+    result=daily_discovery(store,boundary,grant(settings),'2026-11-16',slot='evening',clock=clock)
+    assert get(store,'health_incident:daily_workflow')['state']==('open' if failure else 'resolved')
+    assert get(store,'discovery_run:2026-11-14:evening')==historical
+    assert result['unresolved_critical']>0 if failure else result['unresolved_critical']==0
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
 
 
 def test_verified_current_cycle_activation_reconciles_once_and_preserves_history(store,settings,clock):
