@@ -156,7 +156,7 @@ def reconcile_completed_enrichment(store,now=None):
   incident(store,'listing_enrichment',None,now=now,resolved=True)
  return {'reconciled':resolved,'unmatched_pending':unmatched}
 
-def recover_listing_operations(store,now,opener=None,limit=1):
+def recover_listing_operations(store,now,opener=None,limit=3):
  """Replay only reconstructable, idempotent free-source operations, never mail."""
  config=review_configuration()
  if not config:return {'state':'not_configured','recovered':0,'provider_calls':0}
