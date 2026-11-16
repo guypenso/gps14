@@ -129,9 +129,13 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     report = prior or {'version': VERSION, 'run_key': key, 'started_at': now.isoformat(),
                       'pages': [], 'job_ids': [], 'new_source_ids': [], 'partitions': {}}
     health=store.budget_health(settings,now,record_warning=False)
-    paced=not remaining and health['remaining']>0 and weighted and available(store,settings,now,'listing')==0
+    if weighted:
+        from .monthly_allocation import limits,period
+        listing_exhausted=store.count_usage(period(settings,now,'listing'))>=limits(settings)['listing']
+    else:listing_exhausted=False
+    paced=not remaining and health['remaining']>0 and weighted and not listing_exhausted and available(store,settings,now,'listing')==0
     report.update(request_limit=remaining, discovery_state='scheduled_pacing_no_listing_request' if paced else 'skipped_budget_exhausted' if not remaining else 'verification_only',
-                  budget_reason='monthly_listing_pacing' if paced else health.get('block_reason') or ('account_or_daily_allowance_exhausted' if not remaining else None))
+                  budget_reason='monthly_listing_pacing' if paced else health.get('block_reason') or ('listing_purpose_allocation_exhausted' if listing_exhausted else 'account_or_daily_allowance_exhausted' if not remaining else None))
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
     unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}

@@ -237,7 +237,7 @@ class Store:
         if settings.approval_mode in {'billing_cycle','monthly_budget'} and now<anchor:remaining=0
         days=1+future_listing_days(now,end)
         warning=None
-        if remaining<days*settings.listing_requests_per_day:warning='API allowance cannot cover daily listing pages for the remaining cycle; increase only after approval.'
+        if remaining<days*settings.listing_requests_per_day:warning='Approved free allowance cannot fund fresh listing pages in every remaining window; cached and free-source processing continues.'
         elif used>=settings.per_month*.85:warning='API billing-cycle allowance is at least 85% consumed.'
         if warning and record_warning:self.operation('budget:'+cycle.isoformat()+':'+str(remaining),warning)
         from .monthly_allocation import block_reason

@@ -30,6 +30,21 @@ def test_free_plan_ceiling_cannot_be_raised_by_conflicting_configuration(setting
     assert s.request_ceiling==50 and sum(limits(s).values())==50
 
 
+def test_exhausted_listing_purpose_is_distinguished_from_pacing(store,settings,boundary,clock):
+    from rentalsourcing.monthly_allocation import period
+    from rentalsourcing.partition_discovery import run
+    s=grant(settings)
+    clock.value=dt.datetime(2026,12,14,6,tzinfo=dt.timezone.utc)
+    store.execute('INSERT INTO usage VALUES (?,?)',(cycle_key(s,clock()),36))
+    store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'listing'),36))
+    class NoWire:
+        def open(self,*a,**k):raise AssertionError('No listing allowance remains')
+    receipt,_=run(store,boundary,s,'2026-12-14','morning',clock=clock,opener=NoWire())
+    assert receipt['requests_consumed']==0
+    assert receipt['budget_reason']=='listing_purpose_allocation_exhausted'
+    assert receipt['remaining_budget']==14
+
+
 def test_runtime_readiness_only_reads_persisted_evidence(store,settings,clock):
     clock.value=dt.datetime(2026,11,16,9,tzinfo=dt.timezone.utc)
     s=grant(settings)
