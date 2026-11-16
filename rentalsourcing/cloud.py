@@ -231,7 +231,8 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
     clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
     run_key='discovery_run:'+day+':'+str(slot)
     if slot and get(store,run_key,{}).get('finished_at'):return dict(get(store,run_key)['result'],already_executed=True)
-    if slot:store.save_setting(run_key,{'slot':slot,'day':day,'started_at':clock().isoformat(),'state':'processing'})
+    run_started=clock().isoformat()
+    if slot:store.save_setting(run_key,{'slot':slot,'day':day,'started_at':run_started,'state':'processing'})
     begin(store,day,clock());stage(store,day,'scheduled_run','success',clock())
     store.save_setting('health_budget',store.budget_health(settings,clock(),record_warning=False))
     if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
@@ -263,7 +264,12 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
         except Exception as exc:event('operational_health_deferred',error_type=type(exc).__name__)
         result['workflow_status']=finish(store,day,clock())
         current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
-        if slot:store.save_setting(run_key,{'slot':slot,'day':day,'finished_at':clock().isoformat(),'state':result['workflow_status'],'result':result})
+        if slot:
+            closed={'slot':slot,'day':day,'started_at':run_started,'finished_at':clock().isoformat(),'state':result['workflow_status']}
+            store.save_setting(run_key,{**closed,'result':result})
+            from .reliability import scheduled_window_outcome
+            result.update(scheduled_window_outcome(store,slot,run_started,clock()))
+            store.save_setting(run_key,{**closed,'result':result})
         event('discovery_slot_result',slot=slot or 'morning',day=day,**result)
         return result
     except Exception as exc:
@@ -419,7 +425,7 @@ def main(argv=None):
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
         if args.scheduled:
             result=daily_discovery(store,boundary,settings,day,slot=scheduled_slot()[1]);event('daily_discovery_result',**result)
-            if result.get('unresolved_critical') or result.get('workflow_status')=='failed':raise SystemExit(2)
+            if result.get('current_window_critical',result.get('unresolved_critical')) or result.get('workflow_status')=='failed':raise SystemExit(2)
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})

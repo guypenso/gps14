@@ -9,14 +9,15 @@ UTC=dt.timezone.utc
 
 def stages(store):return [json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE ?",('health_component:%',)).fetchall()]
 
-def audit_scheduled_slots(store,now=None):
+def audit_scheduled_slots(store,now=None,completed_slot=None):
  """Persist an honest morning/evening receipt audit without provider or email work."""
  now=now or dt.datetime.now(UTC)
  local=now.astimezone(ISRAEL)
  day=local.date().isoformat()
  results={}
  for slot,hour in (('morning',8),('evening',20)):
-  if local < dt.datetime.combine(local.date(),dt.time(hour,40),tzinfo=ISRAEL):continue
+  if completed_slot is not None and slot!=completed_slot:continue
+  if slot!=completed_slot and local < dt.datetime.combine(local.date(),dt.time(hour,40),tzinfo=ISRAEL):continue
   run=get(store,'discovery_run:'+day+':'+slot,{})
   receipt=get(store,'multi-discovery:'+day+':'+slot,{})
   requests=receipt.get('requests_consumed',0)
@@ -25,6 +26,8 @@ def audit_scheduled_slots(store,now=None):
   acks=receipt.get('penten_receipts') or {}
   if not run.get('finished_at') or not receipt.get('finished_at'):
    state,reason='missing','scheduled_slot_or_discovery_receipt_missing'
+  elif run.get('started_at') and receipt.get('started_at','')<run['started_at']:
+   state,reason='stale','discovery_receipt_older_than_current_scheduled_window'
   elif receipt.get('discovery_state')=='fresh' and requests>0 and pages:
    if (delivery.get('new_pending',0)+delivery.get('new_qualified',0)>0 and delivery.get('synced',0)==0):
     state,reason='delivery_unacknowledged','new_opportunities_not_delivered'
@@ -48,6 +51,18 @@ def audit_scheduled_slots(store,now=None):
   incident(store,component_name,None if healthy else {'category':reason,'retryable':state in {'missing','partial','failed','delivery_unacknowledged'}},now=now,resolved=healthy)
   results[slot]=value
  return results
+
+def scheduled_window_outcome(store,slot,started_at,now):
+ """Current-slot execution proof; historical failures stay in global health."""
+ receipt=audit_scheduled_slots(store,now,completed_slot=slot)[slot]
+ view=snapshot(store,now)
+ current_incidents=[i for i in view['incidents'] if i.get('state')=='open' and i.get('last_seen_at','')>=started_at]
+ counts=view['counts']
+ critical=sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs'))+len(current_incidents)
+ if receipt['state'] not in {'fresh','paced'}:critical=max(1,critical)
+ return {'current_window_state':receipt['state'],'current_window_critical':critical,
+         'unresolved_critical':sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs'))+sum(i.get('state')=='open' for i in view['incidents']),
+         'historical_open_incidents':sum(i.get('state')=='open' for i in view['incidents'])-len(current_incidents)}
 def begin(store,day,now):
  key='daily_health:'+day;old=get(store,key,{})
  if old.get('state')=='running' and old.get('started_at','')>(now-dt.timedelta(minutes=45)).isoformat():return old

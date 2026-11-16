@@ -8,6 +8,37 @@ from test_monthly_allocation import grant
 import pytest
 
 
+@pytest.mark.parametrize('case',['fresh','paced','budget_blocked','missing_delivery','stale_receipt'])
+def test_current_scheduled_window_requires_its_own_receipt_without_erasing_historical_failure(store,clock,case):
+    from rentalsourcing.reliability import scheduled_window_outcome
+    from rentalsourcing.sync_runtime import incident,get
+    clock.value=dt.datetime(2026,11,16,18,10,tzinfo=dt.timezone.utc)
+    started=(clock()-dt.timedelta(minutes=5)).isoformat()
+    historical_at=clock()-dt.timedelta(hours=12)
+    incident(store,'discovery_slot_morning',{'category':'approved_provider_budget_unavailable','retryable':False},now=historical_at)
+    run_key='discovery_run:2026-11-16:evening'
+    store.save_setting('daily_health:2026-11-16',{'day':'2026-11-16','state':'success','stages':{}})
+    store.save_setting(run_key,{'day':'2026-11-16','slot':'evening','started_at':started,'finished_at':clock().isoformat()})
+    receipt={'started_at':started,'finished_at':clock().isoformat(),'discovery_state':'fresh','requests_consumed':1,
+        'pages':[{'partition':'pittsburgh-bellevue','offset_before':0,'offset_after':1}],
+        'received_this_run':1,'delivery_totals':{'new_pending':0,'new_qualified':0,'synced':0},'penten_receipts':{}}
+    if case=='paced':receipt.update(discovery_state='scheduled_pacing_no_listing_request',requests_consumed=0,pages=[])
+    if case=='budget_blocked':receipt.update(discovery_state='skipped_budget_exhausted',requests_consumed=0,pages=[])
+    if case=='missing_delivery':receipt['delivery_totals']['new_pending']=1
+    if case=='stale_receipt':receipt['started_at']=historical_at.isoformat()
+    store.save_setting('multi-discovery:2026-11-16:evening',receipt)
+    outcome=scheduled_window_outcome(store,'evening',started,clock())
+    if case in {'fresh','paced'}:
+        assert outcome['current_window_critical']==0 and outcome['current_window_state']==case
+    else:assert outcome['current_window_critical']>0
+    assert outcome['historical_open_incidents']==1
+    old=get(store,'health_incident:discovery_slot_morning')
+    assert old['state']=='open' and old['last_seen_at']==historical_at.isoformat()
+    assert get(store,run_key)['started_at']==started
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+
 @pytest.mark.parametrize('failure',[None,'provider_failed'])
 def test_later_workflow_resolves_only_recovered_orchestration_incident(store,settings,boundary,clock,monkeypatch,failure):
     from rentalsourcing.cloud import daily_discovery
@@ -16,7 +47,11 @@ def test_later_workflow_resolves_only_recovered_orchestration_incident(store,set
     incident(store,'daily_workflow',{'category':'response_validation','retryable':False},now=clock()-dt.timedelta(days=2))
     historical={'day':'2026-11-14','slot':'evening','state':'failed','finished_at':'2026-11-14T18:05:00+00:00'}
     store.save_setting('discovery_run:2026-11-14:evening',historical)
-    monkeypatch.setattr('rentalsourcing.cloud._daily_discovery',lambda *a,**k:{'status':'processed_without_email','scan':'failed' if failure else 'fresh','error':failure})
+    def completed(*a,**k):
+        store.save_setting('multi-discovery:2026-11-16:evening',{'started_at':clock().isoformat(),'finished_at':clock().isoformat(),
+            'discovery_state':'failed' if failure else 'fresh','requests_consumed':0 if failure else 1,'pages':[] if failure else [{'partition':'fixture'}]})
+        return {'status':'processed_without_email','scan':'failed' if failure else 'fresh','error':failure}
+    monkeypatch.setattr('rentalsourcing.cloud._daily_discovery',completed)
     monkeypatch.setattr('rentalsourcing.reliability.publish',lambda *a,**k:None)
     result=daily_discovery(store,boundary,grant(settings),'2026-11-16',slot='evening',clock=clock)
     assert get(store,'health_incident:daily_workflow')['state']==('open' if failure else 'resolved')
