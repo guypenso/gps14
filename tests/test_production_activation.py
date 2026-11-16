@@ -25,6 +25,21 @@ def test_verified_current_cycle_activation_reconciles_once_and_preserves_history
     assert store.count_usage(cycle_key(s,clock()))==0
 
 
+def test_retired_listing_allocation_does_not_block_a_new_verified_cycle(store,settings,boundary,clock):
+    from rentalsourcing.discovery_allocation import KEY
+    from rentalsourcing.partition_discovery import run,MAIN
+    from test_partition_discovery import AreaProvider
+    store.save_setting(KEY,{'approval_id':'rentcast-free-supplement-20261113',
+        'cycle_key':'cycle:2026-10-15T00:00:00+00:00','additional_limit':9})
+    store.execute('INSERT INTO usage VALUES (?,?)',('approval:rentalsourcing-remainder-20261026',27))
+    clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
+    s=grant(settings);provider=AreaProvider(main=0,bethel=0,pleasant=0)
+    receipt,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
+    assert receipt['requests_consumed']>0 and receipt['fresh_request_made']
+    assert provider.calls[0][0]==MAIN
+    assert store.count_usage('approval:rentalsourcing-remainder-20261026')==27
+
+
 def test_free_plan_ceiling_cannot_be_raised_by_conflicting_configuration(settings):
     s=replace(grant(settings),per_month=500,monthly_budget_requests=500,provider_included_requests=500)
     assert s.request_ceiling==50 and sum(limits(s).values())==50
