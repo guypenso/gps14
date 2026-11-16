@@ -31,8 +31,10 @@ def audit_scheduled_slots(store,now=None):
    elif delivery.get('synced',0)>0 and not sum(acks.get(k,0) for k in ('inserted','updated','rejected')):
     state,reason='delivery_unacknowledged','penten_acknowledgment_missing'
    else:state,reason='fresh','persisted_provider_pages_and_delivery_disposition'
+  elif receipt.get('discovery_state')=='scheduled_pacing_no_listing_request':
+   state,reason='paced','monthly_listing_allocation_reserved_for_future_slots'
   elif receipt.get('discovery_state')=='skipped_budget_exhausted':
-   state,reason='budget_blocked','approved_provider_budget_unavailable'
+   state,reason='budget_blocked',receipt.get('budget_reason') or 'approved_provider_budget_unavailable'
   elif receipt.get('discovery_state')=='failed':
    state,reason='failed','discovery_exception'
   else:state,reason='partial','no_fresh_listing_page'
@@ -42,7 +44,7 @@ def audit_scheduled_slots(store,now=None):
   key='scheduled_slot_audit:'+day+':'+slot
   if get(store,key)!=value:store.save_setting(key,value)
   component_name='discovery_slot_'+slot
-  healthy=state=='fresh'
+  healthy=state in {'fresh','paced'}
   incident(store,component_name,None if healthy else {'category':reason,'retryable':state in {'missing','partial','failed','delivery_unacknowledged'}},now=now,resolved=healthy)
   results[slot]=value
  return results

@@ -81,7 +81,7 @@ class Settings:
 
     @property
     def request_ceiling(self):
-        return min(self.per_month,self.monthly_budget_requests,self.provider_included_requests) if self.approval_mode=='monthly_budget' else min(self.per_month,self.approved_requests)
+        return min(50,self.per_month,self.monthly_budget_requests,self.provider_included_requests) if self.approval_mode=='monthly_budget' else min(self.per_month,self.approved_requests)
 
     def public(self):
         data=asdict(self)

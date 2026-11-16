@@ -89,7 +89,7 @@ def test_one_paced_page_and_fair_rotation_without_provider_overrun(store,boundar
     assert second['requests_consumed']==1 and provider.calls[-1]==('Bethel Park',0)
     clock.value=dt.datetime(2026,11,16,6,tzinfo=dt.timezone.utc)
     third,_=run(store,boundary,s,'2026-11-16','morning',clock=clock,opener=provider)
-    assert third['requests_consumed']==0 and third['discovery_state']=='skipped_budget_exhausted'
+    assert third['requests_consumed']==0 and third['discovery_state']=='scheduled_pacing_no_listing_request'
     clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
     fourth,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
     assert fourth['requests_consumed']==1 and provider.calls[-1]==('Pleasant Hills',0)
