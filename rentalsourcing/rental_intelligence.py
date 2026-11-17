@@ -9,6 +9,15 @@ def identity(p):
 def key(p):return 'rentcast-long-term:'+hashlib.sha256(identity(p).encode()).hexdigest()
 def job_key(p):return 'rent-enrichment:'+hashlib.sha256(identity(p).encode()).hexdigest()
 
+
+def queue_evidence_delivery(store,p,estimate):
+    """Use the existing recovery worker for one immutable, stored-only update."""
+    digest=hashlib.sha256((str(p.get('id'))+'|'+estimate['observed_at']+'|'+str(estimate['monthly'])).encode()).hexdigest()
+    name='listing-contact-enrichment:rent:'+digest
+    value={'offset':0,'cursor':10000,'done':False,'batches':0,'source_ids':[p['id']],
+           'reason':'validated_cached_or_acquired_rent_evidence','provider_calls':0}
+    store.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(name,json.dumps(value)))
+
 def record_job(store,p,state,now,reason=None,next_at=None):
     """One durable, identity-scoped state; never itself authorizes a paid call."""
     previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
@@ -78,8 +87,10 @@ def enrich(store,boundary,settings,now,client=None):
         eligible=not review_deferred(source_id,store) and verification(p,boundary)[0]=='Candidate'
         # Recover a verified cached response even for a now-managed/historical
         # property. This never authorizes another call or changes its decision.
-        if cached_estimate(store,p,now,persist=True):
+        rent=cached_estimate(store,p,now,persist=True)
+        if rent:
             if eligible:active_jobs.add(job_key(p))
+            queue_evidence_delivery(store,p,rent)
             counts['cached']+=1;record_job(store,p,'Completed',now);continue
         if not eligible:continue
         previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
@@ -138,6 +149,7 @@ def enrich(store,boundary,settings,now,client=None):
             value=normalize(data,p,client.last_fetched_at,completed_at)
             if not value:counts['invalid']+=1;record_job(store,p,'Awaiting Evidence',now,'provider_response_failed_property_or_comparable_validation');continue
             store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1;record_job(store,p,'Completed',completed_at)
+            queue_evidence_delivery(store,p,value)
             tax=store.get_tax(p['id'],now.isoformat())
             if tax and tax[1]==LIVE and tax[0].get('id')==p['id']:
                 from .core import tax_verification

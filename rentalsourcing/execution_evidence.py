@@ -2,6 +2,7 @@
 import hashlib
 import json
 import datetime as dt
+from .sync_runtime import operation_rows,operation_counts
 from urllib.parse import urlsplit
 from .schedule import ISRAEL
 
@@ -34,7 +35,7 @@ def snapshot(store,now,boundary=None):
             'first_attempt_at':row[4],'updated_at':row[5],
             'delivery_note':'Sent means provider acceptance; inbox delivery is not inferred without a delivery event.'}
     operations=[];incidents=[]
-    for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+    for name,raw in operation_rows(store,limit=20):
         op=json.loads(raw)
         if op.get('state') not in ('pending','dead_letter'):continue
         operations.append({'component':op.get('component'),'state':op.get('state'),
@@ -45,11 +46,13 @@ def snapshot(store,now,boundary=None):
         item=json.loads(raw)
         if item.get('state')!='open':continue
         incidents.append({k:item.get(k) for k in ('component','state','opened_at','last_seen_at','manual_action')}|{'error':safe_error(item.get('error'))})
-    prices=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall()]
-    result['operations']={'pending_count':sum(op['state']=='pending' for op in operations),
-        'dead_letter_count':sum(op['state']=='dead_letter' for op in operations),'items':operations[:20],
+    totals=operation_counts(store)
+    synced="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
+    pending_prices=store.execute(f"SELECT COUNT(*) FROM settings WHERE name LIKE ? AND COALESCE({synced},'')='' ",('price-observation:%',)).fetchone()[0]
+    result['operations']={'pending_count':totals.get('pending',0),
+        'dead_letter_count':totals.get('dead_letter',0),'items':operations[:20],
         'open_incident_count':len(incidents),'open_incidents':incidents[:20],
-        'pending_price_observations':sum(not p.get('synced_at') for p in prices),
+        'pending_price_observations':pending_prices,
         'pending_report_count':store.execute('SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL').fetchone()[0]}
     audit=setting(store,'health_last_audit')
     current=audit.get('result',{}).get('current_inventory',{})

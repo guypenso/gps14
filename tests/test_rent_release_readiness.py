@@ -93,6 +93,11 @@ def test_interrupted_persistence_recovers_cache_without_another_request_or_manua
     assert store.execute('SELECT payload FROM settings WHERE name=?',(key(p),)).fetchone() is None
     outcome=enrich(store,boundary,settings,clock())
     assert outcome['cached']==1 and outcome['paid_calls']==0
+    deliveries=store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing-contact-enrichment:rent:%',)).fetchall()
+    assert len(deliveries)==1 and json.loads(deliveries[0][0])['source_ids']==[p['id']]
+    assert json.loads(deliveries[0][0])['done'] is False
+    enrich(store,boundary,settings,clock())
+    assert store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing-contact-enrichment:rent:%',)).fetchone()[0]==1
     assert store.execute('SELECT payload FROM settings WHERE name=?',(key(p),)).fetchone()
     assert cached_estimate(store,p,clock())['observed_at']==observed
     assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+p['id'],)).fetchone()[0])==decision

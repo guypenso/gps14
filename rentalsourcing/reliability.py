@@ -1,6 +1,6 @@
 """Stored-data health, recovery and watchdog. No provider scans or email sends."""
 import datetime as dt,hashlib,hmac,json,logging,os,threading,time,urllib.request,uuid
-from .sync_runtime import get,component,incident,request_json,SyncFailure,sequence,bounded_recovery,budget_timeout
+from .sync_runtime import get,component,incident,request_json,SyncFailure,sequence,bounded_recovery,budget_timeout,operation_rows,operation_counts
 from .command_center import configuration,review_configuration
 from .schedule import ISRAEL
 from .collector import LIVE
@@ -60,10 +60,10 @@ def scheduled_window_outcome(store,slot,started_at,now):
  view=snapshot(store,now)
  current_incidents=[i for i in view['incidents'] if i.get('state')=='open' and i.get('last_seen_at','')>=started_at]
  counts=view['counts']
- critical=sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs'))+len(current_incidents)
+ critical=sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))+len(current_incidents)
  if receipt['state'] not in {'fresh','paced'}:critical=max(1,critical)
  return {'current_window_state':receipt['state'],'current_window_critical':critical,
-         'unresolved_critical':sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs'))+sum(i.get('state')=='open' for i in view['incidents']),
+         'unresolved_critical':sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))+sum(i.get('state')=='open' for i in view['incidents']),
          'historical_open_incidents':sum(i.get('state')=='open' for i in view['incidents'])-len(current_incidents)}
 def begin(store,day,now):
  key='daily_health:'+day;old=get(store,key,{})
@@ -89,9 +89,8 @@ def snapshot(store,now=None):
   if not any(c['component']==name for c in comps):comps.append({'component':name,'state':'not_recorded','last_success_at':None,'last_attempt_at':None,'processed':0,'pending':0,'evidence':'No per-stage telemetry recorded'})
  # Keep historical receipts in PostgreSQL. Health needs counts and at most
  # twenty actionable records, not every successful request body/receipt.
- state_sql="payload::jsonb->>'state'" if store.pg else "json_extract(payload,'$.state')"
- op_counts=dict(store.execute(f'SELECT {state_sql},COUNT(*) FROM settings WHERE name LIKE ? GROUP BY {state_sql}',('sync_operation:%',)).fetchall())
- ops=[json.loads(r[0]) for r in store.execute(f"SELECT payload FROM settings WHERE name LIKE ? AND {state_sql} IN ('pending','dead_letter') ORDER BY name LIMIT 20",('sync_operation:%',)).fetchall()]
+ op_counts=operation_counts(store)
+ ops=[json.loads(raw) for name,raw in operation_rows(store,limit=20)]
  pending_details=[{'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
  pending_reports=store.execute("SELECT COUNT(*) FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND r.synced_at IS NULL").fetchone()[0]
  synced_sql="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
@@ -164,7 +163,7 @@ def reconcile_completed_enrichment(store,now=None):
  jobs={name:json.loads(raw) for name,raw in store.execute(
   'SELECT name,payload FROM settings WHERE name LIKE ?',('listing-contact-enrichment:%',)).fetchall()}
  resolved=0;unmatched=0
- for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:listing_enrichment:%',)).fetchall():
+ for name,raw in operation_rows(store,('pending',),'sync_operation:listing_enrichment:'):
   operation=json.loads(raw)
   if operation.get('state')!='pending':continue
   identity=operation.get('id','')
@@ -197,7 +196,7 @@ def reconcile_completed_source_refreshes(store,now):
      ('missing','rejected_at_destination','tax_status_mismatch','pending_tax_status_mismatch')))
  if not at or not source_complete or not destination_complete:return {'reconciled':0,'evidence_complete':False,'provider_calls':0}
  reconciled=0;components=set()
- for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+ for name,raw in operation_rows(store,('pending',)):
   operation=json.loads(raw);identity=operation.get('id');kind=operation.get('component')
   if operation.get('state')!='pending' or kind not in {'offmarket_refresh','listing_pre_report'} or not isinstance(identity,str):continue
   if not operation.get('created_at') or operation['created_at']>=at:continue
@@ -209,7 +208,7 @@ def reconcile_completed_source_refreshes(store,now):
       'reconciliation_evidence':{'source_attempted_at':at,'source_counts':counts,'source_dispositions':disposition,
                                  'destination_audited_at':audit['at'],'missing_actionable':0}})
   reconciled+=1;components.add(kind)
- remaining=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall()]
+ remaining=[json.loads(raw) for name,raw in operation_rows(store)]
  for kind in components:
   if not any(r.get('component')==kind and r.get('state') in {'pending','dead_letter'} for r in remaining):
    component(store,kind,'success',now=now,recovery='later_complete_source_and_destination_audit')
@@ -223,7 +222,7 @@ def recover_listing_operations(store,now,opener=None,limit=1):
  if not config:return {'state':'not_configured','recovered':0,'provider_calls':0}
  url,key,token=config
  candidates=[]
- for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+ for name,raw in operation_rows(store,('pending',)):
   operation=json.loads(raw)
   if operation.get('state')!='pending' or operation.get('component') not in {'offmarket_refresh','listing_pre_report'}:continue
   if operation.get('next_attempt_at') and operation['next_attempt_at']>now.isoformat():continue
@@ -242,7 +241,7 @@ def recover_listing_operations(store,now,opener=None,limit=1):
  token_deadline=DEADLINE.set(min(deadline if deadline is not None else float('inf'),started+40))
  recovered=0
  try:
-  for _,operation,body in sorted(candidates,key=lambda r:r[0])[:limit]:
+  for _,operation,body in sorted(candidates,key=lambda r:(r[0],r[1]['id']))[:limit]:
    try:
     if budget_timeout(40)<1:break
    except SyncFailure:break
@@ -276,7 +275,7 @@ def recover(store,boundary,now=None,opener=None):
     value=json.loads(raw)
     if value.get('blocked') and value.get('error',{}).get('category') in ('authentication','configuration','endpoint_redirect'):
      store.save_setting(name,{**value,'blocked':False,'manually_rechecked_at':now.isoformat()})
-   for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall():
+   for name,raw in operation_rows(store,('dead_letter',)):
     value=json.loads(raw)
     if value.get('state')=='dead_letter' and value.get('error',{}).get('category') in ('authentication','configuration','endpoint_redirect'):
      store.save_setting(name,{**value,'state':'pending','next_attempt_at':None})
@@ -366,9 +365,10 @@ def start_watchdog(url,boundary):
      from .config import Settings
      from .rental_intelligence import enrich as queue_rent
      now=dt.datetime.now(UTC)
-     if get(store,'rent_enrichment_queue_last',{}).get('at','')<(now-dt.timedelta(minutes=55)).isoformat():
+     queue=get(store,'rent_enrichment_queue_last',{})
+     if queue.get('version')!='rent-evidence-recovery-v2' or queue.get('at','')<(now-dt.timedelta(minutes=55)).isoformat():
       queue_rent(store,boundary,Settings.from_env(),now,client=None)
-      store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'mode':'stored_evidence_only','provider_calls':0})
+      store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'version':'rent-evidence-recovery-v2','mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
     from .schedule import discovery_protected_window
     current=dt.datetime.now(UTC)

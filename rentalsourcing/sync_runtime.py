@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 from .command_center import signed_request
 from .request import NoRedirect
 UTC=dt.timezone.utc
+OPERATION_PREDICATE="substr(name,1,15) = 'sync_operation:'"
 
 DEADLINE=contextvars.ContextVar('sync_recovery_deadline',default=None)
 def budget_timeout(seconds):
@@ -26,6 +27,25 @@ def get(store,key,default=None):
  return json.loads(row[0]) if row else default
 
 def attempt_count(store,name,identity):return get(store,'sync_operation:'+name+':'+hashlib.sha256(identity.encode()).hexdigest(),{}).get('attempts',0)
+
+
+def operation_counts(store):
+ state="payload::jsonb->>'state'" if store.pg else "json_extract(payload,'$.state')"
+ return dict(store.execute(f"SELECT {state},COUNT(*) FROM settings WHERE {OPERATION_PREDICATE} GROUP BY {state}").fetchall())
+
+
+def operation_rows(store,states=('pending','dead_letter'),prefix='sync_operation:',limit=None):
+ """Filter before materialization. Successful historical receipts stay in DB."""
+ if not states or any(s not in ('pending','dead_letter','success','reconciled') for s in states):raise ValueError('Known operation states required')
+ if not prefix.startswith('sync_operation:'):raise ValueError('Synchronization prefix required')
+ state="payload::jsonb->>'state'" if store.pg else "json_extract(payload,'$.state')"
+ marks=','.join('?' for _ in states)
+ query=f"SELECT name,payload FROM settings WHERE {OPERATION_PREDICATE} AND name LIKE ? AND {state} IN ({marks}) ORDER BY name"
+ args=(prefix+'%',*states)
+ if limit is not None:
+  if not isinstance(limit,int) or not 1<=limit<=1000:raise ValueError('Bounded operation limit required')
+  query+=' LIMIT ?';args+= (limit,)
+ return store.execute(query,args).fetchall()
 
 def component(store,name,state,*,now=None,processed=0,pending=0,error=None,recovery=None):
  now=now or utc();old=get(store,'health_component:'+name,{})

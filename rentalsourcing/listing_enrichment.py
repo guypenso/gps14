@@ -82,16 +82,25 @@ def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
     # Source labels vary by maintained collector; accept only the exact configured LIVE value.
     from .collector import LIVE
     rows=store.execute('SELECT id,payload,observed_at FROM properties WHERE source=? ORDER BY id',(LIVE,)).fetchall()
+    if ledger.get('source_ids') is not None:
+        selected=set(ledger['source_ids']);rows=[row for row in rows if row[0] in selected]
     from .owner_exception import snapshot as exception_snapshot
     owner_snapshot=exception_snapshot(store,dt.datetime.now(dt.timezone.utc))
     for _ in range(100):
-        records=[stored_evidence(store,json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
-        body=json.dumps({'cursor':ledger['cursor'] or 0,'records':records,'owner_exception_source':owner_snapshot,'research_context':research_context(store)},ensure_ascii=False,separators=(',',':')).encode();now=dt.datetime.now(dt.timezone.utc)
+        frozen=ledger.get('inflight')
+        if not frozen:
+            records=[stored_evidence(store,json.loads(raw),observed) for identity,raw,observed in rows[ledger['offset']:ledger['offset']+25]]
+            frozen={'body':json.dumps({'cursor':ledger['cursor'] or 0,'records':records,'owner_exception_source':owner_snapshot,'research_context':research_context(store)},ensure_ascii=False,separators=(',',':')),'records':len(records)}
+            ledger['inflight']=frozen;store.save_setting(job_key,ledger)
+        # Research timestamps and evidence can change during recovery. Reuse
+        # the exact committed batch after an interruption or uncertain receipt.
+        body=frozen['body'].encode();now=dt.datetime.now(dt.timezone.utc)
         from .sync_runtime import request_json
         def validate(result,*args):
             if result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
         result=request_json(store,'listing_enrichment',job_key+':'+str(ledger['offset'])+':'+str(ledger['cursor']),(url,key,token),body,timeout=90,max_bytes=524288,opener=opener,now=now,validate=validate)
-        ledger['offset']+=len(records);ledger['cursor']=result.get('next_cursor');ledger['batches']+=1;ledger['summary']=result.get('summary',{})
+        ledger['offset']+=frozen['records'];ledger['cursor']=result.get('next_cursor');ledger['batches']+=1;ledger['summary']=result.get('summary',{})
+        ledger.pop('inflight',None)
         ledger['done']=ledger['offset']>=len(rows) and ledger['cursor'] is None
         if result.get('summary',{}).get('property_quality'):store.save_setting('property_quality:last',result['summary']['property_quality'])
         store.save_setting(job_key,ledger)

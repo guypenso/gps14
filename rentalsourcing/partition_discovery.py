@@ -16,7 +16,7 @@ from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v3'
+VERSION = 'multi-partition-v4'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -28,7 +28,7 @@ def get(store, key, default=None):
 
 
 def scopes(boundary):
-    return {MAIN: listing_parameters(boundary), **dict(municipal_queries())}
+    return {MAIN: listing_parameters(boundary), **dict(municipal_queries(boundary))}
 
 
 class ListingClient(Client):
@@ -59,6 +59,16 @@ def _state(store, slug, query):
                 if row[1]: state['last_complete_at'] = row[3]
             state.update(offset=row[0], query_complete=bool(row[1]))
         return state
+    previous_query={}
+    if state:
+        # A corrected provider query cannot reuse the old query's offset.
+        # Retain its complete state and terminal/unfinished job for audit and
+        # rollback, and carry forward fairness accounting for this cycle.
+        archive=PREFIX+slug+':query-history:'+state['query_hash']+':'+hashlib.sha256(str(state.get('job_id')).encode()).hexdigest()[:16]
+        store.save_setting(archive,{k:v for k,v in state.items() if k!='_checkpoint_recovery'})
+        previous_query={'query_history_key':archive,**{k:state.get(k) for k in ('query','query_hash','job_id','offset','query_complete','last_success_at','last_complete_at','pages','observations','total')}}
+        fairness={k:state[k] for k in ('selection_cycle','selection_pages') if k in state}
+    else:fairness={}
     # Adopt an unfinished legacy job at its exact existing offset; never reset it.
     pattern = 'coverage:' + POLICY_VERSION + ':' + slug + ':%'
     old = store.execute('SELECT id,offset_value,collection_done,updated_at FROM scan_jobs WHERE id LIKE ? ORDER BY collection_done,updated_at DESC LIMIT 1', (pattern,)).fetchone() if state is None else None
@@ -69,6 +79,7 @@ def _state(store, slug, query):
              'last_complete_at': old[3] if old and old[2] else None,
              'coverage_claim': 'configured_provider_query_only',
              'geographic_completeness': 'not_verified', 'failures': 0}
+    if previous_query:state.update(previous_query=previous_query,**fairness)
     store.save_setting(PREFIX + slug, state)
     return state
 
