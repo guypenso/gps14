@@ -71,6 +71,22 @@ def classify(exc,endpoint=None,operation=None):
     body=json.loads(exc.read(4096));known=body.get('error') in ('Synchronization is not configured','Synchronization is disabled')
    except Exception:known=False
    return SyncFailure('configuration' if known else 'server',status,not known,endpoint,operation)
+  if status==400:
+   # The destination returns 400 for some runtime/database exceptions too.
+   # Retain only a static diagnostic category, never a response body, SQL,
+   # email content, contact details or credentials in the incident record.
+   try:
+    message=str(json.loads(exc.read(4096)).get('error','')).lower()
+   except (ValueError,TypeError,AttributeError):message=''
+   categories=(
+    ('destination_query_limit',('too many subrequests','too many api requests','too many sql queries','too many sql variables')),
+    ('destination_bind_type',('d1_type_error','type \'undefined\' not supported')),
+    ('destination_database',('d1_error','sqlite_')),
+    ('contract_batch',('invalid bounded batch',)),
+    ('contract_identity',('a street address is required for persistent property identity',)),
+    ('destination_runtime',('cannot read properties of','is not a function','is not defined')))
+   for category,patterns in categories:
+    if any(pattern in message for pattern in patterns):return SyncFailure(category,status,False,endpoint,operation)
   return SyncFailure('contract' if status in (400,404,409,413,415,422) else 'http',status,False,endpoint,operation)
  if isinstance(exc,(TimeoutError,urllib.error.URLError,OSError)):return SyncFailure('timeout' if isinstance(exc,TimeoutError) else 'network',None,True,endpoint,operation)
  return SyncFailure('response_validation',None,False,endpoint,operation)
