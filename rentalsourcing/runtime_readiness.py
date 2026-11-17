@@ -9,6 +9,22 @@ from .rental_intelligence import job_summary
 from .schedule import ISRAEL
 
 
+def resource_envelope(store):
+    """Aggregate storage sizes without materializing historical payloads."""
+    import resource
+    length='octet_length' if store.pg else 'length'
+    family="split_part(name,':',1)" if store.pg else "CASE WHEN instr(name,':')>0 THEN substr(name,1,instr(name,':')-1) ELSE name END"
+    families=store.execute(f'SELECT {family},COUNT(*),SUM({length}(payload)),MAX({length}(payload)) FROM settings GROUP BY {family} ORDER BY SUM({length}(payload)) DESC LIMIT 8').fetchall()
+    tables={}
+    for table in ('response_cache','properties','tax_history','command_center_reports'):
+        row=store.execute(f'SELECT COUNT(*),COALESCE(SUM({length}(payload)),0),COALESCE(MAX({length}(payload)),0) FROM '+table).fetchone()
+        tables[table]={'rows':row[0],'payload_bytes':row[1],'largest_payload_bytes':row[2]}
+    return {'process_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        'cache_rows':tables['response_cache']['rows'],'cache_payload_bytes':tables['response_cache']['payload_bytes'],
+        'largest_cache_payload_bytes':tables['response_cache']['largest_payload_bytes'],
+        'tables':tables,'largest_setting_families':[{'family':f,'rows':n,'payload_bytes':b,'largest_payload_bytes':m} for f,n,b,m in families]}
+
+
 def snapshot(store, settings, now):
     def saved(name):
         row=store.execute('SELECT payload FROM settings WHERE name=?',(name,)).fetchone()
@@ -37,13 +53,9 @@ def snapshot(store, settings, now):
         slots[slot]={k:receipt[k] for k in ('day','slot','started_at','finished_at','state','result') if k in receipt}
     scheduler=saved('offmarket_scheduler')
     pre_report=saved('listing_pre_report_receipt')
-    import resource
-    length='octet_length' if store.pg else 'length'
-    cache_size=store.execute(f'SELECT COUNT(*),COALESCE(SUM({length}(payload)),0),COALESCE(MAX({length}(payload)),0) FROM response_cache').fetchone()
     return {'as_of':now.isoformat(),'build_sha':os.getenv('RENDER_GIT_COMMIT'),
             'settings':settings.public(),'provider_calls':0,'email_sends':0,'read_only':True,
-            'resource_envelope':{'process_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
-                'cache_rows':cache_size[0],'cache_payload_bytes':cache_size[1],'largest_cache_payload_bytes':cache_size[2]},
+            'resource_envelope':resource_envelope(store),
             'budget':store.budget_health(settings,now,record_warning=False),
             'monthly_allocation':allocation(store,settings,now),'ledger':ledger,
             'next_slots':dates[:4],'coverage':coverage(store,now),'scheduled_slots':slots,

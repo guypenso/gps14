@@ -80,13 +80,14 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
    key='scheduled_slot_audit:'+day.isoformat()+':'+slot
    row=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()
    if row:slot_audits[day.isoformat()+':'+slot]=json.loads(row[0])
- from .rental_intelligence import job_summary
- rental_summary={'saved_estimates':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
-                 'jobs':job_summary(store),'provider_calls':0}
+ from .rental_intelligence import evidence_summary
+ rental_summary=evidence_summary(store,now)
  from .listing_report import listing_report
  listing_intake=listing_report(store,boundary,now)
  from .discovery_audit import snapshot as discovery_snapshot
  return {'as_of':now.isoformat(),'source_records':coverage['counts'].get('stored_unique',0),
+         'resource_envelope':__import__('rentalsourcing.runtime_readiness',fromlist=['resource_envelope']).resource_envelope(store),
+         'service_quality':__import__('rentalsourcing.service_quality',fromlist=['snapshot']).snapshot(store,now),
          'non_tax_pass':coverage['counts'].get('non_tax_pass',0),
          'non_tax_rejected':coverage['counts'].get('non_tax_rejected',0),
          'owner_deferred':owner_deferred,

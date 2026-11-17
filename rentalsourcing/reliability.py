@@ -50,6 +50,8 @@ def audit_scheduled_slots(store,now=None,completed_slot=None):
   healthy=state in {'fresh','paced'}
   incident(store,component_name,None if healthy else {'category':reason,'retryable':state in {'missing','partial','failed','delivery_unacknowledged'}},now=now,resolved=healthy)
   results[slot]=value
+ from .service_quality import snapshot as quality_snapshot
+ store.save_setting('service_quality:last',quality_snapshot(store,now))
  return results
 
 def scheduled_window_outcome(store,slot,started_at,now):
@@ -85,10 +87,15 @@ def snapshot(store,now=None):
  comps=stages(store)
  for name in ('scheduled_run','discovery','listing_processing','eligibility_filtering','tax_verification','property_storage','price_history','review_feedback','property_sync','price_sync','inventory_sync','listing_enrichment','email_delivery','consistency','health_delivery'):
   if not any(c['component']==name for c in comps):comps.append({'component':name,'state':'not_recorded','last_success_at':None,'last_attempt_at':None,'processed':0,'pending':0,'evidence':'No per-stage telemetry recorded'})
- ops=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('sync_operation:%',)).fetchall()]
+ # Keep historical receipts in PostgreSQL. Health needs counts and at most
+ # twenty actionable records, not every successful request body/receipt.
+ state_sql="payload::jsonb->>'state'" if store.pg else "json_extract(payload,'$.state')"
+ op_counts=dict(store.execute(f'SELECT {state_sql},COUNT(*) FROM settings WHERE name LIKE ? GROUP BY {state_sql}',('sync_operation:%',)).fetchall())
+ ops=[json.loads(r[0]) for r in store.execute(f"SELECT payload FROM settings WHERE name LIKE ? AND {state_sql} IN ('pending','dead_letter') ORDER BY name LIMIT 20",('sync_operation:%',)).fetchall()]
  pending_details=[{'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
  pending_reports=store.execute("SELECT COUNT(*) FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND r.synced_at IS NULL").fetchone()[0]
- prices=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('price-observation:%',)).fetchall()]
+ synced_sql="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
+ price_pending=store.execute(f"SELECT COUNT(*) FROM settings WHERE name LIKE ? AND COALESCE({synced_sql},'')=''",('price-observation:%',)).fetchone()[0]
  feedback=get(store,'penten_review_feed',{})
  identities=store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
  last_job=store.execute('SELECT day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last_job[2]) if last_job else {}
@@ -102,7 +109,6 @@ def snapshot(store,now=None):
  elif daily.get('state') not in ('not_observed','running'):incident(store,'daily_schedule',None,now=now,resolved=True)
  inventory_jobs=[json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE ? OR name LIKE ?",('stored-review-inventory:%','listing-contact-enrichment:%')).fetchall()]
  inventory_pending=sum(not (j.get('done') or j.get('synced_at')) for j in inventory_jobs)
- price_pending=sum(not r.get('synced_at') for r in prices)
  incident(store,'price_backpressure',None if price_pending<=1000 else {'category':'price_queue_high_water','retryable':True},now=now,resolved=price_pending<=1000)
  total_pending=pending_reports+price_pending+inventory_pending
  progress=get(store,'health_backlog_progress',{})
@@ -114,7 +120,7 @@ def snapshot(store,now=None):
  elif progress.get('last_progress_at','')<(now-dt.timedelta(minutes=30)).isoformat():incident(store,'sync_backlog',{'category':'synchronization_backlog_stalled','retryable':True},now=now)
  store.save_setting('health_backlog_progress',progress)
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()]
- blocked=sum(op.get('state')=='dead_letter' for op in ops)+store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('sync_hold:%',)).fetchone()[0];pending=sum(op.get('state')=='pending' for op in ops)
+ blocked=op_counts.get('dead_letter',0)+store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('sync_hold:%',)).fetchone()[0];pending=op_counts.get('pending',0)
  opens=[i for i in incidents if i.get('state')=='open']
  if daily.get('state')=='running' and daily.get('started_at','')<(now-dt.timedelta(minutes=45)).isoformat():incident(store,'daily_schedule',{'category':'scheduled_run_stalled','retryable':False},now=now)
  if unsent:incident(store,'email_delivery',{'category':'unsent_report_requires_safe_recovery','retryable':False},now=now)

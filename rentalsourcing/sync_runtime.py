@@ -102,17 +102,21 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
  if same and not poll and ledger.get('digest') and ledger['digest']!=digest:raise SyncFailure('frozen_operation_changed',409,False,endpoint,identity)
  ledger={**ledger,'id':identity,'component':name,'endpoint':endpoint,'configuration':fingerprint,'digest':digest,'created_at':ledger.get('created_at',stamp.isoformat()),'attempts':ledger.get('attempts',0),'state':'pending'}
  opener=opener or urllib.request.build_opener(NoRedirect)
+ call_started=time.monotonic()
  for attempt in range(3):
+  # A local time-slice boundary is not an upstream request failure. Do not
+  # create/increment an attempt unless there is budget to dispatch it.
+  timeout_for_attempt=budget_timeout(timeout)
   stamp=now or utc();ledger.update(last_attempt_at=stamp.isoformat(),attempts=ledger['attempts']+1);store.save_setting(ledger_key,ledger)
   try:
    req=signed_request(config,body,stamp);req.add_header('X-RentalSourcing-Operation',hashlib.sha256(identity.encode()).hexdigest())
-   with opener.open(req,timeout=budget_timeout(timeout)) as response:
+   with opener.open(req,timeout=timeout_for_attempt) as response:
     raw=response.read(max_bytes+1)
     if response.status!=200 or len(raw)>max_bytes:raise SyncFailure('response_validation',getattr(response,'status',None),False,endpoint,identity)
     result=json.loads(raw)
     if validate:validate(result,raw,response)
    receipt={k:result[k] for k in ('accepted','report_id','batch_id','counts','next_cursor','summary','audit','accepted_reports','state','acknowledged_observation_ids','rejected_observation_ids','untracked_observation_ids','coverage') if k in result}
-   ledger.update(state='success',last_success_at=stamp.isoformat(),error=None,next_attempt_at=None,receipt=receipt);store.save_setting(ledger_key,ledger)
+   ledger.update(state='success',last_success_at=stamp.isoformat(),error=None,next_attempt_at=None,consecutive_failures=0,receipt=receipt);store.save_setting(ledger_key,ledger)
    counts=result.get('counts',{});count=counts.get('received',counts.get('processed',result.get('processed',len(result.get('decisions',[])))))
    store.save_setting('sync_circuit:'+name,{'blocked':False,'configuration':fingerprint})
    component(store,name,'success',now=stamp,processed=count,recovery='recovered' if ledger.get('attempts',0)>1 else None);incident(store,name,None,now=stamp,resolved=True)
@@ -121,12 +125,14 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
    error=classify(exc,endpoint,identity)
    if error.category in ('authentication','configuration','endpoint_redirect','response_signature') or error.http_status in (404,415):store.save_setting('sync_circuit:'+name,{'blocked':True,'configuration':fingerprint,'error':error.safe()})
    incident(store,name,error.safe(),now=stamp)
-   delay=min(300,max(5,2**min(ledger['attempts'],8)))
+   ledger['consecutive_failures']=ledger.get('consecutive_failures',0)+1
+   delay=min(300,max(5,2**min(ledger['consecutive_failures'],8)))
    retry_after=getattr(exc,'headers',None)
    if retry_after:
     try:delay=max(delay,min(3600,int(retry_after.get('Retry-After','0'))))
     except (ValueError,TypeError):pass
-   ledger.update(state='pending' if error.retryable else 'dead_letter',error=error.safe(),next_attempt_at=(stamp+dt.timedelta(seconds=delay)).isoformat() if error.retryable else None);store.save_setting(ledger_key,ledger)
+   failed_at=(now+dt.timedelta(seconds=max(0,time.monotonic()-call_started))) if now else utc()
+   ledger.update(state='pending' if error.retryable else 'dead_letter',error=error.safe(),next_attempt_at=(failed_at+dt.timedelta(seconds=delay)).isoformat() if error.retryable else None);store.save_setting(ledger_key,ledger)
    component(store,name,'partial' if error.retryable else 'failed',now=stamp,pending=1,error=error.safe(),recovery='scheduled' if error.retryable else 'manual_action_required')
    if not error.retryable or attempt==2 or error.http_status==429:raise error from None
    sleeper((.25,1)[attempt])

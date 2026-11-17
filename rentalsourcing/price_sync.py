@@ -113,7 +113,14 @@ def _flush(store,config,now,opener,max_batches,max_seconds):
             coverage=result.get('coverage',{})
             if len(ack)+len(bad)<len(payload['observations']):break
         except Exception as exc:
-            event('price_sync_deferred',error_type=type(exc).__name__,pending=queue_counts(store)['pending'])
+            from .sync_runtime import SyncFailure
+            if isinstance(exc,SyncFailure) and exc.category=='recovery_time_budget':
+                counts=queue_counts(store)
+                component(store,'price_sync','partial',now=now,processed=sent,pending=counts['pending'],recovery='scheduled')
+                event('price_sync_paused',reason='local_processing_time_slice',observations=sent,**counts)
+                return {'state':'paused','reason':'local_processing_time_slice','sent':sent,**counts}
+            safe={k:v for k,v in exc.safe().items() if k in ('category','http_status','retryable','endpoint')} if isinstance(exc,SyncFailure) else {'category':type(exc).__name__}
+            event('price_sync_deferred',error_type=type(exc).__name__,error=safe,pending=queue_counts(store)['pending'])
             return {'state':'deferred','sent':sent,**queue_counts(store)}
     counts=queue_counts(store);summary={k:v for k,v in coverage.items() if k!='properties'}
     component(store,'price_sync','partial' if counts['pending'] else 'success',now=now,processed=sent,pending=counts['pending'],recovery='scheduled' if counts['pending'] else None)

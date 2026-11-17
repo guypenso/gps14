@@ -69,6 +69,11 @@ def test_five_evening_four_morning_with_independent_cursors(store,boundary,alloc
     assert morning['requests'] == 4 and not morning['discovery_complete']
     assert get(store,PREFIX+MAIN)['query_complete'] is True
     assert morning['partitions']['bethel-park']['state']=='budget_not_reached'
+    # Merely considering Bethel Park must not erase last night's complete
+    # query metrics when the morning allowance is spent on Pittsburgh pages.
+    assert get(store,PREFIX+'bethel-park')['offset']==1
+    assert get(store,PREFIX+'bethel-park')['query_complete'] is True
+    assert get(store,PREFIX+'bethel-park')['generation_run_key']=='2026-11-13:evening'
     assert store.budget_health(allocated,clock())['used'] == 50
     assert store.count_usage('allocation:'+ID) == 9
     assert store.execute('SELECT COUNT(*) FROM properties').fetchone()[0] == 15

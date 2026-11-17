@@ -135,6 +135,28 @@ def reservation_periods(store, settings, now, purpose, scope):
     return [(period(settings, now, purpose), limit)]
 
 
+def purpose_readiness(store,settings,now,purpose):
+    """Forecast the next scheduled release; this never reserves or renews calls."""
+    reason=block_reason(settings,now)
+    if not active(settings,now):
+        return {'state':'blocked','reason':reason or 'current_cycle_approval_inactive','available_now':0,'next_at':None}
+    used=store.count_usage(period(settings,now,purpose));cap=limits(settings).get(purpose,0)
+    remaining=store.budget_health(settings,now,record_warning=False)['remaining']
+    ready=available(store,settings,now,purpose)
+    if ready:return {'state':'available','reason':None,'available_now':ready,'purpose_remaining':cap-used,'next_at':None}
+    if remaining<=0:return {'state':'blocked','reason':'account_wide_allowance_exhausted','available_now':0,'next_at':None}
+    if used>=cap:return {'state':'blocked','reason':purpose+'_purpose_allocation_exhausted','available_now':0,'next_at':None}
+    window=grant_window(settings)
+    for slot in _slots(*window):
+        if slot<=now:continue
+        released=listing_limit_now(settings,slot) if purpose=='listing' else rent_limit_now(settings,slot) if purpose=='rent' else cap
+        if released>used and store.count_usage(slot.strftime('day:%Y-%m-%d'))<settings.per_day:
+            return {'state':'scheduled','reason':'monthly_'+purpose+'_pacing','available_now':0,
+                    'purpose_remaining':cap-used,'next_at':slot.isoformat(),
+                    'forecast_note':'Revalidated atomically at execution; no future capacity is spent or renewed.'}
+    return {'state':'blocked','reason':'no_release_before_approval_cutoff','available_now':0,'purpose_remaining':cap-used,'next_at':None}
+
+
 def snapshot(store, settings, now):
     caps = limits(settings)
     return {'active': active(settings, now), 'approval_id': settings.approval_id,
@@ -144,4 +166,5 @@ def snapshot(store, settings, now):
             'available': {kind: available(store, settings, now, kind) for kind in caps},
             'listing_cumulative_pace_limit': listing_limit_now(settings, now),
             'rent_cumulative_pace_limit': rent_limit_now(settings, now),
+            'readiness':{kind:purpose_readiness(store,settings,now,kind) for kind in ('listing','rent')},
             'provider_calls': 0}
