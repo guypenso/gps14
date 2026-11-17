@@ -100,6 +100,7 @@ def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
             if result.get('accepted') is not True:raise ValueError('Invalid listing enrichment receipt')
         result=request_json(store,'listing_enrichment',job_key+':'+str(ledger['offset'])+':'+str(ledger['cursor']),(url,key,token),body,timeout=90,max_bytes=524288,opener=opener,now=now,validate=validate)
         ledger['offset']+=frozen['records'];ledger['cursor']=result.get('next_cursor');ledger['batches']+=1;ledger['summary']=result.get('summary',{})
+        ledger['last_delivery']={'accepted':result.get('accepted'),'records':frozen['records'],'matched':result.get('matched'),'at':now.isoformat()}
         ledger.pop('inflight',None)
         ledger['done']=ledger['offset']>=len(rows) and ledger['cursor'] is None
         if result.get('summary',{}).get('property_quality'):store.save_setting('property_quality:last',result['summary']['property_quality'])

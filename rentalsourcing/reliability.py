@@ -366,9 +366,9 @@ def start_watchdog(url,boundary):
      from .rental_intelligence import enrich as queue_rent
      now=dt.datetime.now(UTC)
      queue=get(store,'rent_enrichment_queue_last',{})
-     if queue.get('version')!='rent-evidence-recovery-v2' or queue.get('at','')<(now-dt.timedelta(minutes=55)).isoformat():
+     if queue.get('version')!='rent-evidence-recovery-v3' or queue.get('at','')<(now-dt.timedelta(minutes=55)).isoformat():
       queue_rent(store,boundary,Settings.from_env(),now,client=None)
-      store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'version':'rent-evidence-recovery-v2','mode':'stored_evidence_only','provider_calls':0})
+      store.save_setting('rent_enrichment_queue_last',{'at':now.isoformat(),'version':'rent-evidence-recovery-v3','mode':'stored_evidence_only','provider_calls':0})
     except Exception as error:logger.warning('RENT_ENRICHMENT_QUEUE_DEFERRED '+type(error).__name__)
     from .schedule import discovery_protected_window
     current=dt.datetime.now(UTC)

@@ -104,3 +104,24 @@ def test_interrupted_persistence_recovers_cache_without_another_request_or_manua
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     clock.advance(days=31)
     assert cached_estimate(store,p,clock()) is None
+
+
+def test_source_alias_rent_uses_matching_canonical_record_or_records_actual_attribute_conflict(store,clock):
+    from rentalsourcing.rental_intelligence import queue_evidence_delivery,evidence_summary,key
+    canonical=listing('canonical-fixture',addressLine1='100 Fixture Ave')
+    alias={**canonical,'id':'realscout:alias-fixture'}
+    store.save_property(canonical['id'],canonical,'Pending Verification',[],LIVE,1,clock().isoformat())
+    store.save_setting('listing_identity:'+alias['id'],{'source_id':alias['id'],'property':alias,'observed_at':clock().isoformat()})
+    store.save_setting(key(alias),{'source':'RentCast','raw':avm(alias),'observed_at':clock().isoformat()})
+    assert queue_evidence_delivery(store,alias,cached_estimate(store,alias,clock()),clock())=='queued'
+    job=json.loads(store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing-contact-enrichment:rent:%',)).fetchone()[0])
+    assert job['source_ids']==[canonical['id']]
+    canonical['squareFootage']=1100
+    store.save_property(canonical['id'],canonical,'Pending Verification',[],LIVE,2,clock().isoformat())
+    assert queue_evidence_delivery(store,alias,cached_estimate(store,alias,clock()),clock())=='awaiting_evidence'
+    result=evidence_summary(store,clock())
+    # The evidence remains real and source-supported. No new estimate is
+    # fabricated or sent against contradictory canonical input attributes.
+    assert result['delivery_resolution'][0]['state']=='Awaiting Evidence'
+    assert result['delivery_resolution'][0]['attribute_disagreements']['squareFootage']=={'source':1000,'canonical':1100}
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
