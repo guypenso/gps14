@@ -66,8 +66,9 @@ def research_context(store):
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('health_budget',)).fetchone()
     monthly=settings.approval_mode=='monthly_budget'
     budget=store.budget_health(settings,at,record_warning=False) if settings.enabled or monthly else json.loads(scheduled[0]) if scheduled else {'remaining':0}
-    from .monthly_allocation import active
+    from .monthly_allocation import active,purpose_readiness
     value={'remaining':budget.get('remaining',0),'approval_cap':settings.request_ceiling if settings.enabled or monthly else budget.get('approval_cap',27),'approval_id':settings.approval_id,'approval_mode':settings.approval_mode,'rent_authorized':monthly and active(settings,at) and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true','observed_at':at.isoformat()}
+    if monthly:value['rent_readiness']=purpose_readiness(store,settings,at,'rent')
     if settings.enabled or monthly:store.save_setting('research_budget_context',value)
     return value
 

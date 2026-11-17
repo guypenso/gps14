@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from conftest import listing
 from test_partition_discovery import AreaProvider,allocated
-from rentalsourcing.partition_discovery import MAIN,PREFIX,run as scheduled,get
+from rentalsourcing.partition_discovery import MAIN,PREFIX,VERSION,run as scheduled,get
 from rentalsourcing.approved_catchup import DAY,SLOT,APPROVAL,KEY,RUN,LIMITS,activate,remaining,run
 from rentalsourcing.storage import Store,BudgetExceeded
 
@@ -31,7 +31,7 @@ def test_exact_partition_caps_use_corrected_scheduler_and_preserve_morning(store
     result=run(store,boundary,approved,DAY,clock=clock,opener=provider,deliver=False)
     assert provider.calls==[(MAIN,0),(MAIN,2),('Bethel Park',0),('Pleasant Hills',0)]
     assert result['requests']==4 and result['state']=='partial'
-    assert result['stats']['version']=='multi-partition-v2'
+    assert result['stats']['version']==VERSION
     assert result['stats']['received_this_run']==6
     assert result['outgoing_emails']==result['paid_tax_or_rent_requests']==0
     assert store.budget_health(approved,clock())['used']==49

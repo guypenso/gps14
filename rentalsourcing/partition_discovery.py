@@ -16,7 +16,7 @@ from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v2'
+VERSION = 'multi-partition-v3'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -73,17 +73,23 @@ def _state(store, slug, query):
     return state
 
 
-def _prepare(store, state, day, slot, now, special):
+def _prepare_reason(state, day, slot, now):
     if state.get('blocked') or (state.get('retry_after') and state['retry_after'] > now.isoformat()):
         return 'source_blocked' if state.get('blocked') else 'retry_cooldown'
+    if state.get('query_complete') and state.get('generation_run_key') == day + ':' + slot:
+        return 'query_already_complete'
+    return None
+
+
+def _prepare(store, state, day, slot, now, special):
+    reason = _prepare_reason(state, day, slot, now)
+    if reason:return reason
     if state.get('query_complete'):
-        if state.get('generation_run_key') == day + ':' + slot:
-            return 'query_already_complete'
         # Completion belongs to one collection generation, not every future
         # scheduled slot. A later slot must check for new/changed inventory.
         # The previous scan job and its terminal offset remain untouched.
         state['previous_generation'] = {k: state.get(k) for k in
-            ('job_id','offset','generation_run_key','last_complete_at')}
+            ('job_id','offset','generation_run_key','last_complete_at','pages','observations','total')}
         state['job_id'] = None
     if not state.get('job_id'):
         state.update(job_id='coverage:' + POLICY_VERSION + ':' + state['partition'] + ':' + day + ':' + slot + ':' + state['query_hash'][:8],
@@ -145,7 +151,9 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             if not any(p['job_id'] == recovered['job_id'] and p['offset_after'] == recovered['offset_after'] for p in report['pages']):
                 report['pages'].append(recovered)
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
-        reason = _prepare(store, states[slug], day, slot, now, special) if remaining else 'monthly_pacing' if paced else 'budget_blocked'
+        # Checking eligibility must not reset an unselected completed query.
+        # Open a new generation only when this partition receives an actual turn.
+        reason = _prepare_reason(states[slug], day, slot, now) if remaining else 'monthly_pacing' if paced else 'budget_blocked'
         if manual and store.count_usage('request_scope:'+key+':'+slug)>=MANUAL_LIMITS[slug]:reason='partition_limit_reached'
         report['partitions'][slug] = {'state': reason or ('budget_blocked' if not remaining else 'awaiting_turn'), 'query': states[slug]['query'],
             'offset_before': states[slug]['offset'], 'coverage_claim': 'configured_provider_query_only',
@@ -184,6 +192,13 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 if slug in eligible:
                     break
         state = states[slug]
+        reason = _prepare(store, state, day, slot, clock(), special)
+        if reason:
+            report['partitions'][slug]['state'] = reason
+            eligible.remove(slug)
+            continue
+        if not any(p['partition'] == slug for p in report['pages']):
+            report['partitions'][slug]['offset_before'] = state['offset']
         if manual:client.request_scope=(key+':'+slug,MANUAL_LIMITS[slug])
         job_id = state['job_id']
         if job_id not in report['job_ids']:
@@ -286,7 +301,13 @@ def snapshot(store, now):
     states = []
     for slug in ORDER:
         state = get(store, PREFIX + slug, {})
-        states.append({k: v for k, v in state.items() if k not in {'seen_ids'}})
+        entry={k: v for k, v in state.items() if k not in {'seen_ids'}}
+        try:
+            at=dt.datetime.fromisoformat(state['last_success_at'].replace('Z','+00:00'))
+            entry['coverage_age_seconds']=max(0,int((now-at).total_seconds()))
+        except (KeyError,TypeError,ValueError):entry['coverage_age_seconds']=None
+        entry['remaining_records_in_reported_total']=max(0,state['total']-state.get('offset',0)) if isinstance(state.get('total'),int) else None
+        states.append(entry)
     last = get(store, 'multi-discovery:last', {})
     last = {k: v for k, v in last.items() if k in {'version','run_key','started_at','finished_at','request_limit',
         'requests','requests_consumed','received_this_run','remaining_budget','discovery_state',

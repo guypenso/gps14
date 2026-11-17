@@ -13,9 +13,9 @@ def record_job(store,p,state,now,reason=None,next_at=None):
     """One durable, identity-scoped state; never itself authorizes a paid call."""
     previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
     old=json.loads(previous[0]) if previous else {}
-    value={'source_id':p.get('id'),'subject_identity':identity(p),'state':state,'reason':reason,
+    value={'source_id':p.get('id'),'subject_identity':identity(p),'state':state,'reason':reason,'active':True,
            'updated_at':now.isoformat(),'next_at':next_at,'attempts':old.get('attempts',0)+(state=='Processing')}
-    if old.get('state')!=state or old.get('reason')!=reason or old.get('next_at')!=next_at or old.get('source_id')!=p.get('id'):
+    if old.get('state')!=state or old.get('reason')!=reason or old.get('next_at')!=next_at or old.get('source_id')!=p.get('id') or old.get('active') is not True:
         store.save_setting(job_key(p),value)
     return value
 
@@ -42,13 +42,20 @@ def normalize(raw,p,observed_at,now):
 def parameters(p):
     return {'address':p['formattedAddress'],'propertyType':'Single Family','bedrooms':p['bedrooms'],'bathrooms':p['bathrooms'],'squareFootage':p['squareFootage'],'compCount':10,'daysOld':90}
 
-def cached_estimate(store,p,now):
+def cached_estimate(store,p,now,*,persist=False):
     row=store.execute('SELECT payload FROM settings WHERE name=?',(key(p),)).fetchone()
     if not row:
         try:
             url=ENDPOINT+'?'+urllib.parse.urlencode(sorted(parameters(p).items()))
-            existing=store.cache_get(hashlib.sha256(url.encode()).hexdigest(),now.isoformat())
-            if existing and existing[1]=='rentcast-live':return normalize(existing[0].get('data',{}),p,existing[0].get('fetched_at',''),now)
+            # Older AVM responses accidentally inherited the six-hour negative
+            # tax TTL. Their original timestamp and our independent 30-day
+            # identity/evidence validator govern recovery, never a new date.
+            existing=store.execute('SELECT payload,source FROM response_cache WHERE key=?',(hashlib.sha256(url.encode()).hexdigest(),)).fetchone()
+            if existing and existing[1]=='rentcast-live':
+                cached=json.loads(existing[0]);raw=cached.get('data',{});observed=cached.get('fetched_at','')
+                value=normalize(raw,p,observed,now)
+                if value and persist:store.save_setting(key(p),{'source':'RentCast','raw':raw,'observed_at':observed})
+                return value
         except (KeyError,ValueError,TypeError,AttributeError):pass
         return None
     saved=json.loads(row[0])
@@ -60,6 +67,7 @@ def enrich(store,boundary,settings,now,client=None):
     from .collector import LIVE
     counts={'cached':0,'retrieved':0,'invalid':0,'paid_calls':0,'blocked_by_budget':0}
     candidates=[]
+    active_jobs=set()
     records=[(i,json.loads(raw),observed) for i,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties WHERE source=?',(LIVE,)).fetchall()]
     known={i for i,p,observed in records}
     for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall():
@@ -67,8 +75,13 @@ def enrich(store,boundary,settings,now,client=None):
         if not row.get('canonical_source_id') and source_id not in known and p.get('id')==source_id:
             records.append((source_id,p,row.get('observed_at','')));known.add(source_id)
     for source_id,p,observed in records:
-        if review_deferred(source_id,store) or verification(p,boundary)[0]!='Candidate':continue
-        if cached_estimate(store,p,now):counts['cached']+=1;record_job(store,p,'Completed',now);continue
+        eligible=not review_deferred(source_id,store) and verification(p,boundary)[0]=='Candidate'
+        # Recover a verified cached response even for a now-managed/historical
+        # property. This never authorizes another call or changes its decision.
+        if cached_estimate(store,p,now,persist=True):
+            if eligible:active_jobs.add(job_key(p))
+            counts['cached']+=1;record_job(store,p,'Completed',now);continue
+        if not eligible:continue
         previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
         queued=json.loads(previous[0]).get('state') if previous else None
         # A budget-blocked discovery remains eligible for a bounded future run
@@ -86,14 +99,28 @@ def enrich(store,boundary,settings,now,client=None):
         fresh=bool(first and json.loads(first[0]).get('at','')>=(now-dt.timedelta(days=1)).isoformat())
         priority=0 if status=='pursue' else 1 if status=='new' and fresh else 2 if potential_exception else 3 if status=='monitor' else 4
         candidates.append((priority,p))
-    from .monthly_allocation import available
+        active_jobs.add(job_key(p))
+    # Retain historical states/errors while separating them from today's work.
+    for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('rent-enrichment:%',)).fetchall():
+        previous=json.loads(raw)
+        if name not in active_jobs and previous.get('active') is not False:
+            store.save_setting(name,{**previous,'active':False,'inactive_reason':'not_in_current_eligible_candidate_set','eligibility_checked_at':now.isoformat()})
+    from .monthly_allocation import available,purpose_readiness
+    readiness=purpose_readiness(store,settings,now,'rent')
     approved=(os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true'
               and settings.approval_mode=='monthly_budget' and not settings.supplemental_requests
               and available(store,settings,now,'rent')>0)
     permitted=approved and client is not None
     if not permitted:
-        for _,p in candidates:record_job(store,p,'Pending' if approved else 'Budget Blocked',now,'awaiting_scheduled_rent_estimate' if approved else 'monthly_rent_budget_not_approved_or_inactive')
-        counts['blocked_by_budget']=0 if approved else len(candidates)
+        enabled=os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true'
+        paced=enabled and readiness['state']=='scheduled'
+        for _,p in candidates:
+            record_job(store,p,'Pending' if approved else 'Retry Scheduled' if paced else 'Budget Blocked',now,
+                       'awaiting_scheduled_rent_estimate' if approved else readiness['reason'] if enabled else 'rent_estimate_feature_disabled',
+                       readiness['next_at'] if paced else None)
+        counts['blocked_by_budget']=0 if approved or paced else len(candidates)
+        counts['retry_scheduled']=len(candidates) if paced else 0
+        counts['next_budget_release']=readiness['next_at']
         return counts
     for _,p in sorted(candidates,key=lambda x:(x[0],x[1]['id']))[:min(3,int(os.getenv('RENT_ESTIMATE_REQUESTS_PER_RUN','1')))]:
         if available(store,settings,now,'rent')<=0:
@@ -107,9 +134,10 @@ def enrich(store,boundary,settings,now,client=None):
         before=client.count
         try:
             data,_=client.get('/avm/rent/long-term',parameters(p),cache=True)
-            value=normalize(data,p,client.last_fetched_at,now)
+            completed_at=client.clock() if callable(getattr(client,'clock',None)) else now
+            value=normalize(data,p,client.last_fetched_at,completed_at)
             if not value:counts['invalid']+=1;record_job(store,p,'Awaiting Evidence',now,'provider_response_failed_property_or_comparable_validation');continue
-            store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1;record_job(store,p,'Completed',now)
+            store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1;record_job(store,p,'Completed',completed_at)
             tax=store.get_tax(p['id'],now.isoformat())
             if tax and tax[1]==LIVE and tax[0].get('id')==p['id']:
                 from .core import tax_verification
@@ -125,4 +153,28 @@ def job_summary(store):
     rows=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('rent-enrichment:%',)).fetchall()]
     states={state:sum(row.get('state')==state for row in rows) for state in ('Pending','Processing','Completed','Awaiting Evidence','Budget Blocked','Retry Scheduled','Failed')}
     recent=sorted(rows,key=lambda row:row.get('updated_at',''),reverse=True)[:20]
-    return {'total':len(rows),'by_state':states,'recent':[{'source_id':row.get('source_id'),'state':row.get('state'),'reason':row.get('reason'),'updated_at':row.get('updated_at')} for row in recent]}
+    active=[row for row in rows if row.get('active') is not False]
+    return {'total':len(rows),'by_state':states,'active':len(active),'inactive_history':len(rows)-len(active),
+            'active_by_state':{state:sum(row.get('state')==state for row in active) for state in states},
+            'recent':[{'source_id':row.get('source_id'),'state':row.get('state'),'reason':row.get('reason'),'updated_at':row.get('updated_at'),
+                       'next_at':row.get('next_at'),'active':row.get('active')} for row in recent]}
+
+
+def evidence_summary(store,now):
+    """Validated provider values only; no provider calls or cache mutations."""
+    records=[]
+    source_ids=set()
+    for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ? OR name LIKE ?',('rentcast-long-term:%','rent-enrichment:%')).fetchall():
+        saved=json.loads(raw)
+        source_id=saved.get('source_id') if saved.get('state')=='Completed' else (saved.get('raw',{}).get('subjectProperty') or {}).get('id') if name.startswith('rentcast-long-term:') else None
+        if source_id:source_ids.add(source_id)
+    for source_id in sorted(source_ids):
+        saved=store.get_property(source_id)
+        if not saved:continue
+        p=saved['payload'];value=cached_estimate(store,p,now)
+        if value:
+            records.append({k:value[k] for k in ('source_id','source','method','monthly','low','high','observed_at','high_rent_candidate')}|
+                           {'address':p.get('formattedAddress'),'comparables':len(value['comparables'])})
+    return {'supported_estimates':len(records),'records':records[:25],
+            'saved_estimates':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
+            'jobs':job_summary(store),'provider_calls':0}
