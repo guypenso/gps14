@@ -509,7 +509,11 @@ def pending_inventory(store,boundary,now,opener=None):
    hold='sync_hold:'+hashlib.sha256(name.encode()).hexdigest()
    if get(store,hold):continue
    try:
-    if runner is inventory:runner(store,boundary,now,execute=True,download=False,config=configuration() if ledger.get('delivery_scope')=='daily' else config,opener=opener,job_key=name,refresh_decisions=False)
+    if runner is inventory:
+     delivery_config=config
+     if ledger.get('delivery_scope')=='daily':
+      u,k,t=config;delivery_config=configuration() or (u.rsplit('/',1)[0]+'/review-reports',k,t)
+     runner(store,boundary,now,execute=True,download=False,config=delivery_config,opener=opener,job_key=name,refresh_decisions=False)
     else:runner(store,config,opener=opener,job_key=name)
    except Exception as exc:
     if isinstance(exc,ValueError) and 'no longer passes' in str(exc):
