@@ -47,18 +47,36 @@ def test_connection_exhaustion_is_safe(monkeypatch):
     assert 'secret' not in str(error.value)
 
 
-def test_migration_lock_contention_fails_instead_of_starting_web(monkeypatch):
+def test_migration_lock_contention_waits_and_still_fails_closed_on_timeout(monkeypatch):
     from rentalsourcing.cloud import main
     closed=[]
     class BusyStore:
         def __init__(self,url):pass
         def lock(self):return False
+        def wait_for_scan_lock(self):raise RuntimeError('Migration lock timed out')
         def close(self):closed.append(True)
     monkeypatch.setenv('DATABASE_URL','postgresql://u:secret@db/app')
     monkeypatch.setattr('rentalsourcing.cloud.Store',BusyStore)
-    with pytest.raises(RuntimeError,match='migrations did not run'):
+    with pytest.raises(RuntimeError,match='Migration lock timed out'):
         main(['--migrate'])
     assert closed==[True]
+
+
+def test_deployment_waits_for_watchdog_then_runs_migrations_without_discovery(monkeypatch):
+    from rentalsourcing.cloud import main
+    calls=[]
+    class Store:
+        def __init__(self,url):pass
+        def lock(self):return False
+        def wait_for_scan_lock(self):calls.append('wait')
+        def migrate(self):calls.append('migrate')
+        def bootstrap_listing_cache_index(self):calls.append('cache_index')
+        def close(self):calls.append('close')
+    monkeypatch.setenv('DATABASE_URL','postgresql://u:secret@db/app')
+    monkeypatch.setattr('rentalsourcing.cloud.Store',Store)
+    monkeypatch.setattr('rentalsourcing.cloud.load_boundary',lambda _:object())
+    main(['--migrate'])
+    assert calls==['wait','migrate','cache_index','close']
 
 
 def test_start_script_stops_when_migrations_fail(tmp_path):

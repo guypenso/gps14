@@ -7,6 +7,8 @@ from .provenance import demo_marked
 
 
 def funnel(store,boundary,now):
+    from .tax_backlog import review_snapshot,current_tax_identities
+    reviews=review_snapshot(store);tax_ids=current_tax_identities(store,now)
     rows=store.execute('SELECT id,payload,state,source,observed_at FROM properties').fetchall()
     counts=Counter();rejections=Counter();primary=Counter();missing=Counter()
     for identity,raw,saved_state,source,observed in rows:
@@ -17,11 +19,11 @@ def funnel(store,boundary,now):
         if state!='Candidate':
             counts['non_tax_pending']+=1;missing.update(reasons);continue
         counts['non_tax_pass']+=1
-        cached=store.get_tax(identity,now.isoformat())
+        cached=store.get_tax(identity,now.isoformat()) if identity in tax_ids else None
         if not cached or cached[1]!=LIVE or not isinstance(cached[0],dict) or cached[0].get('id')!=identity or demo_marked(cached[0]):
             counts['tax_uncached_backlog']+=1
             from .tax_backlog import review_deferred
-            if review_deferred(identity,store):counts['owner_review_deferred']+=1
+            if review_deferred(identity,store,reviews=reviews):counts['owner_review_deferred']+=1
             continue
         counts['valid_tax_cache']+=1
         tax_state,_,_=tax_verification(cached[0],now.date())

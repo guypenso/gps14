@@ -10,13 +10,34 @@ def key(p):return 'rentcast-long-term:'+hashlib.sha256(identity(p).encode()).hex
 def job_key(p):return 'rent-enrichment:'+hashlib.sha256(identity(p).encode()).hexdigest()
 
 
-def queue_evidence_delivery(store,p,estimate):
+def queue_evidence_delivery(store,p,estimate,now):
     """Use the existing recovery worker for one immutable, stored-only update."""
+    source_id=p['id'];direct=store.get_property(source_id)
+    if not direct:
+        matches=[]
+        for identity_,raw in store.execute('SELECT id,payload FROM properties').fetchall():
+            candidate={**json.loads(raw),'id':identity_}
+            if identity(candidate)==identity(p):matches.append(candidate)
+        canonical=matches[0] if len(matches)==1 else None
+        validated=cached_estimate(store,canonical,now) if canonical else None
+        if not validated:
+            differences={field:{'source':p.get(field),'canonical':canonical.get(field)} for field in ('bedrooms','bathrooms','squareFootage') if canonical and p.get(field)!=canonical.get(field)}
+            state={'state':'Awaiting Evidence','source_id':source_id,'subject_identity':identity(p),
+                   'candidate_source_ids':[c['id'] for c in matches],
+                   'reason':'canonical_subject_attributes_disagree' if canonical else 'canonical_source_mapping_unresolved',
+                   'attribute_disagreements':differences,
+                   'checked_at':now.isoformat(),'provider_calls':0}
+            store.save_setting('rent-delivery-resolution:'+hashlib.sha256(identity(p).encode()).hexdigest(),state)
+            return 'awaiting_evidence'
+        p,estimate=canonical,validated
     digest=hashlib.sha256((str(p.get('id'))+'|'+estimate['observed_at']+'|'+str(estimate['monthly'])).encode()).hexdigest()
     name='listing-contact-enrichment:rent:'+digest
     value={'offset':0,'cursor':10000,'done':False,'batches':0,'source_ids':[p['id']],
            'reason':'validated_cached_or_acquired_rent_evidence','provider_calls':0}
     store.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(name,json.dumps(value)))
+    store.save_setting('rent-delivery-resolution:'+hashlib.sha256(identity(p).encode()).hexdigest(),
+        {'state':'Pending','source_id':source_id,'canonical_source_id':p['id'],'job_key':name,'checked_at':now.isoformat(),'provider_calls':0})
+    return 'queued'
 
 def record_job(store,p,state,now,reason=None,next_at=None):
     """One durable, identity-scoped state; never itself authorizes a paid call."""
@@ -90,7 +111,8 @@ def enrich(store,boundary,settings,now,client=None):
         rent=cached_estimate(store,p,now,persist=True)
         if rent:
             if eligible:active_jobs.add(job_key(p))
-            queue_evidence_delivery(store,p,rent)
+            delivery=queue_evidence_delivery(store,p,rent,now)
+            counts['delivery_'+delivery]=counts.get('delivery_'+delivery,0)+1
             counts['cached']+=1;record_job(store,p,'Completed',now);continue
         if not eligible:continue
         previous=store.execute('SELECT payload FROM settings WHERE name=?',(job_key(p),)).fetchone()
@@ -149,7 +171,7 @@ def enrich(store,boundary,settings,now,client=None):
             value=normalize(data,p,client.last_fetched_at,completed_at)
             if not value:counts['invalid']+=1;record_job(store,p,'Awaiting Evidence',now,'provider_response_failed_property_or_comparable_validation');continue
             store.save_setting(key(p),{'source':'RentCast','raw':data,'observed_at':client.last_fetched_at});counts['retrieved']+=1;record_job(store,p,'Completed',completed_at)
-            queue_evidence_delivery(store,p,value)
+            queue_evidence_delivery(store,p,value,completed_at)
             tax=store.get_tax(p['id'],now.isoformat())
             if tax and tax[1]==LIVE and tax[0].get('id')==p['id']:
                 from .core import tax_verification
@@ -182,11 +204,21 @@ def evidence_summary(store,now):
         if source_id:source_ids.add(source_id)
     for source_id in sorted(source_ids):
         saved=store.get_property(source_id)
+        if not saved:
+            row=store.execute('SELECT payload FROM settings WHERE name=?',('listing_identity:'+source_id,)).fetchone()
+            item=json.loads(row[0]) if row else {}
+            saved={'payload':item['property']} if isinstance(item.get('property'),dict) and item['property'].get('id')==source_id else None
         if not saved:continue
         p=saved['payload'];value=cached_estimate(store,p,now)
         if value:
             records.append({k:value[k] for k in ('source_id','source','method','monthly','low','high','observed_at','high_rent_candidate')}|
                            {'address':p.get('formattedAddress'),'comparables':len(value['comparables'])})
-    return {'supported_estimates':len(records),'records':records[:25],
+    resolutions=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('rent-delivery-resolution:%',)).fetchall()]
+    for resolution in resolutions:
+        job=store.execute('SELECT payload FROM settings WHERE name=?',(resolution.get('job_key',''),)).fetchone()
+        delivery=json.loads(job[0]) if job else {}
+        resolution['delivery_acknowledgment']=delivery.get('last_delivery')
+        if delivery.get('done') and delivery.get('offset',0)>0 and ((delivery.get('last_delivery') or {}).get('matched') or 0)>0:resolution['state']='Completed'
+    return {'supported_estimates':len(records),'records':records[:25],'delivery_resolution':resolutions[:25],
             'saved_estimates':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
             'jobs':job_summary(store),'provider_calls':0}

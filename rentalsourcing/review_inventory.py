@@ -6,7 +6,7 @@ from .database import validate_postgres_url
 from .geography import load_boundary
 from .core import verification,tax_verification
 from .collector import LIVE
-from .tax_backlog import review_deferred,previous_price
+from .tax_backlog import review_deferred,previous_price,review_snapshot,current_tax_identities
 from .digest import listing_link,recent_timestamp
 from .command_center import configuration,signed_request,review_configuration
 from .request import NoRedirect
@@ -19,14 +19,15 @@ JOB='stored-review-inventory:2026-11-02:turnkey-v1'
 
 def select(store,boundary,now,*,source_ids=None,include_verified=False):
     cards=[];counts={'stored':0,'hard_rejected':0,'other_missing':0,'owner_rejected':0,'tax_rejected':0,'verified_tax':0,'actionable':0,'stale':0,'fresh':0}
+    reviews=review_snapshot(store);tax_ids=current_tax_identities(store,now)
     for identity,raw,source,observed in store.execute('SELECT id,payload,source,observed_at FROM properties').fetchall():
         if source_ids is not None and identity not in source_ids:continue
         counts['stored']+=1;p=json.loads(raw);state,reasons=verification(p,boundary)
         verified_tax=None;verified_fetched=None
         if state=='Rejected':counts['hard_rejected']+=1;continue
         if source!=LIVE or state!='Candidate':counts['other_missing']+=1;continue
-        if review_deferred(identity,store):counts['owner_rejected']+=1;continue
-        cached=store.get_tax(identity,now.isoformat())
+        if review_deferred(identity,store,reviews=reviews):counts['owner_rejected']+=1;continue
+        cached=store.get_tax(identity,now.isoformat()) if identity in tax_ids else None
         valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
         if valid:
             tax_state,tax,reason=tax_verification(cached[0],now.date())

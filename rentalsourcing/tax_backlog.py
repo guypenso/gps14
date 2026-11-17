@@ -20,8 +20,20 @@ def review_deferrals():
     except (ValueError,TypeError):raise ValueError('Invalid private tax-review deferral configuration') from None
 
 
-def review_deferred(identity,store=None):
+def review_snapshot(store):
+    return {name[len('penten_review:'):]:json.loads(raw) for name,raw in
+            store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('penten_review:%',)).fetchall()}
+
+
+def current_tax_identities(store,now):
+    return {row[0] for row in store.execute('SELECT property_id FROM tax_history WHERE expires_at>?',(now.isoformat(),)).fetchall()}
+
+
+def review_deferred(identity,store=None,*,reviews=None):
     if hashlib.sha256(str(identity).encode()).hexdigest() in review_deferrals():return True
+    if reviews is not None:
+        decision=reviews.get(str(identity)) or {}
+        return decision.get('status')=='rejected' or decision.get('contract_state')=='terminated'
     if store:
         row=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+str(identity),)).fetchone()
         if row and (json.loads(row[0]).get('status')=='rejected' or json.loads(row[0]).get('contract_state')=='terminated'):return True
@@ -78,10 +90,11 @@ def review_key(row,boundary,observed,now,previous=None):
 
 def priorities(store,boundary,now):
     records=[]
+    reviews=review_snapshot(store);tax_ids=current_tax_identities(store,now)
     for identity,raw,state,source,observed in store.execute('SELECT id,payload,state,source,observed_at FROM properties').fetchall():
         row=json.loads(raw)
-        if source!=LIVE or verification(row,boundary)[0]!='Candidate' or review_deferred(identity,store):continue
-        cached=store.get_tax(identity,now.isoformat())
+        if source!=LIVE or verification(row,boundary)[0]!='Candidate' or review_deferred(identity,store,reviews=reviews):continue
+        cached=store.get_tax(identity,now.isoformat()) if identity in tax_ids else None
         valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
         if valid and tax_verification(cached[0],now.date())[0]!='Pending Verification':continue
         prior=previous_price(store,identity,row.get('price'))
