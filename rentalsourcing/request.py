@@ -18,8 +18,17 @@ def listing_parameters(boundary):
     return params
 
 
-def municipal_queries():
-    return [(slug,dict(PARAMS,city=city,zipCode=zipcode)) for slug,city,zipcode in [('pleasant-hills','Pleasant Hills','15236'),('bethel-park','Bethel Park','15102')]]
+def municipal_queries(boundary=None):
+    queries=[]
+    for slug,city,zipcode,name in [('pleasant-hills','Pleasant Hills','15236','Pleasant Hills Borough'),('bethel-park','Bethel Park','15102','Bethel Park Municipality')]:
+        region=getattr(boundary,'additional_municipalities',{}).get(name)
+        params=dict(PARAMS,city=city,zipCode=zipcode)
+        if region is not None:
+            from .geography import search_circle
+            # Postal city names/ZIPs do not define either approved municipality.
+            params.pop('city');params.pop('zipCode');params.update(search_circle(region.geometry))
+        queries.append((slug,params))
+    return queries
 
 def build_request():
     key = os.environ.get('RENTCAST_API_KEY')

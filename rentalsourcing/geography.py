@@ -84,13 +84,17 @@ class EligibilityBoundary:
         return 'Bellevue Borough' if self.bellevue.contains(row) else 'Pittsburgh'
     def contains(self,row):return self.evaluate(row)[0]=='Candidate'
     def search_parameters(self):
-        import math
-        west,south,east,north=self.city.geometry.union(self.bellevue.geometry).bounds;lat=(south+north)/2;lon=(west+east)/2
-        def miles(x,y):
-            a,b=math.radians(lat),math.radians(y);dy=b-a;dx=math.radians(x-lon)
-            return 3958.7613*2*math.asin(math.sqrt(math.sin(dy/2)**2+math.cos(a)*math.cos(b)*math.sin(dx/2)**2))
-        radius=math.ceil((max(miles(x,y) for x in (west,east) for y in (south,north))+.01)*10)/10
-        return dict(latitude=round(lat,7),longitude=round(lon,7),radius=radius)
+        return search_circle(self.city.geometry.union(self.bellevue.geometry))
+
+def search_circle(geometry):
+    """Cover a pinned boundary's bounds; eligibility still uses its polygons."""
+    import math
+    west,south,east,north=geometry.bounds;lat=(south+north)/2;lon=(west+east)/2
+    def miles(x,y):
+        a,b=math.radians(lat),math.radians(y);dy=b-a;dx=math.radians(x-lon)
+        return 3958.7613*2*math.asin(math.sqrt(math.sin(dy/2)**2+math.cos(a)*math.cos(b)*math.sin(dx/2)**2))
+    radius=math.ceil((max(miles(x,y) for x in (west,east) for y in (south,north))+.01)*10)/10
+    return dict(latitude=round(lat,7),longitude=round(lon,7),radius=radius)
 
 def load_boundary(path):
     from .pink_area import load_pink_regions

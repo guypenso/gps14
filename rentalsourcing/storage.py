@@ -115,6 +115,12 @@ class Store:
           'CREATE INDEX IF NOT EXISTS deal_events_property ON deal_events(property_id,state)']
         with self.transaction():
             for statement in statements:self.execute(statement)
+            from .sync_runtime import OPERATION_PREDICATE
+            state="payload::jsonb->>'state'" if self.pg else "json_extract(payload,'$.state')"
+            self.execute(f'CREATE INDEX IF NOT EXISTS sync_operation_state_v1 ON settings (({state})) WHERE {OPERATION_PREDICATE}')
+            from .price_sync import PRICE_PREDICATE,field
+            synced=field(self,'synced_at')
+            self.execute(f"CREATE INDEX IF NOT EXISTS price_observation_pending_v1 ON settings ((COALESCE({synced},''))) WHERE {PRICE_PREDICATE}")
             self.execute('INSERT INTO schema_versions VALUES (2,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
             self.execute('INSERT INTO schema_versions VALUES (3,?) ON CONFLICT(version) DO NOTHING',(self.now(),))
 

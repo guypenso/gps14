@@ -12,6 +12,12 @@ from .telemetry import event
 
 PREFIX='price-observation:'
 BATCH_SIZE=10  # At most 32 receiver writes, leaving room for D1 read/guard queries.
+PRICE_PREDICATE="substr(name,1,18) = 'price-observation:'"
+
+def field(store,*path):
+    return "payload::jsonb#>>'{"+','.join(path)+"}'" if store.pg else "json_extract(payload,'$."+'.'.join(path)+"')"
+
+def pending_predicate(store):return "COALESCE("+field(store,'synced_at')+",'')=''"
 
 def money(value):
     if isinstance(value,bool) or not isinstance(value,(float,int)) or not math.isfinite(value) or value<=0:return None
@@ -48,11 +54,9 @@ def seed(store,boundary,now):
         store.save_setting(key,dict(created_at=now.isoformat(),queued=count))
 
 def queue_counts(store):
-    rows=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall()]
-    pending=[r for r in rows if not r.get('synced_at')]
-    return {'pending':len(pending),'held':sum(bool(r.get('held_at')) for r in pending),
-            'snapshots':sum(r['observation']['kind']=='snapshot' for r in pending),
-            'price_changes':sum(r['observation']['kind']=='price_change' for r in pending)}
+    kind=field(store,'observation','kind');held=field(store,'held_at')
+    row=store.execute(f"SELECT COUNT(*),COALESCE(SUM(CASE WHEN COALESCE({held},'')<>'' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN {kind}='snapshot' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN {kind}='price_change' THEN 1 ELSE 0 END),0) FROM settings WHERE {PRICE_PREDICATE} AND {pending_predicate(store)}").fetchone()
+    return dict(zip(('pending','held','snapshots','price_changes'),row))
 
 
 def flush(store,config=None,now=None,opener=None,max_batches=30,max_seconds=25):
@@ -77,12 +81,9 @@ def _flush(store,config,now,opener,max_batches,max_seconds):
         if time.monotonic()-started>=max_seconds:break
         frozen=get(store,'price-sync-active-batch')
         if not frozen:
-            pending=[]
-            for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall():
-                row=json.loads(raw)
-                if not row.get('synced_at') and not row.get('held_at'):pending.append((name,row))
-            pending.sort(key=lambda r:(r[1]['observation']['observed_at'],r[1]['observation']['source_id'],0 if r[1]['observation']['kind']=='price_change' else 1,r[0]))
-            part=pending[:BATCH_SIZE]
+            observed=field(store,'observation','observed_at');source=field(store,'observation','source_id');kind=field(store,'observation','kind');held=field(store,'held_at')
+            query=f"SELECT name,payload FROM settings WHERE {PRICE_PREDICATE} AND {pending_predicate(store)} AND COALESCE({held},'')='' ORDER BY {observed},{source},CASE WHEN {kind}='price_change' THEN 0 ELSE 1 END,name LIMIT ?"
+            part=[(name,json.loads(raw)) for name,raw in store.execute(query,(BATCH_SIZE,)).fetchall()]
             if not part:break
             payload={'observations':[r['observation'] for name,r in part]}
             payload['batch_id']=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
@@ -149,8 +150,9 @@ def safe_current_baselines(store,boundary):
     try:
         if not review_configuration():return {'state':'disabled'}
         from .core import verification
-        delivered_sources={(r['observation']['source_id'],r['observation']['observed_at']) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall() for r in [json.loads(raw)] if r.get('synced_at') and r.get('receiver_disposition')=='acknowledged'}
-        pending_sources={r['observation']['source_id'] for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',(PREFIX+'%',)).fetchall() for r in [json.loads(raw)] if not r.get('synced_at')}
+        source=field(store,'observation','source_id');observed=field(store,'observation','observed_at');disposition=field(store,'receiver_disposition')
+        delivered_sources=set(store.execute(f"SELECT {source},{observed} FROM settings WHERE {PRICE_PREDICATE} AND NOT ({pending_predicate(store)}) AND {disposition}='acknowledged'").fetchall())
+        pending_sources={r[0] for r in store.execute(f"SELECT DISTINCT {source} FROM settings WHERE {PRICE_PREDICATE} AND {pending_predicate(store)}").fetchall()}
         for identity,raw,observed in store.execute('SELECT id,payload,observed_at FROM properties WHERE source=?',(LIVE,)).fetchall():
             p=json.loads(raw)
             if identity not in pending_sources and (identity,observed) not in delivered_sources and verification(p,boundary)[0]=='Candidate':

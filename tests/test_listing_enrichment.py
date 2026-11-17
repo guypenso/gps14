@@ -23,3 +23,25 @@ def test_resumable_existing_enrichment_uses_no_provider_requests_or_emails(store
     assert run(store,config,opener=o)['done'];assert run(store,config,opener=o)['done'];assert o.calls==1
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
     assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
+
+def test_enrichment_restart_reuses_committed_body_after_evidence_and_context_change(store,clock,monkeypatch):
+    import hashlib,pytest
+    from rentalsourcing.sync_runtime import SyncFailure,get
+    from test_sync_reliability import Wire,error,CONFIG
+    p=listing('frozen-fixture');store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    monkeypatch.setattr('rentalsourcing.sync_runtime.time.sleep',lambda _:None)
+    monkeypatch.setattr('rentalsourcing.listing_enrichment.research_context',lambda _: {'observed_at':'original-context'})
+    wire=Wire([error(503),error(503),error(503),{'accepted':True,'next_cursor':None,'summary':{}}])
+    job='listing-contact-enrichment:retry-fixture'
+    with pytest.raises(SyncFailure):run(store,CONFIG,job_key=job,opener=wire)
+    frozen=get(store,job)['inflight']['body'].encode()
+    assert all(r.data==frozen for r in wire.calls)
+    identity=job+':0:0';operation='sync_operation:listing_enrichment:'+hashlib.sha256(identity.encode()).hexdigest()
+    store.save_setting(operation,{**get(store,operation),'next_attempt_at':None})
+    p['price']=170000;store.save_property(p['id'],p,'Pending Verification',[],LIVE,2,clock().isoformat())
+    monkeypatch.setattr('rentalsourcing.listing_enrichment.research_context',lambda _:pytest.fail('Retry must not regenerate context'))
+    result=run(store,CONFIG,job_key=job,opener=wire)
+    assert result['done'] and result['offset']==1 and 'inflight' not in result
+    assert len(wire.calls)==4 and wire.calls[-1].data==frozen
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0

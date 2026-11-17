@@ -31,7 +31,7 @@ def scheduled_scope(store,day,slot,boundary):
     """Resume the exact query/offset, then rotate approved geographic scopes."""
     from .investment_policy import POLICY_VERSION
     from .request import listing_parameters,municipal_queries
-    scopes=[('pittsburgh-bellevue',listing_parameters(boundary)),*municipal_queries()]
+    scopes=[('pittsburgh-bellevue',listing_parameters(boundary)),*municipal_queries(boundary)]
     prefix='coverage:'+POLICY_VERSION+':'
     old=store.execute("SELECT id FROM scan_jobs WHERE id LIKE ? AND collection_done=0 AND state IN ('running','partial','failed') ORDER BY day,id LIMIT 1",(prefix+'%',)).fetchone()
     cursor_row=store.execute('SELECT payload FROM settings WHERE name=?',('coverage_scope:'+POLICY_VERSION,)).fetchone()

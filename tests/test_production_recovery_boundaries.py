@@ -64,3 +64,35 @@ def test_health_aggregates_history_in_database_without_loading_success_payloads(
     report=snapshot(store,clock())
     assert report['counts']['pending_operations']==23 and len(report['pending_operation_details'])==20
     assert report['counts']['pending_price_observations']==2
+
+
+def test_all_incident_and_recovery_readers_leave_success_history_in_database(store,clock,boundary,monkeypatch):
+    from rentalsourcing.execution_evidence import snapshot
+    from rentalsourcing.reliability import reconcile_completed_enrichment,reconcile_completed_source_refreshes,recover_listing_operations
+    from rentalsourcing.sync_runtime import operation_rows
+    for n in range(30):store.save_setting('sync_operation:history:'+str(n),{'state':'success','receipt':{'audit':'historic evidence '*10000}})
+    store.save_setting('sync_operation:pending:fixture',{'state':'pending','component':'fixture','id':'fixture'})
+    original=store.execute
+    def bounded(sql,args=()):
+        projection=sql.split('FROM')[0]
+        if 'payload' in projection and 'LIKE' in sql and any(isinstance(a,str) and a.startswith('sync_operation:') and a.endswith('%') for a in args):
+            assert "IN (" in sql and 'state' in sql
+        return original(sql,args)
+    monkeypatch.setattr(store,'execute',bounded)
+    assert len(operation_rows(store))==1
+    assert snapshot(store,clock(),boundary)['operations']['pending_count']==1
+    reconcile_completed_enrichment(store,clock())
+    reconcile_completed_source_refreshes(store,clock())
+    monkeypatch.setattr('rentalsourcing.reliability.review_configuration',lambda:CONFIG)
+    assert recover_listing_operations(store,clock())['recovered']==0
+    assert store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('sync_operation:history:%',)).fetchone()[0]==30
+
+
+def test_pending_price_delivery_prevents_successful_scheduled_window_claim(store,clock,monkeypatch):
+    from rentalsourcing.reliability import scheduled_window_outcome
+    monkeypatch.setattr('rentalsourcing.reliability.audit_scheduled_slots',lambda *a,**k:{'evening':{'state':'paced'}})
+    counts=dict.fromkeys(('pending_reports','pending_operations','dead_letters','pending_inventory_jobs'),0)
+    counts['pending_price_observations']=1
+    monkeypatch.setattr('rentalsourcing.reliability.snapshot',lambda *a,**k:{'counts':counts,'incidents':[]})
+    result=scheduled_window_outcome(store,'evening',clock().isoformat(),clock())
+    assert result['current_window_critical']==result['unresolved_critical']==1
