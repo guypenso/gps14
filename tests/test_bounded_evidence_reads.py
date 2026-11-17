@@ -21,3 +21,20 @@ def test_review_and_tax_reads_do_not_issue_one_roundtrip_per_source_property(sto
     assert report['counts']['non_tax_pass']==report['counts']['tax_uncached_backlog']==20
     assert single==[]
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_realscout_audit_batches_official_location_and_owner_decisions(store,boundary,clock,monkeypatch):
+    from rentalsourcing.listing_intake import audit
+    for n in range(20):
+        p=listing('realscout:'+str(n),addressLine1=f'{100+n} Fictional Fixture Ave')
+        store.save_setting('listing_identity:'+p['id'],{'source_id':p['id'],'property':p,'observed_at':clock().isoformat(),
+            'matched_rentcast':False,'owner_deferred':False,'state':'Pending Verification'})
+        if n<10:store.save_setting('penten_review:'+p['id'],{'status':'rejected'})
+    original=store.execute;single=[]
+    def measured(sql,args=()):
+        if sql.startswith('SELECT payload FROM settings WHERE name=?') and args and str(args[0]).startswith(('penten_review:','listing_geocode:')):single.append(sql)
+        return original(sql,args)
+    monkeypatch.setattr(store,'execute',measured)
+    result=audit(store,boundary,clock())
+    assert len(result['properties'])==20 and sum(p['owner_deferred'] for p in result['properties'])==10
+    assert single==[] and store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0

@@ -75,6 +75,16 @@ def snapshot(store,now,boundary=None):
     result['previous_evening']={k:prior[k] for k in ('run_key','started_at','finished_at','requests_consumed',
         'received_this_run','delivery_totals','penten_receipts') if k in prior}
     result['previous_evening_new_sources']=cohort
+    intake=setting(store,'listing_pre_report_receipt');source_result=intake.get('result') or {}
+    source_email=source_result.get('email') or {}
+    runs=[]
+    for item in (source_email.get('results') or [])[:2]:
+        safe={k:item[k] for k in ('state','trigger','started_at','completed_at','messages_returned','messages_processed','duplicates','extracted','failed','needs_review','unresolved_errors','unresolved_listing_blocks','pending_reparse','more') if k in item}
+        safe['listing_results']=[{k:row[k] for k in ('received','known_rentcast','new_unique_beyond_rentcast','non_tax_pass','qualified','pending','rejected','delivered','delivery_counts','completed_at') if k in row} for row in (item.get('listing_results') or [])[:25]]
+        runs.append(safe)
+    result['latest_listing_intake']={'day':intake.get('day'),'attempted_at':intake.get('at'),'state':source_result.get('state'),
+        'authorized_accounts':source_email.get('authorized_accounts'),'runs':runs,
+        'source_dispositions':(source_result.get('realscout_audit') or {}).get('counts')}
     if boundary is not None:
         from .review_inventory import select
         cards,counts=select(store,boundary,now,include_verified=True)

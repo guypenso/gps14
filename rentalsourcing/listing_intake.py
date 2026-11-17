@@ -176,14 +176,16 @@ def summary(store):
 
 def audit(store,boundary,now):
     """Read-only bounded source ledger; never contacts listing/tax providers."""
+    from .tax_backlog import review_snapshot
+    reviews=review_snapshot(store)
+    geocodes={name[len('listing_geocode:'):]:json.loads(raw) for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('listing_geocode:%',)).fetchall()}
     rows=[]
     for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ? ORDER BY name',('listing_identity:%',)).fetchall():
         r=json.loads(raw);p=r['property'];state,reasons=verification(p,boundary)
         if r.get('canonical_source_id'):continue
         geo,geo_reason=geographic_verification(p,boundary)
-        location=store.execute('SELECT payload FROM settings WHERE name=?',('listing_geocode:'+hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest(),)).fetchone()
-        review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+r['source_id'],)).fetchone()
-        rows.append({**r,'current_state':state,'current_reasons':reasons,'geography':{'state':geo,'reason':geo_reason},'geocode_evidence':json.loads(location[0]) if location else None,'owner_deferred':review_deferred(r['source_id'],store),'source_review':json.loads(review[0]) if review else None})
+        location=geocodes.get(hashlib.sha256((street_key(p)+'|'+p['zipCode']).encode()).hexdigest())
+        rows.append({**r,'current_state':state,'current_reasons':reasons,'geography':{'state':geo,'reason':geo_reason},'geocode_evidence':location,'owner_deferred':review_deferred(r['source_id'],store,reviews=reviews),'source_review':reviews.get(r['source_id'])})
     if len(rows)>1000:raise ValueError('Listing audit requires pagination beyond 1000 properties')
     scheduled=store.execute('SELECT payload FROM settings WHERE name=?',('offmarket_scheduler',)).fetchone()
     validation=store.execute('SELECT payload FROM settings WHERE name=?',('realscout_scheduler_validation_v1',)).fetchone()
