@@ -37,6 +37,39 @@ def test_unknown_geography_is_pending_review_not_fully_approved(store,boundary,c
     assert 'coordinates' in r['evaluations'][0]['reasons']
 
 
+def test_legacy_undelivered_alias_closes_after_exact_stored_canonical_rejection_without_losing_observations(store,boundary,clock):
+    import json
+    from rentalsourcing.listing_intake import reconcile_rejected_stored_aliases,summary
+    old=evaluate(store,boundary,[alert(latitude=None,longitude=None)],clock())['evaluations'][0]
+    old['disposition']='pending_additional_evidence' # Captured pre-routing policy, no PENTEN delivery.
+    store.save_setting('listing_identity:'+old['source_id'],old)
+    p=listing('canonical',addressLine1='100 Fixture Ave',latitude=40.32,longitude=-80.27)
+    store.save_property('canonical',p,'Rejected',['outside_city_or_boundary'],LIVE,1,clock().isoformat())
+    evaluate(store,boundary,[alert(latitude=None,longitude=None)],clock())
+    before=store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0]
+    # Normal future intake has already reconciled the exact stored alias.
+    assert reconcile_rejected_stored_aliases(store,boundary,clock())==0
+    # The watchdog can safely repair an already-persisted pre-upgrade ledger too.
+    store.save_setting('listing_identity:'+old['source_id'],old)
+    assert reconcile_rejected_stored_aliases(store,boundary,clock())==1
+    assert summary(store)['unique_properties']==1
+    saved=json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('listing_identity:'+old['source_id'],)).fetchone()[0])
+    assert saved['canonical_source_id']=='canonical' and saved['reasons']==old['reasons']
+    assert store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing_observation:%',)).fetchone()[0]==before
+    assert reconcile_rejected_stored_aliases(store,boundary,clock())==0
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_rejected_alias_repair_preserves_published_or_owner_decided_legacy_identity(store,boundary,clock):
+    from rentalsourcing.listing_intake import reconcile_rejected_stored_aliases
+    old=evaluate(store,boundary,[alert(latitude=None,longitude=None)],clock())['evaluations'][0]
+    old['disposition']='pending_additional_evidence';store.save_setting('listing_identity:'+old['source_id'],old)
+    p=listing('canonical',addressLine1='100 Fixture Ave',latitude=40.32,longitude=-80.27)
+    store.save_setting('penten_review:'+old['source_id'],{'status':'rejected'})
+    store.save_property('canonical',p,'Rejected',[],LIVE,1,clock().isoformat());evaluate(store,boundary,[alert(latitude=None,longitude=None)],clock())
+    assert reconcile_rejected_stored_aliases(store,boundary,clock())==0
+
+
 def test_stale_alert_does_not_become_qualified_with_cached_tax(store,boundary,clock):
     p=listing('known',addressLine1='100 Fixture Ave');store.save_property('known',p,'Qualified',[],LIVE,1,clock().isoformat())
     store.save_tax('known',taxes('known',1500),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())

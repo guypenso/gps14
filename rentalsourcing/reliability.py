@@ -296,6 +296,10 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:
   from .sync_runtime import classify
   error=classify(e,operation='review-feedback');component(store,'review_feedback','failed' if not error.retryable else 'partial',now=now,pending=1,error=error.safe());incident(store,'review_feedback',error.safe(),now=now);result['feedback']={'state':'failed',**error.safe()}
+ alias_repair='source_alias_reconciliation:confirmed-rejected-stored-v1'
+ if not get(store,alias_repair) and result.get('feedback',{}).get('state')=='fresh':
+  from .listing_intake import reconcile_rejected_stored_aliases
+  store.save_setting(alias_repair,{'at':now.isoformat(),'aliases':reconcile_rejected_stored_aliases(store,boundary,now),'provider_calls':0,'property_decisions_changed':False})
  from .command_center import flush
  try:
   config=configuration()
