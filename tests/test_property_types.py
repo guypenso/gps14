@@ -60,11 +60,11 @@ def test_each_scan_runs_stored_quality_audit_without_provider_or_extra_email(sto
  monkeypatch.setattr(fd,'process',lambda *a,**kw:{'state':'complete'})
  seen=[]
  def audit(*args,**kw):
-  seen.append(kw['job_key']);return {'summary':{'property_quality':{'counts':{'review_ready':0},'review_ready_without_insights':0}}}
+  seen.append((kw['job_key'],kw.get('target_current')));return {'summary':{'property_quality':{'counts':{'review_ready':0},'review_ready_without_insights':0}}}
  monkeypatch.setattr(le,'run',audit)
  provider=Provider([])
  result=daily_discovery(store,boundary,replace(settings,enabled=False,email_enabled=False),clock().date().isoformat(),clock=clock,opener=provider,slot=slot)
- assert seen==['listing-contact-enrichment:'+clock().date().isoformat()+':'+slot+':property-quality-v1']
+ assert seen==[('listing-contact-enrichment:'+clock().date().isoformat()+':'+slot+':property-quality-v2',True)]
  assert not provider.messages and not any('api.rentcast.io' in request.full_url for request in provider.calls)
  if slot=='evening':assert result['status']=='evening_no_email'
 def test_background_threads_start_only_in_initialized_workers(monkeypatch):

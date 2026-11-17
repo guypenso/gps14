@@ -72,16 +72,31 @@ def research_context(store):
     if settings.enabled or monthly:store.save_setting('research_budget_context',value)
     return value
 
-def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True):
+def run(store,config,*,job_key=JOB,opener=None,acquire_lock=True,target_current=False):
     if not config:return {'state':'disabled'}
     if acquire_lock and not store.lock():raise ValueError('Existing job is busy')
     saved=store.execute('SELECT payload FROM settings WHERE name=?',(job_key,)).fetchone()
     ledger=json.loads(saved[0]) if saved else {'offset':0,'cursor':0,'done':False,'batches':0}
+    if target_current and not saved:
+        ledger['target_current']=True
+        store.save_setting(job_key,ledger)
     if ledger['done']:print('LISTING_ENRICHMENT_ALREADY_ACCEPTED '+json.dumps(ledger.get('summary',{})));return ledger
     url,key,token=config;url=url.rsplit('/',1)[0]+'/review-listing-enrichment';opener=opener or urllib.request.build_opener(NoRedirect)
     # Source labels vary by maintained collector; accept only the exact configured LIVE value.
     from .collector import LIVE
     rows=store.execute('SELECT id,payload,observed_at FROM properties WHERE source=? ORDER BY id',(LIVE,)).fetchall()
+    if ledger.get('target_current') and 'source_ids' not in ledger:
+        # Destination identities scope metadata work, never investment criteria.
+        # Inventory has its own durable delivery and inline insight generation.
+        from .review_feedback import refresh
+        from .tax_backlog import review_snapshot
+        from .sync_runtime import SyncFailure
+        feedback=refresh(store,dt.datetime.now(dt.timezone.utc),opener,config)
+        if feedback.get('state')!='fresh':raise SyncFailure('destination_feedback_unavailable',None,True)
+        reviews=review_snapshot(store)
+        ledger['source_ids']=[identity for identity,raw,at in rows if identity in reviews and reviews[identity].get('status')!='rejected']
+        ledger['cursor']=10000
+        store.save_setting(job_key,ledger)
     if ledger.get('source_ids') is not None:
         selected=set(ledger['source_ids']);rows=[row for row in rows if row[0] in selected]
     from .owner_exception import snapshot as exception_snapshot

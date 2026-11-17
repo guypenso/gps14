@@ -189,7 +189,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
         if feedback_config:
             try:
                 from .listing_enrichment import run as enrich_listings
-                quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v1')
+                quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v2',target_current=True)
                 stats['property_quality']=quality.get('summary',{}).get('property_quality',{})
                 event('property_quality_audit',slot=slot,counts=stats['property_quality'].get('counts',{}),review_ready_without_insights=stats['property_quality'].get('review_ready_without_insights'))
             except Exception as exc:
@@ -202,7 +202,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     if feedback_config:
         try:
             from .listing_enrichment import run as enrich_listings
-            quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v1')
+            quality=enrich_listings(store,feedback_config,job_key='listing-contact-enrichment:'+day+':'+str(slot)+':property-quality-v2',target_current=True)
             stats['property_quality']=quality.get('summary',{}).get('property_quality',{})
             event('property_quality_audit',slot=slot,counts=stats['property_quality'].get('counts',{}),review_ready_without_insights=stats['property_quality'].get('review_ready_without_insights'))
         except Exception as exc:
