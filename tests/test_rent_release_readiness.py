@@ -125,3 +125,44 @@ def test_source_alias_rent_uses_matching_canonical_record_or_records_actual_attr
     assert result['delivery_resolution'][0]['state']=='Awaiting Evidence'
     assert result['delivery_resolution'][0]['attribute_disagreements']['squareFootage']=={'source':1000,'canonical':1100}
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_supported_rent_count_is_unique_properties_not_source_aliases(store,clock):
+    from rentalsourcing.rental_intelligence import evidence_summary,key,record_job
+    p=listing('canonical-count',addressLine1='100 Fixture Ave')
+    alias={**p,'id':'realscout:count'}
+    store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    store.save_setting('listing_identity:'+alias['id'],{'source_id':alias['id'],'property':alias,'observed_at':clock().isoformat()})
+    store.save_setting(key(p),{'source':'RentCast','raw':avm(alias),'observed_at':clock().isoformat()})
+    record_job(store,p,'Completed',clock())
+    result=evidence_summary(store,clock())
+    assert result['supported_estimates']==1 and result['source_identity_matches']==2
+    assert result['records'][0]['canonical_property_record']
+    assert result['records'][0]['source_aliases']==[p['id'],alias['id']]
+
+
+def test_legacy_rent_ack_is_reconciled_once_without_reacquiring_provider_evidence(store,clock,monkeypatch):
+    from rentalsourcing.rental_intelligence import queue_evidence_delivery,key,evidence_summary
+    from rentalsourcing.listing_enrichment import run
+    from rentalsourcing.listing_enrichment import stored_evidence
+    from conftest import Response
+    p=listing('legacy-ack',addressLine1='100 Fixture Ave')
+    store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    store.save_setting(key(p),{'source':'RentCast','raw':avm(p),'observed_at':clock().isoformat()})
+    value=cached_estimate(store,p,clock());queue_evidence_delivery(store,p,value,clock())
+    monkeypatch.setattr('rentalsourcing.listing_enrichment.stored_evidence',lambda db,property_,observed:stored_evidence(db,property_,observed,clock()))
+    name=store.execute('SELECT name FROM settings WHERE name LIKE ?',('listing-contact-enrichment:rent:%',)).fetchone()[0]
+    store.save_setting(name,{'done':True,'offset':1,'cursor':None,'batches':1,'source_ids':[p['id']]})
+    queue_evidence_delivery(store,p,value,clock());queue_evidence_delivery(store,p,value,clock())
+    assert store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('listing-contact-enrichment:rent:%',)).fetchone()[0]==2
+    class Receiver:
+        calls=0
+        def open(self,request,timeout):
+            self.calls+=1;records=json.loads(request.data)['records'];assert len(records)==1
+            assert records[0]['rent_estimate']['monthly']==2400
+            return Response({'accepted':True,'matched':1,'next_cursor':None,'summary':{}})
+    wire=Receiver();run(store,('https://penten.example.test/api/rentalsourcing/review-sync','s'*40,'fixture-token'),job_key=name+':ack-v2',opener=wire)
+    result=evidence_summary(store,clock())
+    assert result['delivery_resolution'][0]['state']=='Completed'
+    assert result['delivery_resolution'][0]['delivery_acknowledgment']['matched']==1 and wire.calls==1
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
