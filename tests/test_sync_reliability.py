@@ -54,6 +54,21 @@ class Wire:
   if isinstance(value,Exception):raise value
   return Response(value)
 def error(code):return urllib.error.HTTPError(CONFIG[0],code,'never-log-this-private-text',{'Retry-After':'120'} if code==429 else {},io.BytesIO(b'{}'))
+@pytest.mark.parametrize('message,category',[
+ ('Too many API requests by single worker invocation.','destination_query_limit'),
+ ('D1_ERROR: request failed; private-agent@example.test','destination_database'),
+ ('Invalid bounded batch','contract_batch'),
+ ('A street address is required for persistent property identity','contract_identity'),
+ ("Cannot read properties of null (reading 'private-field')",'destination_runtime')])
+def test_destination_400_diagnostic_is_specific_without_persisting_response_data(store,clock,message,category):
+ failure=urllib.error.HTTPError(CONFIG[0],400,'private-response',{},io.BytesIO(json.dumps({'error':message}).encode()))
+ wire=Wire([failure])
+ with pytest.raises(SyncFailure) as error_:request_json(store,'listing_enrichment','typed-diagnostic',CONFIG,b'{}',opener=wire,now=clock())
+ assert error_.value.category==category and error_.value.http_status==400
+ saved=json.dumps(get(store,'health_incident:listing_enrichment'))
+ assert 'private-' not in saved and 'agent@example.test' not in saved
+ assert len(wire.calls)==1 and store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
 @pytest.mark.parametrize('status',[401,403,400,404,409,413,415,422,307])
 def test_permanent_failures_are_held_without_redirects_or_repeated_requests(store,clock,status):
  wire=Wire([error(status),{'accepted':True}])
