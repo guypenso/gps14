@@ -7,6 +7,15 @@ from rentalsourcing.future_discovery import process
 class Provider:
     source=LIVE
 
+
+def test_verified_tax_cannot_count_unresolved_type_as_new_qualified(store,boundary,settings,clock):
+    engine=Engine(store,boundary,Provider(),settings,clock)
+    store.save_tax('type-unresolved',taxes('type-unresolved',1500),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
+    engine.ingest('future',listing('type-unresolved',propertyType=None,formattedAddress='108 Fixture St, Pittsburgh, PA 15212'))
+    result=process(store,boundary,'future',clock())
+    assert result['new_qualified']==0 and result['new_pending']==1
+    assert result['new_verified_tax']==1 and result['new_unknown_tax']==0
+
 def test_resumed_old_job_is_recovered_without_counting_old_properties_as_new(store,boundary,settings,clock,monkeypatch):
     engine=Engine(store,boundary,Provider(),settings,clock)
     engine.ingest('resumed',listing('old-observation'))

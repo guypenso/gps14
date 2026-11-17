@@ -308,6 +308,16 @@ def recover(store,boundary,now=None,opener=None):
  memory_checkpoint('feedback_reports_prices_completed')
  from .incident_batch_revalidation import run as revalidate_incident_batch
  result['incident_batch_revalidation']=revalidate_incident_batch(store,dt.datetime.now(UTC),opener)
+ reconciliation='stored-review-inventory:2026-11-17:pending-evidence-routing-v2'
+ review_config=review_configuration()
+ if review_config and not get(store,reconciliation):
+  from .core import verification
+  from .review_inventory import run as reconcile_pending_review
+  u,k,t=review_config
+  candidates={identity for identity,raw in store.execute('SELECT id,payload FROM properties').fetchall() if verification(json.loads(raw),boundary)[0]=='Pending Verification'}
+  try:result['pending_review_reconciliation']=reconcile_pending_review(store,boundary,now,execute=True,download=False,
+       config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key=reconciliation,source_ids=candidates,include_verified=True,refresh_decisions=False).get('receipt_counts',{})
+  except Exception as exc:result['pending_review_reconciliation']={'state':'pending_recovery','error_type':type(exc).__name__}
  try:
   from .diagnostics import funnel
   store.save_setting('health_funnel',funnel(store,boundary,now))
@@ -454,17 +464,12 @@ def current_inventory_audit(store,config=None,opener=None):
  if not config:return {'state':'disabled'}
  now=dt.datetime.now(UTC)
  candidates=[];counts={'source_records':0,'hard_rejected':0,'review_deferred':0,'tax_rejected':0,'pending':0,'verified':0,'mapped':0,'missing':0,'rejected_at_destination':0,'tax_status_mismatch':0,'pending_tax_status_mismatch':0,'destination_review_statuses':{},'destination_tax_statuses':{}}
- for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall():
-  counts['source_records']+=1
-  p=json.loads(raw)
-  if source!=LIVE or verification(p,boundary)[0]!='Candidate':counts['hard_rejected']+=1;continue
-  if review_deferred(identity,store):counts['review_deferred']+=1;continue
-  cached=store.get_tax(identity,now.isoformat())
-  valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
-  tax_state=tax_verification(cached[0],now.date())[0] if valid else 'Pending Verification'
-  if tax_state=='Rejected':counts['tax_rejected']+=1;continue
-  kind='verified' if tax_state=='Qualified' else 'pending'
-  counts[kind]+=1;candidates.append((identity,kind))
+ from .review_inventory import select
+ pairs,selection=select(store,boundary,now,include_verified=True)
+ counts.update(source_records=selection['stored'],hard_rejected=selection['hard_rejected'],review_deferred=selection['owner_rejected'],tax_rejected=selection['tax_rejected'])
+ for card,p in pairs:
+  kind='verified' if card['tax_status']=='provider_verified' else 'pending'
+  counts[kind]+=1;candidates.append((card['source_id'],kind))
  url,key,token=config;config=(url.rsplit('/',1)[0]+'/review-inventory-audit',key,token)
  opener=opener or urllib.request.build_opener(NoRedirect)
  missing=[]

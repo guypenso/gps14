@@ -22,13 +22,13 @@ def process(store,boundary,job_id,now,*,config=None,opener=None,new_since=None):
     new_cards,new_counts=select(store,boundary,now,source_ids=new_identities,include_verified=True) if new_since else (cards,counts)
     batch=store.execute('SELECT payload FROM settings WHERE name=?',('public_tax_batch:2026',)).fetchone()
     estimates=json.loads(batch[0]).get('estimates',{}) if batch else {}
-    verified=sum(c['tax_status']=='provider_verified' for c,p in new_cards)
+    verified=sum(c['qualification']=='verified' for c,p in new_cards)
     estimated=sum(c['tax_status']!='provider_verified' and estimates.get(c['source_id'],{}).get('state')=='estimated' for c,p in new_cards)
     report={'job_id':job_id,'new_source_listings':len(new_records),'recovered_source_listings':len(records)-len(new_records),
             'new_non_tax_pass':sum(r['non_tax_state']=='Candidate' for r in new_records),
             'new_two_bedroom_candidates':sum(p.get('bedrooms')==2 for c,p in new_cards),'new_three_four_bedroom_candidates':sum(p.get('bedrooms') in (3,4) for c,p in new_cards),
             'new_parcel_matches':sum(estimates.get(i,{}).get('match_status')=='unique_parcel' for i in new_identities),
-            'new_verified_tax':verified,'new_estimated_tax':estimated,'new_unknown_tax':len(new_cards)-verified-estimated,
+            'new_verified_tax':sum(c['tax_status']=='provider_verified' for c,p in new_cards),'new_estimated_tax':estimated,'new_unknown_tax':sum(c['tax_status']!='provider_verified' and estimates.get(c['source_id'],{}).get('state')!='estimated' for c,p in new_cards),
             'new_qualified':verified,'new_pending':len(new_cards)-verified,'new_rejected':new_counts['hard_rejected']+new_counts['tax_rejected'],
             'synced':0,'paid_tax_calls':0,'state':'not_configured' if not config else 'pending',
             'source_limitations':['No validated automated official annual-bill source is connected. Assessment estimates do not verify annual liability.']}

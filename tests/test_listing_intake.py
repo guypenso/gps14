@@ -28,10 +28,12 @@ def test_unseen_property_pending_and_bad_bedrooms_rejected(store,boundary,clock)
     assert evaluate(store,boundary,[alert(bedrooms=5)],clock())['counts']['rejected']==1
 
 
-def test_unknown_geography_is_research_not_approved(store,boundary,clock):
+def test_unknown_geography_is_pending_review_not_fully_approved(store,boundary,clock):
     item=alert(latitude=None,longitude=None)
     r=evaluate(store,boundary,[item],clock())
-    assert not r['cards'] and r['counts']['needs_research']==1
+    assert len(r['cards'])==1 and r['counts']['pending']==1 and r['counts']['qualified']==0
+    assert r['cards'][0]['qualification']=='pending_verification'
+    assert r['cards'][0]['section']=='pending_verification'
     assert 'coordinates' in r['evaluations'][0]['reasons']
 
 
@@ -86,7 +88,8 @@ def test_read_only_audit_keeps_every_disposition_and_original_identity(store,bou
     evaluate(store,boundary,records,clock())
     result=audit(store,boundary,clock())
     assert result['summary']['unique_properties']==3
-    assert {r['disposition'] for r in result['properties']}=={'pending_delivery','rejected_hard_criterion','pending_additional_evidence'}
+    assert {r['disposition'] for r in result['properties']}=={'pending_delivery','rejected_hard_criterion'}
+    assert any('coordinates' in r['reasons'] for r in result['properties'])
     assert all(r['external_id'].startswith('fixture-email|') for r in result['properties'])
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
 
@@ -146,7 +149,7 @@ def test_all_nine_captured_unknown_properties_have_an_explicit_disposition(store
     checked=audit(store,actual_boundary,clock())['properties']
     assert len(checked)==9
     counts={d:sum(r['disposition']==d for r in checked) for d in ['pending_delivery','rejected_hard_criterion','pending_additional_evidence']}
-    assert counts=={'pending_delivery':1,'rejected_hard_criterion':5,'pending_additional_evidence':3}
+    assert counts=={'pending_delivery':4,'rejected_hard_criterion':5,'pending_additional_evidence':0}
     for r in checked:
         if r['disposition']=='rejected_hard_criterion':assert 'bedrooms' in r['reasons'] or 'excluded_zip' in r['reasons']
         assert r['tax_status']=='unknown'

@@ -23,6 +23,28 @@ def test_all_stored_pending_are_reviewable_even_if_stale_and_ids_stay_stable(sto
     assert cards[0][0]['listing_observed_at']==old.isoformat()
 
 
+def test_unresolved_evidence_is_reviewable_but_verified_tax_does_not_fully_qualify(store,boundary,clock):
+    for identity,changes in [('geography',{'latitude':None,'longitude':None}),('type',{'propertyType':None}),('status',{'status':None})]:
+        add(store,identity,clock,formattedAddress='108 Fixture St, Pittsburgh, PA 15212',**changes)
+        store.save_tax(identity,taxes(identity,1500),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
+    cards,counts=select(store,boundary,clock(),include_verified=True)
+    assert counts['actionable']==3
+    assert all(c['qualification']=='pending_verification' and c['annual_tax']==1500 and c['tax_status']=='provider_verified' for c,p in cards)
+    geo=next(c for c,p in cards if c['source_id']=='geography')
+    assert geo['municipality'] is None and geo['neighborhood'] is None and 'coordinates' in geo['reasons']
+    assert 'tax_verification_required' not in geo['reasons']
+    store.save_setting('penten_review:geography',{'status':'rejected'})
+    assert len(select(store,boundary,clock(),include_verified=True)[0])==2
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_pending_review_never_creates_a_card_without_reliable_address_identity(store,boundary,clock):
+    add(store,'missing-address',clock,formattedAddress=None)
+    add(store,'missing-zip',clock,zipCode=None)
+    add(store,'missing-type',clock,propertyType=None,formattedAddress='108 Fixture St, Pittsburgh, PA 15212')
+    assert [c['source_id'] for c,p in select(store,boundary,clock())[0]]==['missing-type']
+
+
 def test_review_feedback_is_authenticated_and_rejection_is_permanent(store,clock):
     config=('https://example.test/api/rentalsourcing/sync','s'*32,'service-fixture')
     class Response:

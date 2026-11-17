@@ -91,7 +91,7 @@ def evaluate(store,boundary,records,now,opener=None):
         if deferred:counts['owner_deferred']+=1
         if state=='Candidate':counts['non_tax_pass']+=1
         if state=='Rejected':counts['rejected']+=1
-        elif not deferred and len(matches)<=1 and (matched or len(source_matches)<=1) and geographic_verification(p,boundary)[0]=='Candidate':
+        elif not deferred and len(matches)<=1 and (matched or len(source_matches)<=1):
             qualified=state=='Candidate' and tax is not None and fresh
             counts['qualified' if qualified else 'pending']+=1
             cards.append(dict(source_id=identity,source='RealScout',source_label='RealScout listing alert (MLS-origin channel)',address=p['formattedAddress'],street_address=p['addressLine1'],unit=p.get('addressLine2'),city=p.get('city'),state='PA',zip_code=p['zipCode'],latitude=p.get('latitude'),longitude=p.get('longitude'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=tax['annual'] if qualified else None,tax_year=tax['year'] if qualified else None,tax_status='provider_verified' if qualified else 'pending_verification',tax_source='RentCast cached Property Records' if qualified else None,qualification='verified' if qualified else 'pending_verification',section='new' if qualified else 'pending_verification',reasons=reasons+([] if qualified else ['tax_verification_required']),discovered_at=observed,updated_at=observed,listing_observed_at=observed,verified_at=now.isoformat() if qualified else None,tax_fetched_at=fetched if qualified else None,listing_url=item.get('listing_url') or item.get('evidence_url'),last_reported_status=p['status']))

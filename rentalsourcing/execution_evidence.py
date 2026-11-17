@@ -77,6 +77,8 @@ def snapshot(store,now,boundary=None):
             'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
     result['pending_enrichment_batches']=enrichment[:20]
     result['incident_batch_revalidation']=setting(store,'incident_batch_revalidation:20261117:v1')
+    repaired=setting(store,'stored-review-inventory:2026-11-17:pending-evidence-routing-v2')
+    result['pending_evidence_reconciliation']={k:repaired[k] for k in ('counts','receipt_counts','synced_at') if k in repaired}
     audit=setting(store,'health_last_audit')
     current=audit.get('result',{}).get('current_inventory',{})
     result['saved_inventory_audit']={'at':audit.get('at'),**{k:current[k] for k in
