@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 from urllib.parse import urlencode
-from flask import Flask,jsonify,render_template,request,Response
+from flask import Flask,jsonify,render_template,request,Response,g
 from .collector import LIVE
 from .core import verification,tax_verification,demo_marked,number
 from .digest import render as render_digest
@@ -171,6 +171,22 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
         try:return snapshot(s,boundary,clock())
         finally:s.close()
 
+    # Bound simultaneous large reads without tying up threads needed by healthz.
+    # Authentication runs first; a busy request performs no processing or writes.
+    import threading
+    work_slots=threading.BoundedSemaphore(2)
+    @app.before_request
+    def limit_large_requests():
+        if request.path not in ('/','/api/dashboard','/api/offmarket/backend','/api/operations/tax-intelligence','/api/operations/backend-health'):return
+        if not work_slots.acquire(blocking=False):
+            return jsonify(error='Processing capacity busy',code='runtime_capacity_busy',retryable=True),429,{'Retry-After':'2'}
+        g.large_request_slot=True
+
+    @app.teardown_request
+    def release_large_request_slot(error=None):
+        if getattr(g,'large_request_slot',False):
+            g.large_request_slot=False;work_slots.release()
+
     @app.post('/api/offmarket/backend')
     def offmarket_backend():
         from .offmarket import evaluate,fetch_public,SOURCES,cache_program_contacts
@@ -254,11 +270,14 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
     @app.get('/healthz')
     def health():
         try:
-            s=Store(url,initialize=False)
-            try:
-                if s.execute('SELECT version FROM schema_versions WHERE version=2').fetchone() is None:
-                    raise ValueError('Database migrations are missing')
-            finally:s.close()
+            if not testing:
+                from .database import probe_postgres
+                probe_postgres(url)
+            else:
+                s=Store(url,initialize=False)
+                try:
+                    if s.execute('SELECT version FROM schema_versions WHERE version=2').fetchone() is None:raise ValueError('Database migrations are missing')
+                finally:s.close()
             return jsonify(status='ok')
         except Exception as exc:
             event('dashboard_database_unavailable',error_type=type(exc).__name__)

@@ -266,6 +266,43 @@ class Store:
     def cache_put(self,key,payload,source,expires):
         self.execute('INSERT INTO response_cache VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,source=excluded.source,expires_at=excluded.expires_at',
                      (key,json.dumps(payload),source,expires))
+        if source=='rentcast-live' and isinstance(payload,dict) and isinstance(payload.get('data'),list) and isinstance(payload.get('fetched_at'),str):
+            self._index_listing_response(key,payload['fetched_at'])
+
+    def _index_listing_response(self,key,fetched_at):
+        name='latest_listing_cache:v1'
+        try:
+            when=dt.datetime.fromisoformat(fetched_at.replace('Z','+00:00'))
+            if when.tzinfo is None:return
+        except (ValueError,TypeError):return
+        value=json.dumps({'key':key,'fetched_at':when.astimezone(dt.timezone.utc).isoformat()})
+        for _ in range(8):
+            row=self.execute('SELECT payload FROM settings WHERE name=?',(name,)).fetchone()
+            if row and json.loads(row[0]).get('fetched_at','')>=when.astimezone(dt.timezone.utc).isoformat():return
+            result=self.execute('UPDATE settings SET payload=? WHERE name=? AND payload=?',(value,name,row[0])) if row else self.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(name,value))
+            if result.rowcount:return
+        raise RuntimeError('Latest listing cache index update conflicted')
+
+    def _latest_listing_key(self):
+        # Only a key crosses the connection for historical caches. The server
+        # filters listing arrays and finds the newest timestamp before LIMIT 1.
+        date="payload::jsonb->>'fetched_at'" if self.pg else "json_extract(payload,'$.fetched_at')"
+        array="jsonb_typeof(payload::jsonb->'data')='array'" if self.pg else "json_type(payload,'$.data')='array'"
+        return self.execute(f'SELECT key,{date} FROM response_cache WHERE source=? AND {array} AND {date} IS NOT NULL ORDER BY {date} DESC,key DESC LIMIT 1',('rentcast-live',)).fetchone()
+
+    def bootstrap_listing_cache_index(self):
+        row=self._latest_listing_key()
+        if row:self._index_listing_response(row[0],row[1])
+
+    def latest_listing_response(self):
+        pointer=self.execute('SELECT payload FROM settings WHERE name=?',('latest_listing_cache:v1',)).fetchone()
+        key=json.loads(pointer[0]).get('key') if pointer else None
+        if not key:
+            latest=self._latest_listing_key();key=latest[0] if latest else None
+        if not key:return None
+        row=self.execute('SELECT payload FROM response_cache WHERE key=? AND source=?',(key,'rentcast-live')).fetchone()
+        body=json.loads(row[0]) if row else None
+        return body if isinstance(body,dict) and isinstance(body.get('data'),list) else None
 
     def get_property(self,identity):
         r=self.execute('SELECT payload,state,reasons,source,revision,observed_at FROM properties WHERE id=?',(identity,)).fetchone()

@@ -37,8 +37,13 @@ def snapshot(store, settings, now):
         slots[slot]={k:receipt[k] for k in ('day','slot','started_at','finished_at','state','result') if k in receipt}
     scheduler=saved('offmarket_scheduler')
     pre_report=saved('listing_pre_report_receipt')
+    import resource
+    length='octet_length' if store.pg else 'length'
+    cache_size=store.execute(f'SELECT COUNT(*),COALESCE(SUM({length}(payload)),0),COALESCE(MAX({length}(payload)),0) FROM response_cache').fetchone()
     return {'as_of':now.isoformat(),'build_sha':os.getenv('RENDER_GIT_COMMIT'),
             'settings':settings.public(),'provider_calls':0,'email_sends':0,'read_only':True,
+            'resource_envelope':{'process_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                'cache_rows':cache_size[0],'cache_payload_bytes':cache_size[1],'largest_cache_payload_bytes':cache_size[2]},
             'budget':store.budget_health(settings,now,record_warning=False),
             'monthly_allocation':allocation(store,settings,now),'ledger':ledger,
             'next_slots':dates[:4],'coverage':coverage(store,now),'scheduled_slots':slots,

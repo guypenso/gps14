@@ -37,3 +37,13 @@ def connect_postgres(url):
                 raise RuntimeError('PostgreSQL unavailable after 4 connection attempts; check Render database readiness and DATABASE_URL') from None
             logging.getLogger(__name__).warning('PostgreSQL connection unavailable; retry %d/3', attempt + 1)
             time.sleep(2 ** attempt)
+
+
+def probe_postgres(url):
+    """Readiness has a single bounded attempt, never the application retry loop."""
+    import psycopg
+    validate_postgres_url(url)
+    with psycopg.connect(url,autocommit=True,connect_timeout=2,client_encoding='utf8',
+                        options='-c statement_timeout=1000 -c lock_timeout=1000') as db:
+        if db.execute('SELECT version FROM schema_versions WHERE version=2').fetchone() is None:
+            raise RuntimeError('Database migrations are missing')
