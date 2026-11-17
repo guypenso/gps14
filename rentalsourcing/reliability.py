@@ -306,6 +306,8 @@ def recover(store,boundary,now=None,opener=None):
  from .price_sync import safe_flush
  result['prices']=safe_flush(store)
  memory_checkpoint('feedback_reports_prices_completed')
+ from .incident_batch_revalidation import run as revalidate_incident_batch
+ result['incident_batch_revalidation']=revalidate_incident_batch(store,dt.datetime.now(UTC),opener)
  try:
   from .diagnostics import funnel
   store.save_setting('health_funnel',funnel(store,boundary,now))

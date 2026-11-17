@@ -38,3 +38,19 @@ def test_realscout_audit_batches_official_location_and_owner_decisions(store,bou
     result=audit(store,boundary,clock())
     assert len(result['properties'])==20 and sum(p['owner_deferred'] for p in result['properties'])==10
     assert single==[] and store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_listing_report_reuses_one_owner_snapshot_without_per_identity_queries(store,boundary,clock,monkeypatch):
+    from rentalsourcing.listing_report import listing_report
+    for n in range(20):
+        p=listing('realscout:'+str(n),addressLine1=f'{100+n} Fictional Fixture Ave')
+        store.save_setting('listing_identity:'+p['id'],{'source_id':p['id'],'property':p,'observed_at':clock().isoformat()})
+        if n<10:store.save_setting('penten_review:'+p['id'],{'status':'rejected'})
+    original=store.execute;single=[]
+    def measured(sql,args=()):
+        if sql.startswith('SELECT payload FROM settings WHERE name=?') and args and str(args[0]).startswith('penten_review:'):single.append(sql)
+        return original(sql,args)
+    monkeypatch.setattr(store,'execute',measured)
+    result=listing_report(store,boundary,clock())
+    assert result['properties']==20 and len(result['cards'])==10 and single==[]
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0

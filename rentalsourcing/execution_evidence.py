@@ -76,6 +76,7 @@ def snapshot(store,now,boundary=None):
             'wire_record_count':len(batch.get('records',[])) if isinstance(batch.get('records'),list) else None,
             'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
     result['pending_enrichment_batches']=enrichment[:20]
+    result['incident_batch_revalidation']=setting(store,'incident_batch_revalidation:20261117:v1')
     audit=setting(store,'health_last_audit')
     current=audit.get('result',{}).get('current_inventory',{})
     result['saved_inventory_audit']={'at':audit.get('at'),**{k:current[k] for k in
