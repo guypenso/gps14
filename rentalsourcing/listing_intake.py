@@ -35,6 +35,35 @@ def reconcile_official_identities(store,now):
         changed+=1
     return changed
 
+
+def reconcile_rejected_stored_aliases(store,boundary,now):
+    """Close legacy undelivered aliases only after an exact canonical hard rejection.
+
+    Stored-source matching is not official parcel verification. Published or
+    owner-managed identities are deliberately outside this repair's scope.
+    """
+    from .tax_backlog import review_snapshot
+    reviews=review_snapshot(store)
+    rows={r['source_id']:r for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall() for r in [json.loads(raw)]}
+    known={}
+    for identity,raw in store.execute('SELECT id,payload FROM properties WHERE source=?',(LIVE,)).fetchall():
+        p=json.loads(raw)
+        if p.get('state')=='PA':known.setdefault((street_key(p),p.get('zipCode')),[]).append(identity)
+    changed=0
+    for old,r in rows.items():
+        if r.get('canonical_source_id') or r.get('disposition')!='pending_additional_evidence' or r.get('owner_deferred') or old in reviews:continue
+        p=r['property'];key=street_key(p);zipcode=p.get('zipCode')
+        if not key or not key[0].isdigit() or not isinstance(zipcode,str) or len(zipcode)!=5 or not zipcode.isdigit() or p.get('state')!='PA':continue
+        matches=known.get((key,zipcode),[])
+        if len(matches)!=1 or matches[0]==old:continue
+        target=matches[0];canonical=rows.get(target)
+        if not canonical or canonical.get('canonical_source_id') or verification(canonical['property'],boundary)[0]!='Rejected':continue
+        alias={'from_source_id':old,'to_source_id':target,'address_key':key,'zip_code':zipcode,'evidence':'unique_exact_stored_address_unit_zip','at':now.isoformat(),'published_identity_repair':False}
+        store.save_setting('listing_identity_alias:'+old,alias)
+        store.save_setting('listing_identity:'+old,{**r,'canonical_source_id':target})
+        changed+=1
+    return changed
+
 def evaluate(store,boundary,records,now,opener=None):
     if not isinstance(records,list) or len(records)>30:raise ValueError('Bounded listing intake required')
     existing=[(i,json.loads(raw)) for i,raw in store.execute('SELECT id,payload FROM properties WHERE source=?',(LIVE,)).fetchall()]
@@ -127,6 +156,7 @@ def evaluate(store,boundary,records,now,opener=None):
         if not any(i==identity for i,_ in source_existing):source_existing.append((identity,p))
         results.append(result)
     reconcile_official_identities(store,now)
+    reconcile_rejected_stored_aliases(store,boundary,now)
     return dict(cards=cards,counts=counts,evaluations=results)
 
 
