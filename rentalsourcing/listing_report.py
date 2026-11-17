@@ -6,13 +6,15 @@ from .investment_policy import annual_tax_passes
 from .tax_backlog import review_deferred
 
 def listing_report(store,boundary,now):
+    from .tax_backlog import review_snapshot
+    reviews=review_snapshot(store)
     rows=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('listing_identity:%',)).fetchall()]
     cards=[]
     for r in rows:
         identity=r['source_id'];p=r['property']
-        if review_deferred(identity,store) or not recent_timestamp(r['observed_at'],now):continue
-        review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()
-        if review and json.loads(review[0]).get('status') not in (None,'new'):continue
+        if review_deferred(identity,store,reviews=reviews) or not recent_timestamp(r['observed_at'],now):continue
+        review=reviews.get(identity)
+        if review and review.get('status') not in (None,'new'):continue
         state,reasons=verification(p,boundary)
         if state=='Rejected' or geographic_verification(p,boundary)[0]!='Candidate':continue
         tax=r.get('tax_evidence');verified=r.get('tax_status')=='provider_verified' and tax and annual_tax_passes(tax['annual'])
