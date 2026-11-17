@@ -26,6 +26,16 @@ def snapshot(store,now,boundary=None):
             ('status','scan','requests','error','workflow_status','outbox_id','unresolved_critical','price_queue')},
         'morning_metrics':{k:metrics[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
             'received_this_run','discovery_complete','discovery_partial','delivery_totals','penten_receipts','evening_inventory_receipt') if k in metrics}}
+    result['scheduled_slots']={}
+    for slot in ('morning','evening'):
+        execution=setting(store,'discovery_run:'+day+':'+slot)
+        evidence=setting(store,'discovery_metrics:'+day+':'+slot)
+        result['scheduled_slots'][slot]={
+            'execution':{k:execution[k] for k in ('day','slot','started_at','finished_at','state') if k in execution},
+            'outcome':{k:v for k,v in execution.get('result',{}).items() if k in
+                ('status','scan','requests','rent_requests','workflow_status','unresolved_critical','price_queue','email_status')},
+            'metrics':{k:evidence[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
+                'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state') if k in evidence}}
     row=store.execute('SELECT id,state,payload,provider_id,first_attempt_at,updated_at FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if row:
         payload=json.loads(row[2]);body=payload.get('text','')

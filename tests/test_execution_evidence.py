@@ -46,6 +46,18 @@ def test_scheduled_listing_receipt_exposes_counts_without_mail_content_or_identi
     assert 'private-' not in json.dumps(result)
 
 
+def test_evening_execution_is_not_substituted_by_a_closed_morning_receipt(store,clock):
+    day=clock().date().isoformat()
+    for slot,state in [('morning','partial'),('evening','processing')]:
+        store.save_setting('discovery_run:'+day+':'+slot,{'day':day,'slot':slot,'state':state,
+            'result':{'requests':2 if slot=='morning' else 0,'private':'hidden'}})
+    slots=snapshot(store,clock())['scheduled_slots']
+    assert slots['morning']['outcome']['requests']==2
+    assert slots['evening']['execution']['state']=='processing'
+    assert slots['evening']['outcome']['requests']==0
+    assert 'hidden' not in json.dumps(slots)
+
+
 def test_verification_only_report_never_claims_zero_market_opportunities():
     text,_=render('2026-11-14',[],{'discovery_state':'verification_only','discovery_complete':True},{'remaining':5},[])
     assert 'לא בוצעה בקשת מודעות חדשה' in text
