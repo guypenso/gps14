@@ -385,3 +385,21 @@ def test_scheduled_lock_timeout_is_an_explicit_failure(store):
             other.wait_for_scan_lock(1)
         assert other.execute('SHOW statement_timeout').fetchone()[0]=='30s'
     finally:other.close()
+
+
+@pytest.mark.parametrize('unobserved',[None,'','invalid',False,'2026-11-17T08:00:00'])
+def test_coverage_snapshot_handles_unqueried_or_invalid_retrieval_dates_without_writes(store,clock,monkeypatch,unobserved):
+    from rentalsourcing.partition_discovery import snapshot as coverage_snapshot
+    state={'partition':'pleasant-hills','last_success_at':unobserved,'offset':0,'query_complete':False,
+           'previous_query':{'offset':0,'last_success_at':'2026-11-17T06:02:29Z'}}
+    store.save_setting(PREFIX+'pleasant-hills',state)
+    original=store.execute
+    def readonly(sql,args=()):
+        assert sql.lstrip().upper().startswith('SELECT ')
+        return original(sql,args)
+    monkeypatch.setattr(store,'execute',readonly)
+    report=coverage_snapshot(store,clock())
+    partition=next(row for row in report['partitions'] if row.get('partition')=='pleasant-hills')
+    assert partition['coverage_age_seconds'] is None
+    assert partition['previous_query']==state['previous_query']
+    assert report['provider_calls']==0 and report['geographic_completeness']=='not_verified'

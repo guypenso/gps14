@@ -37,6 +37,27 @@ def test_quality_response_is_bounded_without_erasing_stored_evidence():
     assert len(json.dumps(result))<15000 and len(value['records'][0]['type']['evidence'])==10
 
 
+def test_scheduled_listing_receipt_exposes_counts_without_mail_content_or_identifiers(store,clock):
+    store.save_setting('listing_pre_report_receipt',{'day':'2026-11-17:evening','at':clock().isoformat(),'result':{'state':'partial',
+        'email':{'authorized_accounts':1,'results':[{'state':'success','messages_processed':1,'message_ids':['private-gmail-id'],
+        'body':'private-email-body','listing_results':[{'received':3,'new_unique_beyond_rentcast':1,'delivery_counts':{'inserted':1}}]}]}}})
+    result=snapshot(store,clock())['latest_listing_intake']
+    assert result['day']=='2026-11-17:evening' and result['runs'][0]['listing_results'][0]['delivery_counts']=={'inserted':1}
+    assert 'private-' not in json.dumps(result)
+
+
+def test_evening_execution_is_not_substituted_by_a_closed_morning_receipt(store,clock):
+    day=clock().date().isoformat()
+    for slot,state in [('morning','partial'),('evening','processing')]:
+        store.save_setting('discovery_run:'+day+':'+slot,{'day':day,'slot':slot,'state':state,
+            'result':{'requests':2 if slot=='morning' else 0,'private':'hidden'}})
+    slots=snapshot(store,clock())['scheduled_slots']
+    assert slots['morning']['outcome']['requests']==2
+    assert slots['evening']['execution']['state']=='processing'
+    assert slots['evening']['outcome']['requests']==0
+    assert 'hidden' not in json.dumps(slots)
+
+
 def test_verification_only_report_never_claims_zero_market_opportunities():
     text,_=render('2026-11-14',[],{'discovery_state':'verification_only','discovery_complete':True},{'remaining':5},[])
     assert 'לא בוצעה בקשת מודעות חדשה' in text

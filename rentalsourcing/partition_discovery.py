@@ -314,7 +314,9 @@ def snapshot(store, now):
         state = get(store, PREFIX + slug, {})
         entry={k: v for k, v in state.items() if k not in {'seen_ids'}}
         try:
-            at=dt.datetime.fromisoformat(state['last_success_at'].replace('Z','+00:00'))
+            observed=state.get('last_success_at')
+            if not isinstance(observed,str):raise ValueError('Partition has no successful retrieval yet')
+            at=dt.datetime.fromisoformat(observed.replace('Z','+00:00'))
             entry['coverage_age_seconds']=max(0,int((now-at).total_seconds()))
         except (KeyError,TypeError,ValueError):entry['coverage_age_seconds']=None
         entry['remaining_records_in_reported_total']=max(0,state['total']-state.get('offset',0)) if isinstance(state.get('total'),int) else None

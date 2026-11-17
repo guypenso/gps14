@@ -32,6 +32,13 @@ def queue_evidence_delivery(store,p,estimate,now):
         p,estimate=canonical,validated
     digest=hashlib.sha256((str(p.get('id'))+'|'+estimate['observed_at']+'|'+str(estimate['monthly'])).encode()).hexdigest()
     name='listing-contact-enrichment:rent:'+digest
+    previous=store.execute('SELECT payload FROM settings WHERE name=?',(name,)).fetchone()
+    old=json.loads(previous[0]) if previous else {}
+    # A legacy accepted batch did not retain the receiver's matched count.
+    # Reconcile that missing acknowledgment once using the same supported
+    # facts; never reacquire the AVM or reuse a receipt for an empty batch.
+    if old.get('done') and not old.get('last_delivery'):
+        name+=':ack-v2'
     value={'offset':0,'cursor':10000,'done':False,'batches':0,'source_ids':[p['id']],
            'reason':'validated_cached_or_acquired_rent_evidence','provider_calls':0}
     store.execute('INSERT INTO settings(name,payload) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(name,json.dumps(value)))
@@ -196,7 +203,7 @@ def job_summary(store):
 
 def evidence_summary(store,now):
     """Validated provider values only; no provider calls or cache mutations."""
-    records=[]
+    records=[];subjects={};identity_matches=0
     source_ids=set()
     for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ? OR name LIKE ?',('rentcast-long-term:%','rent-enrichment:%')).fetchall():
         saved=json.loads(raw)
@@ -204,6 +211,7 @@ def evidence_summary(store,now):
         if source_id:source_ids.add(source_id)
     for source_id in sorted(source_ids):
         saved=store.get_property(source_id)
+        direct=bool(saved)
         if not saved:
             row=store.execute('SELECT payload FROM settings WHERE name=?',('listing_identity:'+source_id,)).fetchone()
             item=json.loads(row[0]) if row else {}
@@ -211,14 +219,21 @@ def evidence_summary(store,now):
         if not saved:continue
         p=saved['payload'];value=cached_estimate(store,p,now)
         if value:
-            records.append({k:value[k] for k in ('source_id','source','method','monthly','low','high','observed_at','high_rent_candidate')}|
-                           {'address':p.get('formattedAddress'),'comparables':len(value['comparables'])})
+            identity_matches+=1;subject=identity(p)
+            entry={k:value[k] for k in ('source_id','source','method','monthly','low','high','observed_at','high_rent_candidate')}|{'address':p.get('formattedAddress'),'comparables':len(value['comparables']),'source_aliases':[source_id],'canonical_property_record':direct}
+            prior=subjects.get(subject)
+            if prior:
+                aliases=sorted(set(prior['source_aliases']+[source_id]))
+                if direct and not prior['canonical_property_record']:subjects[subject]=entry
+                subjects[subject]['source_aliases']=aliases
+            else:subjects[subject]=entry
+    records=list(subjects.values())
     resolutions=[json.loads(raw) for raw, in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('rent-delivery-resolution:%',)).fetchall()]
     for resolution in resolutions:
         job=store.execute('SELECT payload FROM settings WHERE name=?',(resolution.get('job_key',''),)).fetchone()
         delivery=json.loads(job[0]) if job else {}
         resolution['delivery_acknowledgment']=delivery.get('last_delivery')
         if delivery.get('done') and delivery.get('offset',0)>0 and ((delivery.get('last_delivery') or {}).get('matched') or 0)>0:resolution['state']='Completed'
-    return {'supported_estimates':len(records),'records':records[:25],'delivery_resolution':resolutions[:25],
+    return {'supported_estimates':len(records),'source_identity_matches':identity_matches,'records':records[:25],'delivery_resolution':resolutions[:25],
             'saved_estimates':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
             'jobs':job_summary(store),'provider_calls':0}
