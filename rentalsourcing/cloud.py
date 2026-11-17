@@ -379,7 +379,9 @@ def main(argv=None):
             from .reliability import begin
             begin(store,day,dt.datetime.now(dt.timezone.utc))
         boundary=load_boundary(settings.boundary_file)
-        if args.migrate:event('migrations_complete');return
+        if args.migrate:
+            store.bootstrap_listing_cache_index()
+            event('migrations_complete');return
         if catchup_requested and (args.catch_up_discovery or not scheduled_slot()):
             from .catch_up import run as catch_up
             result=catch_up(store,boundary,settings,day);event('catch_up_discovery',**result)

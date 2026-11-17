@@ -26,11 +26,9 @@ def funnel(store,boundary,now):
         counts['valid_tax_cache']+=1
         tax_state,_,_=tax_verification(cached[0],now.date())
         counts[{'Qualified':'tax_qualified','Rejected':'tax_rejected','Pending Verification':'tax_pending_cached'}[tax_state]]+=1
-    latest=None
-    for raw,source in store.execute('SELECT payload,source FROM response_cache').fetchall():
-        if source!=LIVE:continue
-        body=json.loads(raw)
-        if isinstance(body,dict) and isinstance(body.get('data'),list) and body.get('fetched_at') and (latest is None or body['fetched_at']>latest['fetched_at']):latest=body
+    # Historical 500-listing responses must never all be materialized by a
+    # health request. libpq buffers fetchall() before Python can release rows.
+    latest=store.latest_listing_response()
     discovery=None
     if latest:
         data=latest['data'];ids=[p.get('id') for p in data if isinstance(p,dict) and p.get('id')]
