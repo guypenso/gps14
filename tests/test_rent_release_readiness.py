@@ -87,10 +87,15 @@ def test_interrupted_persistence_recovers_cache_without_another_request_or_manua
     decision={'status':'missed_under_contract','reviewed_at':clock().isoformat()}
     store.save_setting('penten_review:'+p['id'],decision)
     url=ENDPOINT+'?'+urllib.parse.urlencode(sorted(parameters(p).items()))
-    store.cache_put(hashlib.sha256(url.encode()).hexdigest(),{'data':avm(p),'fetched_at':clock().isoformat(),'total':None},LIVE,(clock()+dt.timedelta(days=30)).isoformat())
+    observed=clock().isoformat()
+    store.cache_put(hashlib.sha256(url.encode()).hexdigest(),{'data':avm(p),'fetched_at':observed,'total':None},LIVE,(clock()+dt.timedelta(hours=6)).isoformat())
+    clock.advance(hours=22)
     assert store.execute('SELECT payload FROM settings WHERE name=?',(key(p),)).fetchone() is None
     outcome=enrich(store,boundary,settings,clock())
     assert outcome['cached']==1 and outcome['paid_calls']==0
     assert store.execute('SELECT payload FROM settings WHERE name=?',(key(p),)).fetchone()
+    assert cached_estimate(store,p,clock())['observed_at']==observed
     assert json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+p['id'],)).fetchone()[0])==decision
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    clock.advance(days=31)
+    assert cached_estimate(store,p,clock()) is None

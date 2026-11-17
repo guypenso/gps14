@@ -47,9 +47,12 @@ def cached_estimate(store,p,now,*,persist=False):
     if not row:
         try:
             url=ENDPOINT+'?'+urllib.parse.urlencode(sorted(parameters(p).items()))
-            existing=store.cache_get(hashlib.sha256(url.encode()).hexdigest(),now.isoformat())
+            # Older AVM responses accidentally inherited the six-hour negative
+            # tax TTL. Their original timestamp and our independent 30-day
+            # identity/evidence validator govern recovery, never a new date.
+            existing=store.execute('SELECT payload,source FROM response_cache WHERE key=?',(hashlib.sha256(url.encode()).hexdigest(),)).fetchone()
             if existing and existing[1]=='rentcast-live':
-                raw=existing[0].get('data',{});observed=existing[0].get('fetched_at','')
+                cached=json.loads(existing[0]);raw=cached.get('data',{});observed=cached.get('fetched_at','')
                 value=normalize(raw,p,observed,now)
                 if value and persist:store.save_setting(key(p),{'source':'RentCast','raw':raw,'observed_at':observed})
                 return value

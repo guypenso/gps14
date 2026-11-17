@@ -78,7 +78,9 @@ class Client:
                     if (path.startswith('/properties/') or path=='/avm/rent/long-term') and not isinstance(data,dict):raise ValueError('Property must be an object')
                 self.last_fetched_at=self.clock().isoformat()
                 if cache:
-                    expires=self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale' else tax_expiry(data,self.clock(),self.settings)
+                    expires=(self.clock()+dt.timedelta(minutes=self.settings.listing_cache_minutes) if path=='/listings/sale'
+                             else self.clock()+dt.timedelta(days=30) if path=='/avm/rent/long-term'
+                             else tax_expiry(data,self.clock(),self.settings))
                     self.store.cache_put(key,dict(data=data,total=total,fetched_at=self.last_fetched_at),LIVE,expires.isoformat())
                 self.store.execute('DELETE FROM api_attempts WHERE request_key=?',(key,))
                 event('rentcast_success',endpoint=path.split('/')[1],attempts=self.count)

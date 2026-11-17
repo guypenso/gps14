@@ -25,6 +25,17 @@ def resource_envelope(store):
         'tables':tables,'largest_setting_families':[{'family':f,'rows':n,'payload_bytes':b,'largest_payload_bytes':m} for f,n,b,m in families]}
 
 
+def memory_checkpoint(stage):
+    """Safe per-stage attribution of the observed 512 MiB exhaustion."""
+    import logging,resource
+    try:
+        from pathlib import Path
+        resident=int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
+    except (OSError,ValueError,IndexError):resident=None
+    logging.getLogger('rentalsourcing.reliability').info('RUNTIME_MEMORY '+json.dumps({'stage':stage,'resident_bytes':resident,
+        'peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}))
+
+
 def snapshot(store, settings, now):
     def saved(name):
         row=store.execute('SELECT payload FROM settings WHERE name=?',(name,)).fetchone()

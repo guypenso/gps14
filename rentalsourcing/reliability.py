@@ -263,6 +263,8 @@ def recover_listing_operations(store,now,opener=None,limit=1):
 def recover(store,boundary,now=None,opener=None):
  """Only saved sync operations; explicitly never sends emails or calls a listing provider."""
  now=now or dt.datetime.now(UTC);result={}
+ from .runtime_readiness import memory_checkpoint
+ memory_checkpoint('recovery_started')
  result['completed_job_reconciliation']=reconcile_completed_enrichment(store,now)
  result['completed_source_reconciliation']=reconcile_completed_source_refreshes(store,now)
  from .review_feedback import refresh
@@ -304,11 +306,13 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:result['reports']={'state':'deferred','category':type(e).__name__}
  from .price_sync import safe_flush
  result['prices']=safe_flush(store)
+ memory_checkpoint('feedback_reports_prices_completed')
  try:
   from .diagnostics import funnel
   store.save_setting('health_funnel',funnel(store,boundary,now))
  except Exception:pass
  pending_inventory(store,boundary,now,opener)
+ memory_checkpoint('inventory_completed')
  try:
   previous_audit=get(store,'health_last_audit',{})
   need_audit=not previous_audit or 'destination_review_statuses' not in previous_audit.get('result',{}).get('current_inventory',{}) or previous_audit.get('at','')<(now-dt.timedelta(minutes=55)).isoformat() or store.execute("SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL").fetchone()[0]>0
@@ -333,6 +337,7 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:result['health']={'state':'deferred','category':type(e).__name__}
  # Core feedback, inventory, roundtrip and health acknowledgments run first.
  result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
+ memory_checkpoint('recovery_completed')
  return result
 
 def start_watchdog(url,boundary):
