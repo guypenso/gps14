@@ -70,7 +70,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
    recent.append({'source_id':identity,'address':p.get('formattedAddress'),'observed_at':observed,'property_type':property_type_evidence(p),'source_state':source_state,'source_reasons':json.loads(source_reasons),'penten_decision':decisions.get(identity)})
  # The funnel's historical owner_review_deferred counter only includes uncached
  # records. Decisions remain authoritative even when a tax cache exists.
- owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store)
+ owner_deferred=sum(verification(json.loads(raw),boundary)[0]=='Candidate' and review_deferred(identity,store,reviews=decisions)
                     for identity,raw,source in store.execute('SELECT id,payload,source FROM properties').fetchall() if source==LIVE)
  from .schedule import ISRAEL
  local_day=now.astimezone(ISRAEL).date()
