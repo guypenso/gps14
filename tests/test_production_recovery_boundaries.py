@@ -96,3 +96,26 @@ def test_pending_price_delivery_prevents_successful_scheduled_window_claim(store
     monkeypatch.setattr('rentalsourcing.reliability.snapshot',lambda *a,**k:{'counts':counts,'incidents':[]})
     result=scheduled_window_outcome(store,'evening',clock().isoformat(),clock())
     assert result['current_window_critical']==result['unresolved_critical']==1
+
+
+def test_daily_inventory_retry_uses_existing_private_delivery_when_dashboard_sender_is_disabled(store,boundary,clock,monkeypatch):
+    from rentalsourcing.reliability import pending_inventory
+    from rentalsourcing.review_inventory import run
+    from rentalsourcing.collector import LIVE
+    from conftest import listing
+    identity='pending-delivery';p=listing(identity,formattedAddress='108 Fixture St, Pittsburgh, PA 15212')
+    store.save_property(identity,p,'Pending Verification',[],LIVE,1,clock().isoformat())
+    key='stored-review-inventory:future:private-dashboard-retry'
+    with pytest.raises(ValueError,match='Stored review delivery failed'):
+        run(store,boundary,clock(),execute=True,config=CONFIG,opener=Wire([error(429)]),job_key=key,include_verified=True,refresh_decisions=False)
+    before=get(store,key);assert before['delivery_scope']=='daily' and not before['synced_at']
+    report_id=json.loads(before['batches'][0]['payload'])['report_id']
+    monkeypatch.setattr('rentalsourcing.reliability.configuration',lambda:None)
+    monkeypatch.setattr('rentalsourcing.reliability.review_configuration',lambda:(CONFIG[0].rsplit('/',1)[0]+'/review-sync',CONFIG[1],CONFIG[2]))
+    receiver=Wire([{'accepted':True,'report_id':report_id,'counts':{'updated':1}}])
+    clock.advance(minutes=1);pending_inventory(store,boundary,clock(),receiver)
+    assert get(store,key)['synced_at'] and get(store,key)['receipt_counts']=={'updated':1}
+    assert get(store,key)['batches'][0]['payload']==before['batches'][0]['payload']
+    assert len(receiver.calls)==1 and receiver.calls[0].full_url.endswith('/review-reports')
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
