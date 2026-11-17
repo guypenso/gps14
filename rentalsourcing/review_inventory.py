@@ -4,7 +4,7 @@ from .config import Settings
 from .storage import Store
 from .database import validate_postgres_url
 from .geography import load_boundary
-from .core import verification,tax_verification
+from .core import verification,tax_verification,reviewable_state,geographic_verification
 from .collector import LIVE
 from .tax_backlog import review_deferred,previous_price,review_snapshot,current_tax_identities
 from .digest import listing_link,recent_timestamp
@@ -25,7 +25,11 @@ def select(store,boundary,now,*,source_ids=None,include_verified=False):
         counts['stored']+=1;p=json.loads(raw);state,reasons=verification(p,boundary)
         verified_tax=None;verified_fetched=None
         if state=='Rejected':counts['hard_rejected']+=1;continue
-        if source!=LIVE or state!='Candidate':counts['other_missing']+=1;continue
+        if source!=LIVE or not reviewable_state(state):counts['other_missing']+=1;continue
+        if state=='Pending Verification' and not (p.get('id')==identity and isinstance(p.get('formattedAddress'),str) and p['formattedAddress'].strip()
+                and p['formattedAddress'].lstrip()[0].isdigit() and str(p.get('zipCode') or '').split('-')[0].isdigit()
+                and len(str(p.get('zipCode') or '').split('-')[0])==5):counts['other_missing']+=1;continue
+        if state=='Pending Verification':counts['other_missing']+=1
         if review_deferred(identity,store,reviews=reviews):counts['owner_rejected']+=1;continue
         cached=store.get_tax(identity,now.isoformat()) if identity in tax_ids else None
         valid=cached and cached[1]==LIVE and isinstance(cached[0],dict) and cached[0].get('id')==identity and not demo_marked(cached[0])
@@ -33,16 +37,22 @@ def select(store,boundary,now,*,source_ids=None,include_verified=False):
             tax_state,tax,reason=tax_verification(cached[0],now.date())
             if tax_state=='Rejected':counts['tax_rejected']+=1;continue
             if tax_state=='Qualified':
-                counts['verified_tax']+=1
-                if not include_verified:continue
+                if state=='Candidate':
+                    counts['verified_tax']+=1
+                    if not include_verified:continue
                 verified_tax=tax;verified_fetched=cached[2]
         fresh=recent_timestamp(observed,now);counts['fresh' if fresh else 'stale']+=1
         first=store.execute('SELECT MIN(observed_at) FROM price_history WHERE property_id=?',(identity,)).fetchone()[0] or observed
-        muni=boundary.municipality(p) if hasattr(boundary,'municipality') else 'Bellevue Borough' if boundary.bellevue.contains(p) else 'Pittsburgh'
-        neighborhood='Brighton Heights' if boundary.brighton.contains(p) else 'Spring Hill-City View' if boundary.spring_hill.contains(p) else None
+        geo_confirmed=geographic_verification(p,boundary)[0]=='Candidate'
+        muni=(boundary.municipality(p) if hasattr(boundary,'municipality') else 'Bellevue Borough' if boundary.bellevue.contains(p) else 'Pittsburgh') if geo_confirmed else None
+        neighborhood=('Brighton Heights' if boundary.brighton.contains(p) else 'Spring Hill-City View' if boundary.spring_hill.contains(p) else None) if geo_confirmed else None
         from .condominium import evidence as condo_evidence
         card=dict(condominium_evidence=condo_evidence(p),latitude=p.get('latitude'),longitude=p.get('longitude'),source_id=identity,source='RentCast',source_label='RentCast Sale Listings',address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price=p.get('price'),bedrooms=p.get('bedrooms'),bathrooms=p.get('bathrooms'),square_feet=p.get('squareFootage'),annual_tax=None,tax_year=None,tax_status='pending_verification',qualification='pending_verification',section='pending_verification',previous_price=previous_price(store,identity,p.get('price')),listing_url=listing_link(p),reasons=['tax_verification_required']+([] if fresh else ['stale_listing_status_requires_refresh']),discovered_at=first,updated_at=observed,listing_observed_at=observed,verified_at=None,tax_fetched_at=None,last_reported_status=p.get('status'),municipality=muni,neighborhood=neighborhood)
-        if verified_tax and fresh:
+        if verified_tax:
+            card.update(annual_tax=verified_tax['annual'],tax_year=verified_tax['year'],tax_status='provider_verified',tax_source='RentCast Property Records',tax_fetched_at=verified_fetched)
+            card['reasons']=[reason for reason in card['reasons'] if reason!='tax_verification_required']
+        card['reasons']=list(dict.fromkeys(reasons+card['reasons']))
+        if verified_tax and fresh and state=='Candidate':
             card.update(annual_tax=verified_tax['annual'],tax_year=verified_tax['year'],tax_status='provider_verified',tax_source='RentCast Property Records',qualification='verified',section='new',reasons=[],verified_at=now.isoformat(),tax_fetched_at=verified_fetched)
         from .listing_enrichment import stored_evidence
         from .rental_intelligence import cached_estimate
@@ -98,10 +108,10 @@ def run(store,boundary,now,*,execute=False,download=False,config=None,opener=Non
         try:
             for card in json.loads(batch['payload'])['opportunities']:
                 current=store.get_property(card['source_id'])
-                if not current or verification(current['payload'],boundary)[0]!='Candidate':raise ValueError('Frozen candidate no longer passes non-tax rules; no import performed')
+                if not current or not reviewable_state(verification(current['payload'],boundary)[0]):raise ValueError('Frozen candidate no longer passes non-tax rules; no import performed')
                 if card.get('qualification')=='verified':
                     saved_tax=store.get_tax(card['source_id'],now.isoformat())
-                    if not saved_tax or saved_tax[1]!=LIVE or saved_tax[0].get('id')!=card['source_id'] or tax_verification(saved_tax[0],now.date())[0]!='Qualified' or not recent_timestamp(current['observed_at'],now):
+                    if verification(current['payload'],boundary)[0]!='Candidate' or not saved_tax or saved_tax[1]!=LIVE or saved_tax[0].get('id')!=card['source_id'] or tax_verification(saved_tax[0],now.date())[0]!='Qualified' or not recent_timestamp(current['observed_at'],now):
                         raise ValueError('Frozen candidate no longer passes verified freshness requirements; no import performed')
             from .sync_runtime import request_json
             report_id=json.loads(batch['payload'])['report_id']

@@ -15,6 +15,11 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def reviewable_state(state):
+    """Potential review is separate from fully verified investment eligibility."""
+    return state in ('Candidate','Pending Verification')
+
+
 def property_type_verification(row, *, single_family=False):
     """Structured use/attachment evidence only; architectural style is not a property type."""
     condo=condominium_evidence(row)
