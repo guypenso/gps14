@@ -58,6 +58,14 @@ def test_evening_execution_is_not_substituted_by_a_closed_morning_receipt(store,
     assert 'hidden' not in json.dumps(slots)
 
 
+def test_pending_enrichment_diagnostic_exposes_batch_shape_without_property_or_mail_content(store,clock):
+    store.save_setting('listing-contact-enrichment:fixture',{'offset':25,'cursor':50,'batches':1,
+        'inflight':{'records':1,'body':json.dumps({'cursor':50,'records':[{'description':'private listing evidence'}]})}})
+    report=snapshot(store,clock())['pending_enrichment_batches']
+    assert len(report)==1 and report[0]['wire_cursor']==50 and report[0]['wire_record_count']==1
+    assert 'private listing' not in json.dumps(report)
+
+
 def test_verification_only_report_never_claims_zero_market_opportunities():
     text,_=render('2026-11-14',[],{'discovery_state':'verification_only','discovery_complete':True},{'remaining':5},[])
     assert 'לא בוצעה בקשת מודעות חדשה' in text

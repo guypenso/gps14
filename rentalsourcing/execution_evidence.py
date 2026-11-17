@@ -64,6 +64,18 @@ def snapshot(store,now,boundary=None):
         'open_incident_count':len(incidents),'open_incidents':incidents[:20],
         'pending_price_observations':pending_prices,
         'pending_report_count':store.execute('SELECT COUNT(*) FROM command_center_reports WHERE synced_at IS NULL').fetchone()[0]}
+    enrichment=[]
+    for name,raw in store.execute('SELECT name,payload FROM settings WHERE name LIKE ?',('listing-contact-enrichment:%',)).fetchall():
+        job=json.loads(raw)
+        if job.get('done'):continue
+        frozen=job.get('inflight') or {}
+        try:batch=json.loads(frozen.get('body','{}'))
+        except (TypeError,ValueError):batch={}
+        enrichment.append({'job_key':name,'offset':job.get('offset'),'cursor':job.get('cursor'),'batches':job.get('batches'),
+            'frozen_records':frozen.get('records'),'wire_cursor':batch.get('cursor'),
+            'wire_record_count':len(batch.get('records',[])) if isinstance(batch.get('records'),list) else None,
+            'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
+    result['pending_enrichment_batches']=enrichment[:20]
     audit=setting(store,'health_last_audit')
     current=audit.get('result',{}).get('current_inventory',{})
     result['saved_inventory_audit']={'at':audit.get('at'),**{k:current[k] for k in
