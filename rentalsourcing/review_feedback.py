@@ -50,7 +50,7 @@ def _refresh(store,now=None,opener=None,config=None):
             elif prior.get('status')!=d.get('status'):
                 if d.get('reviewed_at') and prior.get('fetched_at') and dt.datetime.fromisoformat(d['reviewed_at'].replace('Z','+00:00'))>dt.datetime.fromisoformat(prior['fetched_at'].replace('Z','+00:00')):status_updates_after_previous_fetch+=1
                 else:older_status_mismatches+=1
-            fields=('status','reviewed_at','reviewed_by','contract_state','workflow_at','workflow_by')
+            fields=('status','reviewed_at','reviewed_by','contract_state','workflow_at','workflow_by','conditional_watch')
             if prior.get('status')=='rejected' and d['status']!='rejected':stale+=1;continue
             def parsed(value):
                 if not value:return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
@@ -68,7 +68,7 @@ def _refresh(store,now=None,opener=None,config=None):
                 applied+=1
             store.save_setting(name,dict(d,fetched_at=now.isoformat()))
         actual=[json.loads(store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()[0]) for identity in seen_ids]
-        store.save_setting('penten_review_feed',dict(fetched_at=now.isoformat(),decisions=len(seen_ids),snapshot_version=revision,decision_digest=hashlib.sha256(json.dumps([[r.get(k) for k in ('source_id','status','reviewed_at','reviewed_by','contract_state','workflow_at','workflow_by')] for r in sorted(actual,key=lambda r:r['source_id'])],ensure_ascii=False,separators=(',',':')).encode()).hexdigest(),applied=applied,unchanged=unchanged,stale_ignored=stale,status_updates_after_previous_fetch=status_updates_after_previous_fetch,older_status_mismatches=older_status_mismatches,new_source_identities=new_source_identities))
+        store.save_setting('penten_review_feed',dict(fetched_at=now.isoformat(),decisions=len(seen_ids),snapshot_version=revision,decision_digest=hashlib.sha256(json.dumps([[r.get(k) for k in ('source_id','status','reviewed_at','reviewed_by','contract_state','workflow_at','workflow_by')]+([r['conditional_watch']] if r.get('conditional_watch') else []) for r in sorted(actual,key=lambda r:r['source_id'])],ensure_ascii=False,separators=(',',':')).encode()).hexdigest(),applied=applied,unchanged=unchanged,stale_ignored=stale,status_updates_after_previous_fetch=status_updates_after_previous_fetch,older_status_mismatches=older_status_mismatches,new_source_identities=new_source_identities))
     from .sync_runtime import component
     component(store,'review_feedback','success',now=now,processed=len(seen_ids),recovery='reconciled')
     return {'state':'fresh','decisions':len(seen_ids),'applied':applied,'unchanged':unchanged,'stale_ignored':stale,'status_updates_after_previous_fetch':status_updates_after_previous_fetch,'older_status_mismatches':older_status_mismatches,'new_source_identities':new_source_identities,'snapshot_version':revision,'criteria_counts':result.get('criteria_counts',{})}

@@ -33,10 +33,10 @@ def review_deferred(identity,store=None,*,reviews=None):
     if hashlib.sha256(str(identity).encode()).hexdigest() in review_deferrals():return True
     if reviews is not None:
         decision=reviews.get(str(identity)) or {}
-        return decision.get('status')=='rejected' or decision.get('contract_state')=='terminated'
+        return decision.get('conditional_watch',{}).get('active') is True or decision.get('status')=='rejected' or decision.get('contract_state')=='terminated'
     if store:
         row=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+str(identity),)).fetchone()
-        if row and (json.loads(row[0]).get('status')=='rejected' or json.loads(row[0]).get('contract_state')=='terminated'):return True
+        if row and (json.loads(row[0]).get('conditional_watch',{}).get('active') is True or json.loads(row[0]).get('status')=='rejected' or json.loads(row[0]).get('contract_state')=='terminated'):return True
     return False
 
 
