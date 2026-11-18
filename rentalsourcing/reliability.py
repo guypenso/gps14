@@ -309,6 +309,17 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:result['reports']={'state':'deferred','category':type(e).__name__}
  from .price_sync import safe_flush
  result['prices']=safe_flush(store)
+ # Explicit owner-authorized isolated acceptance test; no provider or email paths.
+ acceptance_key='conditional_watch_acceptance:v1'
+ if review_configuration() and not get(store,acceptance_key):
+  u,k,t=review_configuration()
+  try:
+   def validate_watch_test(value,*args):
+    if value.get('accepted') is not True or value.get('passed') is not True or value.get('cleanup_completed') is not True:raise ValueError('Conditional watch acceptance incomplete')
+   body=json.dumps({'action':'controlled-acceptance-v1'},separators=(',',':')).encode()
+   result['conditional_watch_acceptance']=request_json(store,'conditional_watch_acceptance',acceptance_key,(u.rsplit('/',1)[0]+'/review-price-watch-acceptance',k,t),body,opener=opener,now=now,timeout=60,validate=validate_watch_test,poll=True)
+   store.save_setting(acceptance_key,result['conditional_watch_acceptance'])
+  except Exception as exc:result['conditional_watch_acceptance']={'state':'pending','error_type':type(exc).__name__}
  memory_checkpoint('feedback_reports_prices_completed')
  from .incident_batch_revalidation import run as revalidate_incident_batch
  result['incident_batch_revalidation']=revalidate_incident_batch(store,dt.datetime.now(UTC),opener)

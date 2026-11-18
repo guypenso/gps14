@@ -25,14 +25,14 @@ def money(value):
     if d!=d.to_integral_value() or d>=100000000000:return None
     return int(d)
 
-def enqueue(store,p,observed,detected,*,observation_id,previous=None,kind='snapshot',historical=False,eligible=True):
+def enqueue(store,p,observed,detected,*,observation_id,previous=None,kind='snapshot',historical=False,eligible=True,source_rejected=False):
     price=money(p.get('price'))
     if price is None and str(p.get('status','')).lower() not in ('active','sold','closed','under contract','under contract - show','active under contract','contingent','pending'):return False
     try:
         at=dt.datetime.fromisoformat(observed.replace('Z','+00:00'));when=dt.datetime.fromisoformat(detected.replace('Z','+00:00'))
         if not at.tzinfo or not when.tzinfo:return False
     except (ValueError,TypeError,AttributeError):return False
-    body=dict(source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price_cents=price,previous_cents=money(previous),observed_at=at.isoformat(),detected_at=when.isoformat(),observation_id=observation_id,kind=kind,historical=historical,listing_status=p.get('status'),non_tax_eligible=eligible)
+    body=dict(source='RentCast',source_id=p.get('id'),address=p.get('formattedAddress'),street_address=p.get('addressLine1'),unit=p.get('addressLine2'),city=p.get('city'),state=p.get('state'),zip_code=p.get('zipCode'),price_cents=price,previous_cents=money(previous),observed_at=at.isoformat(),detected_at=when.isoformat(),observation_id=observation_id,kind=kind,historical=historical,listing_status=p.get('status'),non_tax_eligible=eligible,source_rejected=source_rejected)
     semantic=('tracked-baseline' if observation_id.startswith('tracked-baseline:') else 'source')
     identity=hashlib.sha256((str(p.get('id'))+'|'+semantic+'|'+at.isoformat()+'|'+str(price)+'|'+str(p.get('status'))).encode()).hexdigest();key=PREFIX+identity
     old=store.execute('SELECT payload FROM settings WHERE name=?',(key,)).fetchone()

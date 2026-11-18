@@ -47,7 +47,7 @@ class Engine:
         self.store.save_property(identity,row,'Pending Verification' if state=='Candidate' else state,['tax_not_verified'] if state=='Candidate' else reasons,source,revision,when)
         if source==LIVE:
             from .price_sync import enqueue
-            enqueue(self.store,row,when,self.clock().isoformat(),observation_id=('history:'+f'{identity}:{revision}') if changed else 'snapshot:'+identity+':'+when,previous=previous,kind='price_change' if changed else 'snapshot',eligible=state=='Candidate')
+            enqueue(self.store,row,when,self.clock().isoformat(),observation_id=('history:'+f'{identity}:{revision}') if changed else 'snapshot:'+identity+':'+when,previous=previous,kind='price_change' if changed else 'snapshot',eligible=state=='Candidate',source_rejected=state=='Rejected')
         if changed:
             self.store.execute('INSERT INTO price_history VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
                (f'{identity}:{revision}',identity,price,previous,int(reduced),when))

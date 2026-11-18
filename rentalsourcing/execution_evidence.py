@@ -76,6 +76,7 @@ def snapshot(store,now,boundary=None):
             'wire_record_count':len(batch.get('records',[])) if isinstance(batch.get('records'),list) else None,
             'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
     result['pending_enrichment_batches']=enrichment[:20]
+    result['conditional_watch_acceptance']=setting(store,'conditional_watch_acceptance:v1')
     result['incident_batch_revalidation']=setting(store,'incident_batch_revalidation:20261117:v1')
     result['source_alias_reconciliation']=setting(store,'source_alias_reconciliation:confirmed-rejected-stored-v1')
     repaired=setting(store,'stored-review-inventory:2026-11-17:pending-evidence-routing-v2')
