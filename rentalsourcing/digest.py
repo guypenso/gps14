@@ -178,6 +178,7 @@ class Digest:
                 parsed=urllib.parse.urlsplit(cfg[0]);origin=parsed.scheme+'://'+parsed.netloc
                 subject,text,markup=investment_render(day,investment_plan,stats,origin)
                 body.update(subject=subject,text=text,html=markup)
+                ids=[]  # Legacy verified-event mail selections are not the change journal.
         if preview:body['preview_only']=True
         outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
         suppressed=bool(investment_plan is not None and not investment_plan['updates'] and os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary')=='suppress' and not preview)
@@ -342,7 +343,18 @@ class Digest:
             return 'cancelled_stale'
         frozen=self.store.execute('SELECT payload FROM command_center_reports WHERE outbox_id=?',(identity,)).fetchone()
         invalid=False
-        if frozen:
+        from .sync_runtime import get
+        manifest=get(self.store,'investment_digest:batch:'+identity)
+        if manifest is not None:
+            from .tax_backlog import review_deferred
+            for entry in manifest.get('updates',[]):
+                source_id=entry['source_id'];current=self.store.get_property(source_id)
+                if not current:
+                    saved=get(self.store,'listing_identity:'+source_id,{})
+                    current={'payload':saved['property']} if isinstance(saved.get('property'),dict) else None
+                if not current or not report_eligible(current['payload'],self.boundary) or review_deferred(source_id,self.store):invalid=True;break
+                if entry['kind'] in ('new','reactivated','price') and current['payload'].get('price')!=entry.get('price'):invalid=True;break
+        elif frozen:
             for card in json.loads(frozen[0]).get('opportunities',[]):
                 current=self.store.get_property(card.get('source_id')) if card.get('source_id') else None
                 if not current or not report_eligible(current['payload'],self.boundary):invalid=True;break

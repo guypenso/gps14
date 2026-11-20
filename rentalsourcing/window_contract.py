@@ -29,6 +29,7 @@ def outcome(stats,*,critical=0,source=None):
     for field in ('future_discovery','rental_intelligence','property_quality','evening_inventory_receipt'):
         if stats.get(field,{}).get('state') in ('pending_recovery','failed'):issues.append(field)
     if stats.get('listing_intake_state') in ('failed','not_configured') or source.get('requires_retry'):issues.append('free_source')
+    if stats.get('digest_identity_refresh')=='pending_recovery':issues.append('digest_identity_refresh')
     states={v.get('state') for v in stats.get('partitions',{}).values()}
     if states & {'source_blocked','retry_scheduled','request_deferred'}:issues.append('source_retrieval')
     failed=stats.get('discovery_state')=='failed' or bool(stats.get('error_type'))

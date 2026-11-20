@@ -164,3 +164,20 @@ def test_cached_free_source_acknowledgment_keeps_processing_proof_without_mail_b
     assert free_source_status(recovered)==free_source_status(original)
     assert free_source_status(recovered)['checked']
     assert 'email' not in recovered
+
+
+def test_change_digest_is_not_cancelled_by_unrelated_legacy_inventory_snapshot(store,boundary,settings,clock,monkeypatch):
+    from conftest import Provider
+    from rentalsourcing.digest import Digest
+    setup_candidate(store,clock)
+    cfg=('https://penten.example.test/api/rentalsourcing/review-sync','s'*40,'fixture')
+    monkeypatch.setattr('rentalsourcing.command_center.review_configuration',lambda:cfg)
+    monkeypatch.setattr('rentalsourcing.command_center.flush',lambda *a,**k:None)
+    wire=Provider([]);d=Digest(store,boundary,settings,clock,wire)
+    out=d.prepare('slot',clock().date().isoformat(),{'run_key':'multi-discovery:fixture'})
+    # A legacy destination export can contain another property that became
+    # ineligible; it must not change this frozen email's actual selection.
+    store.execute('UPDATE command_center_reports SET payload=? WHERE outbox_id=?',(json.dumps({'opportunities':[{'source_id':'unrelated'}]}),out))
+    assert d.send(out)=='sent'
+    assert len(wire.messages)==1 and 'opportunity=real-canonical' in wire.messages[0]['text']
+    assert d.send(out)=='already_sent' and len(wire.messages)==1

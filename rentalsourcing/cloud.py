@@ -152,8 +152,11 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
         error=classify(exc,operation='rental_enrichment');component(store,'rental_enrichment','partial',now=clock(),pending=1,error=error.safe());incident(store,'rental_enrichment',error.safe(),now=clock())
     from .future_discovery import process as process_future
     try:
-        stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None)
-        stats['supplemental_verification']=[process_future(store,boundary,j,clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None) for j in stats.get('supplemental_jobs',[])]
+        delivery_config=configuration()
+        if not delivery_config and feedback_config:
+            u,k,t=feedback_config;delivery_config=(u.rsplit('/',1)[0]+'/review-reports',k,t)
+        stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=delivery_config,opener=opener,new_since=stats.get('started_at') if slot else None)
+        stats['supplemental_verification']=[process_future(store,boundary,j,clock(),config=delivery_config,opener=opener,new_since=stats.get('started_at') if slot else None) for j in stats.get('supplemental_jobs',[])]
     except Exception as exc:
         stats['future_discovery']={'state':'pending_recovery','error_type':type(exc).__name__}
         error={'category':'future_inventory_processing','retryable':True}
@@ -219,6 +222,14 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
             event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
     store.save_setting('discovery_metrics:'+day+':morning',stats)
+    store.save_setting('window_stages:'+day+':morning',stats)
+    if feedback_config:
+        try:
+            from .review_feedback import refresh
+            stats['digest_identity_refresh']=refresh(store,clock(),opener,feedback_config).get('state')
+        except Exception as exc:
+            stats['digest_identity_refresh']='pending_recovery'
+            event('digest_identity_pending_recovery',error_type=type(exc).__name__)
     store.save_setting('window_stages:'+day+':morning',stats)
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
