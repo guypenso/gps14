@@ -181,3 +181,18 @@ def test_change_digest_is_not_cancelled_by_unrelated_legacy_inventory_snapshot(s
     assert d.send(out)=='sent'
     assert len(wire.messages)==1 and 'opportunity=real-canonical' in wire.messages[0]['text']
     assert d.send(out)=='already_sent' and len(wire.messages)==1
+
+
+def test_newer_realscout_price_evidence_is_not_replaced_by_an_older_rentcast_row(store,boundary,settings,clock,monkeypatch):
+    from conftest import Provider
+    from rentalsourcing.digest import Digest
+    p=setup_candidate(store,clock)
+    clock.advance(minutes=1)
+    store.save_setting('listing_identity:fixture',{'source_id':'fixture','property':{**p,'price':100000},'state':'Candidate','observed_at':clock().isoformat()})
+    cfg=('https://penten.example.test/api/rentalsourcing/review-sync','s'*40,'fixture')
+    monkeypatch.setattr('rentalsourcing.command_center.review_configuration',lambda:cfg)
+    monkeypatch.setattr('rentalsourcing.command_center.flush',lambda *a,**k:None)
+    wire=Provider([]);d=Digest(store,boundary,settings,clock,wire)
+    out=d.prepare('slot',clock().date().isoformat(),{'run_key':'multi-discovery:fixture'})
+    assert '$100,000' in json.loads(store.execute('SELECT payload FROM outbox WHERE id=?',(out,)).fetchone()[0])['text']
+    assert d.send(out)=='sent' and len(wire.messages)==1

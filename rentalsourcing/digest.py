@@ -349,9 +349,12 @@ class Digest:
             from .tax_backlog import review_deferred
             for entry in manifest.get('updates',[]):
                 source_id=entry['source_id'];current=self.store.get_property(source_id)
-                if not current:
-                    saved=get(self.store,'listing_identity:'+source_id,{})
-                    current={'payload':saved['property']} if isinstance(saved.get('property'),dict) else None
+                saved=get(self.store,'listing_identity:'+source_id,{})
+                if isinstance(saved.get('property'),dict) and saved['property'].get('id')==source_id:
+                    from .investment_digest import _time
+                    fallback=dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+                    if not current or (_time(saved.get('observed_at')) or fallback)>(_time(current.get('observed_at')) or fallback):
+                        current={'payload':saved['property'],'observed_at':saved.get('observed_at')}
                 if not current or not report_eligible(current['payload'],self.boundary) or review_deferred(source_id,self.store):invalid=True;break
                 if entry['kind'] in ('new','reactivated','price') and current['payload'].get('price')!=entry.get('price'):invalid=True;break
         elif frozen:

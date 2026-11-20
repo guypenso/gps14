@@ -53,7 +53,7 @@ def select(store,boundary,now):
         if not canonical:missing_canonical+=1;continue
         # A shared destination ID prevents counting another source as a new card.
         old=current.get(canonical)
-        if old and (old['observed_at'] or '')>=(observed or ''):continue
+        if old and (_time(old['observed_at']) or dt.datetime.min.replace(tzinfo=dt.timezone.utc))>=(_time(observed) or dt.datetime.min.replace(tzinfo=dt.timezone.utc)):continue
         from .rental_intelligence import cached_estimate
         rent=cached_estimate(store,p,now)
         cached=store.get_tax(source_id,now.isoformat());tax=None
