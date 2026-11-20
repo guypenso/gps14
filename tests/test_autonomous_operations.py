@@ -149,3 +149,18 @@ def test_digest_rejects_tax_evidence_for_a_different_subject(store,boundary,cloc
     store.save_tax('fixture',taxes('unrelated-property'),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
     plan=select(store,boundary,clock())
     assert plan['updates']==[]
+
+
+def test_cached_free_source_acknowledgment_keeps_processing_proof_without_mail_bodies(store,clock):
+    class Wire:
+        calls=0
+        def open(self,*a,**k):
+            self.calls+=1
+            return Response(free_result())
+    wire=Wire();cfg=('https://penten.example.test/api/rentalsourcing/offmarket-refresh','s'*40,'fixture')
+    original=request_json(store,'listing_pre_report','same-slot',cfg,b'{}',now=clock(),opener=wire)
+    recovered=request_json(store,'listing_pre_report','same-slot',cfg,b'{}',now=clock(),opener=wire)
+    assert wire.calls==1
+    assert free_source_status(recovered)==free_source_status(original)
+    assert free_source_status(recovered)['checked']
+    assert 'email' not in recovered

@@ -11,6 +11,7 @@ CRITICAL_COMPONENTS={'review_feedback','property_sync','inventory_sync','price_s
 
 
 def free_source_status(result):
+    if isinstance(result.get('source_processing'),dict):return result['source_processing']
     runs=(result.get('email') or {}).get('results') or []
     transport=bool(runs) and all(r.get('state') in ('success','skipped') and not r.get('failed') and not r.get('more') and not r.get('pending_reparse') for r in runs)
     holds=sum(r.get('unresolved_listing_blocks',0) for r in runs)
