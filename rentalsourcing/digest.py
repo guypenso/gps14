@@ -168,13 +168,30 @@ class Digest:
         body=dict(from_=self.settings.email_from,to=[self.settings.email_to],
                   subject=f'RentalSourcing | {day} | {status}',text=text,html=markup)
         body['from']=body.pop('from_')
+        investment_plan=None
+        if stats.get('run_key','').startswith('multi-discovery:'):
+            from .investment_digest import select as investment_selection,render as investment_render
+            from .command_center import review_configuration
+            cfg=review_configuration() or __import__('rentalsourcing.command_center',fromlist=['configuration']).configuration()
+            if cfg:
+                investment_plan=investment_selection(self.store,self.boundary,self.clock())
+                parsed=urllib.parse.urlsplit(cfg[0]);origin=parsed.scheme+'://'+parsed.netloc
+                subject,text,markup=investment_render(day,investment_plan,stats,origin)
+                body.update(subject=subject,text=text,html=markup)
         if preview:body['preview_only']=True
         outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
+        suppressed=bool(investment_plan is not None and not investment_plan['updates'] and os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary')=='suppress' and not preview)
         with self.store.transaction():
             self.store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING',
                 (outbox_id,digest_day,'pending',json.dumps(body),json.dumps(ids),None,None,self.clock().isoformat()))
             for identity in ids:self.store.execute("UPDATE deal_events SET state='queued' WHERE id=? AND state='ready'",(identity,))
-            if not preview:
+            if investment_plan is not None:
+                from .investment_digest import freeze
+                freeze(self.store,outbox_id,investment_plan)
+                if suppressed:
+                    self.store.execute("UPDATE outbox SET state='suppressed' WHERE id=? AND first_attempt_at IS NULL",(outbox_id,))
+                    for identity in ids:self.store.execute("UPDATE deal_events SET state='ready' WHERE id=? AND state='queued'",(identity,))
+            if not preview and not suppressed:
                 from .command_center import snapshot
                 snapshot(self.store,outbox_id,day,items,stats,self.clock(),boundary=self.boundary)
         return outbox_id
@@ -284,6 +301,9 @@ class Digest:
         finally:
             if self.store.pg:self.store.execute('SELECT pg_advisory_unlock(73541211)')
         if result in {'sent','already_sent'}:
+            with self.store.transaction():
+                from .investment_digest import acknowledge
+                acknowledge(self.store,identity,self.clock())
             try:
                 from .command_center import flush
                 flush(self.store,self.clock())
@@ -299,6 +319,7 @@ class Digest:
         state,body,event_ids,first=row
         if json.loads(body).get('preview_only'):raise PermissionError('Offline preview cannot be sent')
         if state=='sent':return 'already_sent'
+        if state=='suppressed':return 'suppressed'
         if state=='cancelled':return 'cancelled_stale'
         if state=='failed':raise ValueError('Correct rejected email configuration; events are eligible for the next daily digest')
         now=self.clock()
@@ -391,3 +412,5 @@ class Digest:
         with self.store.transaction():
             self.store.execute("UPDATE outbox SET state='sent',provider_id=?,updated_at=? WHERE id=?",(provider_id,self.clock().isoformat(),identity))
             for e in json.loads(row[0]):self.store.execute("UPDATE deal_events SET state='sent' WHERE id=?",(e,))
+            from .investment_digest import acknowledge
+            acknowledge(self.store,identity,self.clock())

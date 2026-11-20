@@ -77,8 +77,11 @@ def listing_limit_now(settings, now):
     if not window or not active(settings, now):
         return 0
     slots = tuple(_slots(*window))
-    elapsed = sum(slot <= now for slot in slots)
-    return math.ceil(limits(settings)['listing'] * elapsed / len(slots)) if slots else 0
+    # Morning-first weighted release: most days retain a morning page, while
+    # evening pages and any unused allowance remain available within the cap.
+    weight=lambda slot: 5 if slot.astimezone(ISRAEL).hour==8 else 1
+    elapsed = sum(weight(slot) for slot in slots if slot <= now)
+    return math.ceil(limits(settings)['listing'] * elapsed / sum(map(weight,slots))) if slots else 0
 
 
 def rent_limit_now(settings, now):

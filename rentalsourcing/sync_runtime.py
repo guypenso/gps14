@@ -162,6 +162,9 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
    if error.category in ('authentication','configuration','endpoint_redirect','response_signature') or error.http_status in (404,415):store.save_setting('sync_circuit:'+name,{'blocked':True,'configuration':fingerprint,'error':error.safe()})
    incident(store,name,error.safe(),now=stamp)
    ledger['consecutive_failures']=ledger.get('consecutive_failures',0)+1
+   if error.retryable and ledger['consecutive_failures']>=12:
+    error=SyncFailure('retry_exhausted:'+error.category,error.http_status,False,endpoint,identity)
+    incident(store,name,error.safe(),now=stamp)
    delay=min(300,max(5,2**min(ledger['consecutive_failures'],8)))
    retry_after=getattr(exc,'headers',None)
    if retry_after:

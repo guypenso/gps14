@@ -129,7 +129,9 @@ def cache_program_contacts(store,result):
 def next_source_refresh(now,result):
  """Existing worker drains bounded pages, then checks again before the report."""
  from .schedule import ISRAEL
- if result.get('state')=='partial':return (now+dt.timedelta(minutes=5)).isoformat()
+ if result.get('state')=='partial':
+  from .window_contract import free_source_status
+  if free_source_status(result)['requires_retry']:return (now+dt.timedelta(minutes=5)).isoformat()
  local=now.astimezone(ISRAEL)
  cutoff=local.replace(hour=7,minute=45,second=0,microsecond=0)
  if cutoff<=local:cutoff+=dt.timedelta(days=1)

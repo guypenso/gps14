@@ -16,7 +16,7 @@ from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v4'
+VERSION = 'multi-partition-v5'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -176,7 +176,8 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     # capacity every area gets a first turn, then Pittsburgh gets extra pages.
     if not special:
         if weighted:
-            eligible.sort(key=lambda slug: (states[slug].get('selection_pages', 0) / (2 if slug == MAIN else 1), ORDER.index(slug)))
+            from .coverage_strategy import rank
+            eligible.sort(key=lambda slug: rank(slug,states[slug],now,ORDER))
         else:
             eligible.sort(key=lambda slug: (states[slug].get('last_success_at') or '', ORDER.index(slug)))
     first_turns = list(eligible)
@@ -215,6 +216,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
         if job_id not in report['job_ids']:
             report['job_ids'].append(job_id)
         request_before = client.count
+        before_page={r[0]:(r[1],r[2]) for r in store.execute('SELECT id,revision,state FROM properties').fetchall()}
         offset_before = state['offset']
         state['last_attempt_at'] = clock().isoformat()
         attempts += 1
@@ -244,6 +246,14 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             state['observations'] = state.get('observations', 0) + received
             state['duplicate_observations'] = state.get('duplicate_observations', 0) + duplicates
             state['changed_observations'] = state.get('changed_observations', 0) + changed
+            after_page={r[0]:(r[1],r[2]) for r in store.execute('SELECT id,revision,state FROM properties').fetchall()}
+            page_ids={r.get('id') for r in getattr(client,'last_rows',[]) if isinstance(r,dict) and r.get('id')}
+            perf=state.setdefault('performance',{'requests':0,'records':0,'new_identities':0,'new_reviewable':0,'known_identities':0,'price_updates':0})
+            perf['requests']+=client.count-request_before;perf['records']+=received
+            perf['new_identities']+=len(page_ids-before_page.keys());perf['known_identities']+=len(page_ids&before_page.keys())
+            perf['new_reviewable']+=sum(i not in before_page and after_page.get(i,(0,'Rejected'))[1]!='Rejected' for i in page_ids)
+            perf['price_updates']+=sum(i in before_page and after_page.get(i,(0,None))[0]!=before_page[i][0] for i in page_ids)
+            state['selection_policy']='freshness-fairness-yield-v1'
             if state['query_complete']:
                 state['last_complete_at'] = clock().isoformat()
                 eligible.remove(slug)

@@ -146,7 +146,10 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
                  if settings.enabled and settings.approval_mode=='monthly_budget'
                  and not settings.supplemental_requests and cycle_grant_active(settings,clock())
                  and os.getenv('ENABLE_RENT_ESTIMATES','false').lower()=='true' else None)
-    stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),rent_client)
+    try:stats['rental_intelligence']=enrich_rent(store,boundary,settings,clock(),rent_client)
+    except Exception as exc:
+        stats['rental_intelligence']={'state':'pending_recovery','error_type':type(exc).__name__}
+        error=classify(exc,operation='rental_enrichment');component(store,'rental_enrichment','partial',now=clock(),pending=1,error=error.safe());incident(store,'rental_enrichment',error.safe(),now=clock())
     from .future_discovery import process as process_future
     try:
         stats['future_discovery']=process_future(store,boundary,locals().get('scan_job','daily:'+day),clock(),config=configuration(),opener=opener,new_since=stats.get('started_at') if slot else None)
@@ -171,6 +174,8 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
         try:
             source_result=sync_before_report(store,day+(":evening" if slot=="evening" else ""),clock(),opener)
             stats['listing_intake_state']=source_result.get('state')
+            from .window_contract import free_source_status
+            stats['free_source']=free_source_status(source_result)
             if source_result.get('state')=='partial':stats['partial']=True
             event('listing_pre_report',state=source_result.get('state'))
         except Exception as exc:
@@ -183,8 +188,12 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             from .digest import recent_timestamp
             fresh_ids={i for i,observed in store.execute('SELECT id,observed_at FROM properties').fetchall() if recent_timestamp(observed,clock())}
             u,k,t=feedback_config
-            receipt=deliver(store,boundary,clock(),execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='evening-inventory:'+day,source_ids=fresh_ids,include_verified=True)
-            stats['evening_inventory_receipt']=receipt.get('receipt_counts',{})
+            try:
+                receipt=deliver(store,boundary,clock(),execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='evening-inventory:'+day,source_ids=fresh_ids,include_verified=True)
+                stats['evening_inventory_receipt']=receipt.get('receipt_counts',{})
+            except Exception as exc:
+                stats['evening_inventory_receipt']={'state':'pending_recovery','error_type':type(exc).__name__}
+                error=classify(exc,operation='inventory_sync');component(store,'inventory_sync','partial',now=clock(),pending=1,error=error.safe());incident(store,'inventory_sync',error.safe(),now=clock())
         # The same stored-only quality/enrichment audit precedes either digest or evening completion.
         if feedback_config:
             try:
@@ -196,6 +205,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
                 stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
                 event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
         store.save_setting('discovery_metrics:'+day+':evening',stats)
+        store.save_setting('window_stages:'+day+':evening',stats)
         return dict(status='evening_no_email',outbox_id=None,scan=stats.get('discovery_state','failed'),requests=client.count if client else 0,
                     rent_requests=rent_client.count if rent_client else 0,error=failure)
     # The same stored-only quality/enrichment audit precedes either digest or evening completion.
@@ -209,6 +219,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             stats.update(partial=True,property_quality={'state':'pending_recovery','error_type':type(exc).__name__})
             event('property_quality_pending_recovery',slot=slot,error_type=type(exc).__name__)
     store.save_setting('discovery_metrics:'+day+':morning',stats)
+    store.save_setting('window_stages:'+day+':morning',stats)
     message=digest.prepare(locals().get('scan_job','daily:'+day),day,stats)
     result=digest.send(message) if message and settings.email_enabled else 'prepared_not_sent'
     from .command_center import review_configuration
@@ -255,7 +266,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
             stage(store,day,name,'failed' if result.get('error') else 'success',clock(),processed=stats.get('received_this_run',stats.get('received',0)))
         tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
         stage(store,day,'tax_verification','partial' if tax else 'success',clock(),pending=tax,expected=True,coverage='Pending evidence remains unverified; API approval limits preserved')
-        if slot!='evening':stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent') else 1)
+        if slot!='evening':stage(store,day,'email_delivery','success' if result.get('status') in ('sent','already_sent','suppressed') else 'failed',clock(),processed=1 if result.get('status') in ('sent','already_sent') else 0,pending=0 if result.get('status') in ('sent','already_sent','suppressed') else 1)
         status=finish(store,day,clock());result['workflow_status']=status;result['email_status']=result.get('status')
         from .price_sync import queue_counts
         result['price_queue']=queue_counts(store)
@@ -265,16 +276,29 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
         result['workflow_status']=finish(store,day,clock())
         current=snapshot(store,clock());result['unresolved_critical']=current['counts']['pending_reports']+current['counts']['pending_operations']+current['counts']['dead_letters']+current['counts']['pending_inventory_jobs']+len([i for i in current['incidents'] if i['state']=='open'])
         if slot:
-            closed={'slot':slot,'day':day,'started_at':run_started,'finished_at':clock().isoformat(),'state':result['workflow_status']}
+            closed={'build_sha':os.getenv('RENDER_GIT_COMMIT'),'slot':slot,'day':day,'started_at':run_started,'finished_at':clock().isoformat(),'state':result['workflow_status']}
             store.save_setting(run_key,{**closed,'result':result})
             from .reliability import scheduled_window_outcome
             result.update(scheduled_window_outcome(store,slot,run_started,clock()))
+            from .window_contract import outcome
+            window_stats=get(store,'window_stages:'+day+':'+slot,stats)
+            result['processing_outcome']=outcome(window_stats,critical=result['current_window_critical'])
+            result['exit_failure']=result['processing_outcome']['exit_failure']
+            result['legacy_workflow_status']=result['workflow_status']
+            result['workflow_status']='success' if result['processing_outcome']['state'] in {'fresh','free_source','paced'} else result['processing_outcome']['state']
+            closed['state']=result['workflow_status']
             store.save_setting(run_key,{**closed,'result':result})
         event('discovery_slot_result',slot=slot or 'morning',day=day,**result)
         return result
     except Exception as exc:
         from .sync_runtime import classify
         error=classify(exc,operation='daily-workflow');stage(store,day,'email_delivery' if 'Resend' in type(exc).__name__ else 'daily_workflow','failed',clock(),error=error.safe());finish(store,day,clock())
+        if slot:
+            from .window_contract import outcome
+            failed_stats=get(store,'window_stages:'+day+':'+slot,get(store,'multi-discovery:'+day+':'+slot,{}))
+            contract=outcome({**failed_stats,'error_type':type(exc).__name__},critical=1)
+            store.save_setting(run_key,{'build_sha':os.getenv('RENDER_GIT_COMMIT'),'slot':slot,'day':day,'started_at':run_started,'finished_at':clock().isoformat(),'state':contract['state'],
+                'result':{'error':error.safe(),'processing_outcome':contract,'exit_failure':True}})
         try:publish(store,clock(),opener=opener)
         except Exception:pass
         raise
@@ -426,7 +450,7 @@ def main(argv=None):
         if args.reconcile_email:digest.reconcile(args.reconcile_email,args.provider_message_id);return
         if args.scheduled:
             result=daily_discovery(store,boundary,settings,day,slot=scheduled_slot()[1]);event('daily_discovery_result',**result)
-            if result.get('current_window_critical',result.get('unresolved_critical')) or result.get('workflow_status')=='failed':raise SystemExit(2)
+            if result.get('exit_failure',bool(result.get('current_window_critical',result.get('unresolved_critical')) or result.get('workflow_status')=='failed')):raise SystemExit(2)
             return
         store.save_setting('runtime',settings.public())
         store.save_setting('recipient',{'email_to':settings.email_to,'email_from':settings.email_from})

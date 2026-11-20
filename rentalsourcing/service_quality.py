@@ -28,7 +28,7 @@ def snapshot(store,now,days=7):
             delivery_ok=bool(needs_ack<=acknowledged and deliveries.get('new_pending',0)+deliveries.get('new_qualified',0)<=needs_ack)
             fresh=bool(complete and discovery.get('fresh_request_made') and discovery.get('requests_consumed',0)>0 and discovery.get('pages'))
             windows.append({'day':day,'slot':slot,'at_israel':scheduled.isoformat(),
-                'execution':run.get('state','missing'),'receipt_current':current,'receipts_complete':complete,
+                'processing_outcome':run.get('result',{}).get('processing_outcome',{}),'execution':run.get('state','missing'),'receipt_current':current,'receipts_complete':complete,
                 'discovery':discovery.get('discovery_state','missing'),'fresh_provider_discovery':fresh,
                 'requests':discovery.get('requests_consumed',0),'pages':len(discovery.get('pages',[])),
                 'records':discovery.get('received_this_run',0),'new_source_identities':deliveries.get('new_source_listings',0),
