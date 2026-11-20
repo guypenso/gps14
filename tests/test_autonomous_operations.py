@@ -44,7 +44,7 @@ def test_retries_escalate_after_twelve_consecutive_failures_preserving_payload(s
     for _ in range(4):
         with pytest.raises(SyncFailure):request_json(store,'inventory_sync','same',cfg,b'{"stable":true}',now=clock(),opener=Down(),sleeper=lambda _:None)
         clock.advance(minutes=6)
-    ops=[json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE 'sync_operation:%'").fetchall()]
+    ops=[json.loads(r[0]) for r in store.execute("SELECT payload FROM settings WHERE name LIKE ?",('sync_operation:%',)).fetchall()]
     assert len(ops)==1 and ops[0]['state']=='dead_letter' and ops[0]['consecutive_failures']==12
     assert ops[0]['digest']==hashlib.sha256(b'{"stable":true}').hexdigest()
     assert ops[0]['error']['category']=='retry_exhausted:timeout'

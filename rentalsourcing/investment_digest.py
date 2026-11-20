@@ -25,10 +25,10 @@ def _after(value,since,now):
 
 
 def select(store,boundary,now):
-    prior=store.execute("SELECT updated_at FROM outbox WHERE job_id LIKE 'daily:%' AND state='sent' ORDER BY updated_at DESC LIMIT 1").fetchone()
+    prior=store.execute("SELECT updated_at FROM outbox WHERE job_id LIKE ? AND state='sent' ORDER BY updated_at DESC LIMIT 1",('daily:%',)).fetchone()
     since=_time(prior[0]) if prior else now-dt.timedelta(days=1)
     estimates=get(store,'public_tax_batch:2026',{}).get('estimates',{})
-    reviews={name[len('penten_review:'):]:json.loads(raw) for name,raw in store.execute("SELECT name,payload FROM settings WHERE name LIKE 'penten_review:%'").fetchall()}
+    reviews={name[len('penten_review:'):]:json.loads(raw) for name,raw in store.execute("SELECT name,payload FROM settings WHERE name LIKE ?",('penten_review:%',)).fetchall()}
     # Current inventory only, never historical sync-operation bodies. Streaming
     # avoids an unbounded historical-ledger materialization.
     current={};candidates=[];missing_canonical=0
@@ -41,7 +41,7 @@ def select(store,boundary,now):
         if len(rows)>=2000:break
     source_rows=[(i,json.loads(raw),state,observed) for i,raw,state,observed in rows]
     # RealScout's durable identities are independent of RentCast capacity.
-    for raw, in store.execute("SELECT payload FROM settings WHERE name LIKE 'listing_identity:%' ORDER BY name LIMIT 2000").fetchall():
+    for raw, in store.execute("SELECT payload FROM settings WHERE name LIKE ? ORDER BY name LIMIT 2000",('listing_identity:%',)).fetchall():
         r=json.loads(raw)
         if r.get('canonical_source_id') or not isinstance(r.get('property'),dict):continue
         source_rows.append((r['source_id'],r['property'],r.get('state'),r.get('observed_at')))
