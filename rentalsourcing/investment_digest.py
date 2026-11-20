@@ -6,6 +6,7 @@ advance their change watermark only after confirmed email acceptance. No network
 import datetime as dt,hashlib,html,json,os,urllib.parse
 from .sync_runtime import get
 from .core import verification
+from .collector import LIVE
 from .digest import recent_timestamp
 
 PREFIX='investment_digest:'
@@ -56,12 +57,13 @@ def select(store,boundary,now):
         from .rental_intelligence import cached_estimate
         rent=cached_estimate(store,p,now)
         cached=store.get_tax(source_id,now.isoformat());tax=None
-        if cached:
+        from .provenance import demo_marked
+        if cached and cached[1]==LIVE and cached[0].get('id')==source_id and not demo_marked(cached[0]):
             from .core import tax_verification
             tax_state,t,_=tax_verification(cached[0],now.date())
             if tax_state=='Qualified' and t:tax={'state':'verified','annual':t['annual'],'year':t['year'],'observed_at':cached[2]}
         estimate=estimates.get(source_id,{})
-        if not tax and estimate.get('state')=='estimated':tax={'state':'estimated','annual':estimate['annual'],'year':estimate['year'],'observed_at':estimate.get('retrieved_at')}
+        if not tax and estimate.get('state')=='estimated' and estimate.get('match_status')=='unique_parcel' and estimate.get('sources'):tax={'state':'estimated','annual':estimate['annual'],'year':estimate['year'],'observed_at':estimate.get('retrieved_at')}
         facts={'rent':rent['monthly'] if rent else None,'tax':{k:tax[k] for k in ('state','annual','year')} if tax else None,'status':p.get('status')}
         current[canonical]={'source_id':source_id,'canonical':canonical,'address':p.get('formattedAddress'),
             'price':p.get('price'),'observed_at':observed,'review':review,'rent':rent,'tax':tax,'facts':facts}

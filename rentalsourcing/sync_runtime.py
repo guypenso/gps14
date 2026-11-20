@@ -61,6 +61,10 @@ class SyncFailure(RuntimeError):
 
 def classify(exc,endpoint=None,operation=None):
  if isinstance(exc,SyncFailure):return exc
+ sqlstate=getattr(exc,'sqlstate',None)
+ if sqlstate in {'57014','55P03','40001','40P01'} or isinstance(sqlstate,str) and sqlstate.startswith('08'):
+  return SyncFailure('database_temporary',None,True,endpoint,operation)
+ if isinstance(sqlstate,str) and sqlstate.startswith('23'):return SyncFailure('database_integrity',None,False,endpoint,operation)
  status=getattr(exc,'code',None)
  if isinstance(exc,urllib.error.HTTPError):
   if status in (301,302,307,308):return SyncFailure('endpoint_redirect',status,False,endpoint,operation)

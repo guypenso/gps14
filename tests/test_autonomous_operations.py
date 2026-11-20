@@ -131,3 +131,21 @@ def test_explicit_empty_suppression_creates_no_unsent_sync_or_email(store,bounda
     assert store.execute('SELECT COUNT(*) FROM command_center_reports').fetchone()[0]==0
     assert d.send(out)=='suppressed'
     assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+
+
+def test_database_transience_does_not_masquerade_as_permanent_provider_contract():
+    from rentalsourcing.sync_runtime import classify
+    class DatabaseError(Exception):pass
+    for code in ['57014','55P03','40001','40P01','08006']:
+        err=DatabaseError();err.sqlstate=code
+        assert classify(err).category=='database_temporary' and classify(err).retryable
+    err=DatabaseError();err.sqlstate='23505'
+    assert classify(err).category=='database_integrity' and not classify(err).retryable
+
+
+def test_digest_rejects_tax_evidence_for_a_different_subject(store,boundary,clock):
+    from conftest import taxes
+    setup_candidate(store,clock,discovered=(clock()-dt.timedelta(days=4)).isoformat())
+    store.save_tax('fixture',taxes('unrelated-property'),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=1)).isoformat())
+    plan=select(store,boundary,clock())
+    assert plan['updates']==[]
