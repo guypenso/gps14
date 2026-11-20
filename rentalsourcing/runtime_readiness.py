@@ -68,6 +68,8 @@ def snapshot(store, settings, now):
             'settings':settings.public(),'provider_calls':0,'email_sends':0,'read_only':True,
             'resource_envelope':resource_envelope(store),
             'budget':store.budget_health(settings,now,record_warning=False),
+            'coverage_model':__import__('rentalsourcing.coverage_strategy',fromlist=['model']).model(settings,now),
+            'reliability_acceptance':__import__('rentalsourcing.reliability_acceptance',fromlist=['snapshot']).snapshot(store,now),
             'monthly_allocation':allocation(store,settings,now),'ledger':ledger,
             'next_slots':dates[:4],'coverage':coverage(store,now),'scheduled_slots':slots,
             'source_records':store.execute('SELECT COUNT(*) FROM properties').fetchone()[0],

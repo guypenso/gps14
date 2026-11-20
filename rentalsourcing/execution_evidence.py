@@ -21,7 +21,7 @@ def snapshot(store,now,boundary=None):
     run=setting(store,'discovery_run:'+day+':morning')
     metrics=setting(store,'discovery_metrics:'+day+':morning')
     result={'day':day,'as_of':now.isoformat(),'provider_calls':0,'qualification_changed':False,
-        'scheduled_run':{k:run[k] for k in ('day','slot','started_at','finished_at','state') if k in run},
+        'scheduled_run':{k:run[k] for k in ('build_sha','day','slot','started_at','finished_at','state') if k in run},
         'result':{k:v for k,v in run.get('result',{}).items() if k in
             ('status','scan','requests','error','workflow_status','outbox_id','unresolved_critical','price_queue')},
         'morning_metrics':{k:metrics[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
@@ -31,9 +31,9 @@ def snapshot(store,now,boundary=None):
         execution=setting(store,'discovery_run:'+day+':'+slot)
         evidence=setting(store,'discovery_metrics:'+day+':'+slot)
         result['scheduled_slots'][slot]={
-            'execution':{k:execution[k] for k in ('day','slot','started_at','finished_at','state') if k in execution},
+            'execution':{k:execution[k] for k in ('build_sha','day','slot','started_at','finished_at','state') if k in execution},
             'outcome':{k:v for k,v in execution.get('result',{}).items() if k in
-                ('status','scan','requests','rent_requests','workflow_status','unresolved_critical','price_queue','email_status')},
+                ('status','scan','processing_outcome','exit_failure','requests','rent_requests','workflow_status','unresolved_critical','price_queue','email_status')},
             'metrics':{k:evidence[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
                 'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state') if k in evidence}}
     row=store.execute('SELECT id,state,payload,provider_id,first_attempt_at,updated_at FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
@@ -76,6 +76,8 @@ def snapshot(store,now,boundary=None):
             'wire_record_count':len(batch.get('records',[])) if isinstance(batch.get('records'),list) else None,
             'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
     result['pending_enrichment_batches']=enrichment[:20]
+    result['reliability_acceptance']=setting(store,'reliability_acceptance:last')
+    result['investment_digest_preview']=setting(store,'investment_digest:production_preview:v1')
     result['conditional_watch_acceptance']=setting(store,'conditional_watch_acceptance:v1')
     result['incident_batch_revalidation']=setting(store,'incident_batch_revalidation:20261117:v1')
     result['source_alias_reconciliation']=setting(store,'source_alias_reconciliation:confirmed-rejected-stored-v1')

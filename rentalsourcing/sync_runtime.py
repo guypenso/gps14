@@ -61,6 +61,10 @@ class SyncFailure(RuntimeError):
 
 def classify(exc,endpoint=None,operation=None):
  if isinstance(exc,SyncFailure):return exc
+ sqlstate=getattr(exc,'sqlstate',None)
+ if sqlstate in {'57014','55P03','40001','40P01'} or isinstance(sqlstate,str) and sqlstate.startswith('08'):
+  return SyncFailure('database_temporary',None,True,endpoint,operation)
+ if isinstance(sqlstate,str) and sqlstate.startswith('23'):return SyncFailure('database_integrity',None,False,endpoint,operation)
  status=getattr(exc,'code',None)
  if isinstance(exc,urllib.error.HTTPError):
   if status in (301,302,307,308):return SyncFailure('endpoint_redirect',status,False,endpoint,operation)
@@ -152,6 +156,9 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
     result=json.loads(raw)
     if validate:validate(result,raw,response)
    receipt={k:result[k] for k in ('accepted','report_id','batch_id','counts','matched','next_cursor','summary','audit','accepted_reports','state','acknowledged_observation_ids','rejected_observation_ids','untracked_observation_ids','coverage') if k in result}
+   if name in {'offmarket_refresh','listing_pre_report'}:
+    from .window_contract import free_source_status
+    receipt['source_processing']=free_source_status(result)
    ledger.update(state='success',last_success_at=stamp.isoformat(),error=None,next_attempt_at=None,consecutive_failures=0,receipt=receipt);store.save_setting(ledger_key,ledger)
    counts=result.get('counts',{});count=counts.get('received',counts.get('processed',result.get('processed',len(result.get('decisions',[])))))
    store.save_setting('sync_circuit:'+name,{'blocked':False,'configuration':fingerprint})
@@ -162,6 +169,9 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
    if error.category in ('authentication','configuration','endpoint_redirect','response_signature') or error.http_status in (404,415):store.save_setting('sync_circuit:'+name,{'blocked':True,'configuration':fingerprint,'error':error.safe()})
    incident(store,name,error.safe(),now=stamp)
    ledger['consecutive_failures']=ledger.get('consecutive_failures',0)+1
+   if error.retryable and ledger['consecutive_failures']>=12:
+    error=SyncFailure('retry_exhausted:'+error.category,error.http_status,False,endpoint,identity)
+    incident(store,name,error.safe(),now=stamp)
    delay=min(300,max(5,2**min(ledger['consecutive_failures'],8)))
    retry_after=getattr(exc,'headers',None)
    if retry_after:

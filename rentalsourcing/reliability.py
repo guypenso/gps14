@@ -2,6 +2,7 @@
 import datetime as dt,hashlib,hmac,json,logging,os,threading,time,urllib.request,uuid
 from .sync_runtime import get,component,incident,request_json,SyncFailure,sequence,bounded_recovery,budget_timeout,operation_rows,operation_counts
 from .command_center import configuration,review_configuration
+from .window_contract import CRITICAL_COMPONENTS
 from .schedule import ISRAEL
 from .collector import LIVE
 from .geography import POLICY
@@ -52,16 +53,20 @@ def audit_scheduled_slots(store,now=None,completed_slot=None):
   results[slot]=value
  from .service_quality import snapshot as quality_snapshot
  store.save_setting('service_quality:last',quality_snapshot(store,now))
+ from .reliability_acceptance import ensure,snapshot as acceptance_snapshot
+ ensure(store,now)
+ store.save_setting('reliability_acceptance:last',acceptance_snapshot(store,now))
  return results
 
 def scheduled_window_outcome(store,slot,started_at,now):
  """Current-slot execution proof; historical failures stay in global health."""
  receipt=audit_scheduled_slots(store,now,completed_slot=slot)[slot]
  view=snapshot(store,now)
- current_incidents=[i for i in view['incidents'] if i.get('state')=='open' and i.get('last_seen_at','')>=started_at]
+ current_incidents=[i for i in view['incidents'] if i.get('state')=='open' and i.get('component') in CRITICAL_COMPONENTS and i.get('last_seen_at','')>=started_at]
  counts=view['counts']
- critical=sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))+len(current_incidents)
- if receipt['state'] not in {'fresh','paced'}:critical=max(1,critical)
+ optional_ops=sum(i.get('component') in {'offmarket_refresh','listing_pre_report'} for i in view.get('pending_operation_details',[]))
+ critical=max(0,sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))-optional_ops)+len(current_incidents)
+ if receipt['state'] in {'missing','stale','failed','delivery_unacknowledged'}:critical=max(1,critical)
  return {'current_window_state':receipt['state'],'current_window_critical':critical,
          'unresolved_critical':sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))+sum(i.get('state')=='open' for i in view['incidents']),
          'historical_open_incidents':sum(i.get('state')=='open' for i in view['incidents'])-len(current_incidents)}
@@ -100,7 +105,7 @@ def snapshot(store,now=None):
  last_job=store.execute('SELECT day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last_job[2]) if last_job else {}
  pending_tax=store.execute("SELECT COUNT(*) FROM properties WHERE state='Pending Verification'").fetchone()[0]
  sent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE ? AND state='sent'",('daily:%',)).fetchone()[0]
- unsent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE ? AND state!='sent' AND state NOT IN ('cancelled_stale','cancelled')",('daily:%',)).fetchone()[0]
+ unsent=store.execute("SELECT COUNT(*) FROM outbox WHERE job_id LIKE ? AND state!='sent' AND state NOT IN ('cancelled_stale','cancelled','suppressed')",('daily:%',)).fetchone()[0]
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()]
  local=now.astimezone(ISRAEL)
  if (local.hour,local.minute)>=(8,45) and daily.get('state')=='not_observed':
@@ -127,7 +132,8 @@ def snapshot(store,now=None):
  incidents=[json.loads(r[0]) for r in store.execute('SELECT payload FROM settings WHERE name LIKE ?',('health_incident:%',)).fetchall()];opens=[i for i in incidents if i.get('state')=='open']
  effective='failed' if daily.get('state')=='failed' or any(i.get('component') in ('daily_schedule','email_delivery') for i in opens) else 'partial' if pending_reports or pending or blocked or opens or price_pending or inventory_pending or daily.get('state') in ('partial','not_observed','running') else 'success'
  budget=get(store,'health_budget',{})
- return {'runtime':{'research_context':__import__('rentalsourcing.listing_enrichment',fromlist=['research_context']).research_context(store),'bedroom_policy':{k:v for k,v in get(store,'bedroom_policy_reconciliation:investment-20261111-two-bedroom',{}).items() if k not in ('history','source_ids')},'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
+ acceptance=get(store,'reliability_acceptance:last',{})
+ return {'reliability_acceptance':{k:acceptance.get(k) for k in ('state','activated_at','expected_windows','elapsed_windows','passed_windows','missing_receipts')},'digest_policy':{'empty_report':os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary'),'scope':'morning_only','version':'change-journal-v1'},'runtime':{'research_context':__import__('rentalsourcing.listing_enrichment',fromlist=['research_context']).research_context(store),'bedroom_policy':{k:v for k,v in get(store,'bedroom_policy_reconciliation:investment-20261111-two-bedroom',{}).items() if k not in ('history','source_ids')},'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
 
 def publish(store,now=None,config=None,opener=None):
  config=config or review_configuration()
@@ -363,6 +369,19 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:result['health']={'state':'deferred','category':type(e).__name__}
  # Core feedback, inventory, roundtrip and health acknowledgments run first.
  result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
+ from .investment_digest import select as digest_select,render as digest_render
+ if review_configuration() and not get(store,'investment_digest:production_preview:v1'):
+  u,_,_=review_configuration()
+  from urllib.parse import urlsplit
+  parsed=urlsplit(u);plan=digest_select(store,boundary,dt.datetime.now(UTC))
+  preview_day=now.astimezone(ISRAEL).date().isoformat()
+  source=get(store,'window_stages:'+preview_day+':morning',get(store,'multi-discovery:'+preview_day+':morning',{}))
+  saved_intake=get(store,'listing_pre_report_receipt',{})
+  if 'free_source' not in source and saved_intake.get('day')==preview_day:
+   from .window_contract import free_source_status
+   source={**source,'free_source':free_source_status(saved_intake.get('result',{}))}
+  subject,text,markup=digest_render(now.astimezone(ISRAEL).date().isoformat(),plan,source,parsed.scheme+'://'+parsed.netloc)
+  store.save_setting('investment_digest:production_preview:v1',{'subject':subject,'text':text,'html':markup,'updates':len(plan['updates']),'missing_canonical':plan['missing_canonical'],'prepared_at':now.isoformat(),'provider_calls':0,'email_sends':0})
  memory_checkpoint('recovery_completed')
  return result
 
