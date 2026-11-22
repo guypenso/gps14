@@ -42,9 +42,9 @@ def section(data):
     return text,'<section><h2>RealScout</h2><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape(text)+'</pre></section>'
 
 def sync_before_report(store,day,now,opener=None):
-    """One bounded selected-sender intake in the existing email job, never RentCast."""
+    """Persist what the authorized sources checked in this scheduled window."""
     from .command_center import review_configuration
-    from .sync_runtime import request_json, component
+    from .sync_runtime import request_json
     cfg=review_configuration()
     if not cfg:return {'state':'not_configured'}
     url,key,token=cfg
@@ -58,5 +58,4 @@ def sync_before_report(store,day,now,opener=None):
         store.save_setting('listing_pre_report_receipt',{'at':now.isoformat(),'day':day,'result':{'state':'failed'}})
         raise
     store.save_setting('listing_pre_report_receipt',{'at':now.isoformat(),'day':day,'result':result})
-    component(store,'listing_pre_report',result['state'],now=now,pending=1 if result['state']=='partial' else 0)
     return result

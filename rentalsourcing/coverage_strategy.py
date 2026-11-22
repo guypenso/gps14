@@ -1,12 +1,27 @@
 """Evidence-based ordering inside existing atomic allocation; never spends calls."""
 import datetime as dt
-VERSION='freshness-fairness-yield-v1'
+VERSION='freshness-fairness-yield-v2'
+
+
+def age_seconds(state, now):
+    last=state.get('last_success_at')
+    try:
+        return max(0,(now-dt.datetime.fromisoformat(last.replace('Z','+00:00'))).total_seconds())
+    except (ValueError,TypeError,AttributeError):
+        return float('inf')
+
+
+def advance_reason(state, now):
+    age = age_seconds(state, now)
+    if age >= 72 * 3600:
+        return 'partition_overdue'
+    if state.get('offset', 0) > 0 and not state.get('query_complete') and age >= 24 * 3600:
+        return 'unfinished_pagination_overdue'
+    return None
 
 
 def rank(slug,state,now,order):
-    last=state.get('last_success_at')
-    try:age=max(0,(now-dt.datetime.fromisoformat(last.replace('Z','+00:00'))).total_seconds())
-    except (ValueError,TypeError,AttributeError):age=1e12
+    age = age_seconds(state, now)
     overdue=age>=72*3600
     pages=state.get('selection_pages',0)/(2 if slug=='pittsburgh-bellevue' else 1)
     performance=state.get('performance',{});requests=max(1,performance.get('requests',0))

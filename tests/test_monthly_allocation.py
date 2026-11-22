@@ -5,8 +5,8 @@ from dataclasses import replace
 
 import pytest
 
-from rentalsourcing.monthly_allocation import active, available, limits, listing_limit_now, rent_limit_now, snapshot
-from rentalsourcing.partition_discovery import run
+from rentalsourcing.monthly_allocation import active, available, limits, listing_limit_now, listing_plan, period, rent_limit_now, snapshot
+from rentalsourcing.partition_discovery import PREFIX, run
 from rentalsourcing.storage import BudgetExceeded, Store
 from test_partition_discovery import AreaProvider, MAIN
 from conftest import Response, listing
@@ -92,13 +92,43 @@ def test_one_paced_page_and_fair_rotation_without_provider_overrun(store,boundar
     assert third['requests_consumed']==1 and provider.calls[-1]==('Pleasant Hills',0)
     clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
     fourth,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
-    assert fourth['requests_consumed']==0 and fourth['discovery_state']=='scheduled_pacing_no_listing_request'
-    clock.value=dt.datetime(2026,11,17,18,tzinfo=dt.timezone.utc)
-    fifth,_=run(store,boundary,s,'2026-11-17','evening',clock=clock,opener=provider)
-    assert fifth['requests_consumed']==1 and provider.calls[-1]==(MAIN,2)
+    assert fourth['requests_consumed']==1 and provider.calls[-1]==(MAIN,2)
+    assert fourth['listing_plan']['advance']=={'partition':MAIN,'reason':'unfinished_pagination_overdue','from_slot':'2026-11-17T08:00:00+02:00'}
+    clock.value=dt.datetime(2026,11,17,6,tzinfo=dt.timezone.utc)
+    fifth,_=run(store,boundary,s,'2026-11-17','morning',clock=clock,opener=provider)
+    assert fifth['requests_consumed']==0 and fifth['discovery_state']=='scheduled_pacing_no_listing_request'
     clock.value=dt.datetime(2026,11,18,6,tzinfo=dt.timezone.utc)
     sixth,_=run(store,boundary,s,'2026-11-18','morning',clock=clock,opener=provider)
     assert sixth['requests_consumed']==1 and provider.calls[-1]==(MAIN,4)
+
+
+def test_nov22_advance_preserves_separate_budgets_and_only_one_request(store,settings,clock):
+    s=replace(grant(settings),approval_expires_at='2026-12-14T10:00:00Z')
+    clock.value=dt.datetime(2026,11,22,18,2,tzinfo=dt.timezone.utc)
+    store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'listing'),10))
+    store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'rent'),3))
+    store.execute('INSERT INTO usage VALUES (?,?)',('cycle:2026-11-15T00:00:00+00:00',13))
+    store.save_setting(PREFIX+MAIN,{'last_success_at':'2026-11-21T06:01:31+00:00','query_complete':False,'offset':500})
+    store.save_setting(PREFIX+'bethel-park',{'last_success_at':'2026-11-22T06:01:19+00:00','query_complete':True})
+    store.save_setting(PREFIX+'pleasant-hills',{'last_success_at':'2026-11-19T18:01:26+00:00','query_complete':True})
+    plan=listing_plan(store,s,clock())
+    assert plan['base_released']==10 and plan['available']==1
+    assert plan['advance']['partition']=='pleasant-hills'
+    scope=('multi-discovery:2026-11-22:evening',4)
+    if store.pg:
+        def reserve(_):
+            conn=Store(store.test_url,initialize=False)
+            try:
+                try:conn.reserve_api(s,clock(),purpose='listing',scope=scope);return 1
+                except BudgetExceeded:return 0
+            finally:conn.close()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            assert sum(pool.map(reserve,range(4)))==1
+    else:
+        store.reserve_api(s,clock(),purpose='listing',scope=scope)
+        with pytest.raises(BudgetExceeded):store.reserve_api(s,clock(),purpose='listing',scope=scope)
+    assert store.budget_health(s,clock())['remaining']==36
+    assert snapshot(store,s,clock())['used']=={'listing':11,'rent':3,'targeted':0,'recovery':0}
 
 
 def test_concurrent_reservations_are_bounded_by_atomic_rent_allocation(store,settings,clock):

@@ -156,13 +156,22 @@ def request_json(store,name,identity,config,body,*,timeout=20,max_bytes=1024*102
     result=json.loads(raw)
     if validate:validate(result,raw,response)
    receipt={k:result[k] for k in ('accepted','report_id','batch_id','counts','matched','next_cursor','summary','audit','accepted_reports','state','acknowledged_observation_ids','rejected_observation_ids','untracked_observation_ids','coverage') if k in result}
+   source=None
    if name in {'offmarket_refresh','listing_pre_report'}:
     from .window_contract import free_source_status
-    receipt['source_processing']=free_source_status(result)
+    source=receipt['source_processing']=free_source_status(result)
    ledger.update(state='success',last_success_at=stamp.isoformat(),error=None,next_attempt_at=None,consecutive_failures=0,receipt=receipt);store.save_setting(ledger_key,ledger)
    counts=result.get('counts',{});count=counts.get('received',counts.get('processed',result.get('processed',len(result.get('decisions',[])))))
    store.save_setting('sync_circuit:'+name,{'blocked':False,'configuration':fingerprint})
-   component(store,name,'success',now=stamp,processed=count,recovery='recovered' if ledger.get('attempts',0)>1 else None);incident(store,name,None,now=stamp,resolved=True)
+   if source and not source['completed']:
+    blocked=source.get('blocked') or []
+    error={'category':blocked[0] if blocked else 'free_source_check_incomplete',
+           'retryable':bool(source.get('requires_retry'))}
+    component(store,name,'partial',now=stamp,processed=source['messages_processed'],pending=1,error=error)
+    incident(store,name,error,now=stamp)
+   else:
+    component(store,name,'success',now=stamp,processed=count,recovery='recovered' if ledger.get('attempts',0)>1 else None)
+    incident(store,name,None,now=stamp,resolved=True)
    return result
   except Exception as exc:
    error=classify(exc,endpoint,identity)

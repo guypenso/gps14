@@ -173,12 +173,12 @@ class Digest:
             from .investment_digest import select as investment_selection,render as investment_render
             from .command_center import review_configuration
             cfg=review_configuration() or __import__('rentalsourcing.command_center',fromlist=['configuration']).configuration()
-            if cfg:
-                investment_plan=investment_selection(self.store,self.boundary,self.clock())
-                parsed=urllib.parse.urlsplit(cfg[0]);origin=parsed.scheme+'://'+parsed.netloc
-                subject,text,markup=investment_render(day,investment_plan,stats,origin)
-                body.update(subject=subject,text=text,html=markup)
-                ids=[]  # Legacy verified-event mail selections are not the change journal.
+            investment_plan=investment_selection(self.store,self.boundary,self.clock())
+            parsed=urllib.parse.urlsplit(cfg[0]) if cfg else None
+            origin=parsed.scheme+'://'+parsed.netloc if parsed else None
+            subject,text,markup=investment_render(day,investment_plan,stats,origin)
+            body.update(subject=subject,text=text,html=markup)
+            ids=[]  # Scheduled mail always uses the change journal.
         if preview:body['preview_only']=True
         outbox_id='daily-'+hashlib.sha256(digest_day.encode()).hexdigest()
         suppressed=bool(investment_plan is not None and not investment_plan['updates'] and os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary')=='suppress' and not preview)

@@ -35,7 +35,7 @@ def snapshot(store,now,boundary=None):
             'outcome':{k:v for k,v in execution.get('result',{}).items() if k in
                 ('status','scan','processing_outcome','exit_failure','requests','rent_requests','workflow_status','unresolved_critical','price_queue','email_status')},
             'metrics':{k:evidence[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
-                'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state') if k in evidence}}
+                'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state','free_source','listing_plan') if k in evidence}}
     row=store.execute('SELECT id,state,payload,provider_id,first_attempt_at,updated_at FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if row:
         payload=json.loads(row[2]);body=payload.get('text','')
@@ -77,7 +77,7 @@ def snapshot(store,now,boundary=None):
             'frozen_bytes':len(frozen.get('body','').encode()) if isinstance(frozen.get('body'),str) else 0})
     result['pending_enrichment_batches']=enrichment[:20]
     result['reliability_acceptance']=setting(store,'reliability_acceptance:last')
-    result['investment_digest_preview']=setting(store,'investment_digest:production_preview:v1')
+    result['investment_digest_preview']=setting(store,'investment_digest:production_preview:v2') or setting(store,'investment_digest:production_preview:v1')
     result['conditional_watch_acceptance']=setting(store,'conditional_watch_acceptance:v1')
     result['incident_batch_revalidation']=setting(store,'incident_batch_revalidation:20261117:v1')
     result['source_alias_reconciliation']=setting(store,'source_alias_reconciliation:confirmed-rejected-stored-v1')
@@ -108,11 +108,11 @@ def snapshot(store,now,boundary=None):
     source_email=source_result.get('email') or {}
     runs=[]
     for item in (source_email.get('results') or [])[:2]:
-        safe={k:item[k] for k in ('state','trigger','started_at','completed_at','messages_returned','messages_processed','duplicates','extracted','failed','needs_review','unresolved_errors','unresolved_listing_blocks','pending_reparse','more') if k in item}
+        safe={k:item[k] for k in ('state','trigger','started_at','completed_at','messages_returned','messages_processed','duplicates','extracted','failed','needs_review','unresolved_errors','unresolved_listing_blocks','pending_reparse','more','error_type','phase','retryable','mailbox_checked','reused') if k in item}
         safe['listing_results']=[{k:row[k] for k in ('received','known_rentcast','new_unique_beyond_rentcast','non_tax_pass','qualified','pending','rejected','delivered','delivery_counts','completed_at') if k in row} for row in (item.get('listing_results') or [])[:25]]
         runs.append(safe)
     result['latest_listing_intake']={'day':intake.get('day'),'attempted_at':intake.get('at'),'state':source_result.get('state'),
-        'authorized_accounts':source_email.get('authorized_accounts'),'runs':runs,
+        'authorized_accounts':source_email.get('authorized_accounts'),'runs':runs,'public_inventory':source_result.get('public_inventory'),
         'source_dispositions':(source_result.get('realscout_audit') or {}).get('counts')}
     if boundary is not None:
         from .review_inventory import select

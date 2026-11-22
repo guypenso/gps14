@@ -12,15 +12,20 @@ def stages(store):return [json.loads(r[0]) for r in store.execute("SELECT payloa
 
 def audit_scheduled_slots(store,now=None,completed_slot=None):
  """Persist an honest morning/evening receipt audit without provider or email work."""
+ from .window_contract import free_source_status
  now=now or dt.datetime.now(UTC)
  local=now.astimezone(ISRAEL)
  day=local.date().isoformat()
+ worker=get(store,'offmarket_scheduler',{})
  results={}
  for slot,hour in (('morning',8),('evening',20)):
+  scheduled=dt.datetime.combine(local.date(),dt.time(hour),tzinfo=ISRAEL)
   if completed_slot is not None and slot!=completed_slot:continue
-  if slot!=completed_slot and local < dt.datetime.combine(local.date(),dt.time(hour,40),tzinfo=ISRAEL):continue
+  if slot!=completed_slot and local < scheduled+dt.timedelta(minutes=40):continue
   run=get(store,'discovery_run:'+day+':'+slot,{})
   receipt=get(store,'multi-discovery:'+day+':'+slot,{})
+  metrics=get(store,'window_stages:'+day+':'+slot,{})
+  source=metrics.get('free_source') or {}
   requests=receipt.get('requests_consumed',0)
   pages=receipt.get('pages',[])
   delivery=receipt.get('delivery_totals') or {}
@@ -39,17 +44,41 @@ def audit_scheduled_slots(store,now=None,completed_slot=None):
    state,reason='paced','monthly_listing_allocation_reserved_for_future_slots'
   elif receipt.get('discovery_state')=='skipped_budget_exhausted':
    state,reason='budget_blocked',receipt.get('budget_reason') or 'approved_provider_budget_unavailable'
+  elif receipt.get('discovery_state') in {'skipped_disabled','skipped_billing_configuration'}:
+   state,reason='budget_blocked',receipt.get('budget_reason') or receipt['discovery_state']
   elif receipt.get('discovery_state')=='failed':
    state,reason='failed','discovery_exception'
   else:state,reason='partial','no_fresh_listing_page'
+  rentcast_state=state
+  source_gap=bool(source and not source.get('completed'))
+  if state in {'fresh','paced','budget_blocked'} and source_gap:
+   state='partial'
+   reason='free_source_blocked' if source.get('blocked') else 'free_source_check_incomplete'
+  elif state=='budget_blocked' and source.get('completed'):
+   state,reason='free_source','verified_free_source_processing'
+  key='scheduled_slot_audit:'+day+':'+slot
+  previous=get(store,key,{})
+  recovered=previous.get('source_recovery')
+  due=source_gap and not source.get('blocked') or rentcast_state=='missing'
+  scheduled_at=scheduled.astimezone(UTC).isoformat()
+  attempt=worker.get('attempted_at','')
+  worker_evidence=worker.get('source_processing') or free_source_status(worker.get('result',{}))
+  if ((source_gap or rentcast_state=='missing') and max(scheduled_at,run.get('started_at',''))<=attempt
+      <(scheduled+dt.timedelta(hours=12)).astimezone(UTC).isoformat() and worker_evidence.get('checked')
+      and (not recovered or not recovered['source'].get('completed'))):
+   recovered={'at':worker.get('completed_at') or attempt,'source':worker_evidence}
+  source_recovered=bool(recovered and recovered['source'].get('completed'))
   value={'day':day,'slot':slot,'state':state,'reason':reason,
+         'scheduled_for':scheduled_at,'rentcast_state':rentcast_state,'free_source':source,
+         'source_retry_pending':bool(due and not source_recovered),'source_recovery':recovered,
          'requests':requests,'pages':len(pages),'records':receipt.get('received_this_run',0),
          'penten_receipts':acks,'checked_at':now.isoformat(),'provider_calls':0}
-  key='scheduled_slot_audit:'+day+':'+slot
-  if get(store,key)!=value:store.save_setting(key,value)
+  if previous!=value:store.save_setting(key,value)
   component_name='discovery_slot_'+slot
-  healthy=state in {'fresh','paced'}
-  incident(store,component_name,None if healthy else {'category':reason,'retryable':state in {'missing','partial','failed','delivery_unacknowledged'}},now=now,resolved=healthy)
+  healthy=state in {'fresh','paced','free_source'} or (state=='partial' and source_gap and
+      (rentcast_state=='fresh' or source.get('checked') or source_recovered))
+  retryable=state in {'missing','partial','failed','delivery_unacknowledged'} and not source.get('blocked')
+  incident(store,component_name,None if healthy else {'category':reason,'retryable':retryable},now=now,resolved=healthy)
   results[slot]=value
  from .service_quality import snapshot as quality_snapshot
  store.save_setting('service_quality:last',quality_snapshot(store,now))
@@ -245,7 +274,7 @@ def recover_listing_operations(store,now,opener=None,limit=1):
  # Slow source callbacks must not consume the health/delivery recovery budget.
  deadline=DEADLINE.get();started=time.monotonic()
  token_deadline=DEADLINE.set(min(deadline if deadline is not None else float('inf'),started+40))
- recovered=0
+ recovered=acknowledged=0
  try:
   for _,operation,body in sorted(candidates,key=lambda r:(r[0],r[1]['id']))[:limit]:
    try:
@@ -255,13 +284,37 @@ def recover_listing_operations(store,now,opener=None,limit=1):
     if value.get('state') in {'rate_limited','busy','processing'}:raise SyncFailure('source_refresh_deferred',429,True)
     if value.get('state') not in {'success','partial'}:raise ValueError('Free listing recovery receipt incomplete')
    try:
-    request_json(store,operation['component'],operation['id'],(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),
+    value=request_json(store,operation['component'],operation['id'],(url.rsplit('/',1)[0]+'/offmarket-refresh',key,token),
                  body,timeout=40,opener=opener,now=now,validate=validate)
-    recovered+=1
+    from .window_contract import free_source_status
+    acknowledged+=1
+    recovered+=int(free_source_status(value)['completed'])
    except Exception:pass # request_json persists the exact error and next retry.
  finally:DEADLINE.reset(token_deadline)
  return {'state':'recovered' if recovered else 'pending' if candidates else 'complete','recovered':recovered,
-         'eligible_pending':len(candidates),'provider_calls':0,'email_sends':0}
+         'transport_acknowledged':acknowledged,'eligible_pending':len(candidates),'provider_calls':0,'email_sends':0}
+
+
+def recover_saved_discovery_deliveries(store, boundary, now, opener=None):
+ """Finish unstarted PENTEN deliveries from committed pages after a crash."""
+ config=configuration()
+ if not config:return []
+ from .future_discovery import process
+ results=[]
+ day=now.astimezone(ISRAEL).date()
+ for date in (day-dt.timedelta(days=1),day):
+  for slot in ('morning','evening'):
+   saved=get(store,'multi-discovery:'+date.isoformat()+':'+slot,{})
+   if saved.get('started_at','')<(now-dt.timedelta(hours=24)).isoformat():continue
+   for job in saved.get('job_ids',[]):
+    existing=get(store,'future_discovery_report:'+job)
+    if existing and existing.get('state') not in {'not_configured','pending'}:continue
+    # Other retry states have their own persisted inventory batches. The
+    # original scheduled receipt remains unchanged.
+    result=process(store,boundary,job,now,config=config,opener=opener,new_since=(now+dt.timedelta(microseconds=1)).isoformat())
+    results.append({k:result[k] for k in ('state','recovered_source_listings','synced','receipt_counts') if k in result})
+    if len(results)==2:return results
+ return results
 
 
 @bounded_recovery
@@ -361,6 +414,9 @@ def recover(store,boundary,now=None,opener=None):
   store.save_setting('health_funnel',funnel(store,boundary,now))
  except Exception:pass
  pending_inventory(store,boundary,now,opener)
+ if result['feedback'].get('state')=='fresh':
+  try:result['saved_discovery_deliveries']=recover_saved_discovery_deliveries(store,boundary,now,opener)
+  except Exception as exc:result['saved_discovery_deliveries']={'state':'pending','error_type':type(exc).__name__}
  memory_checkpoint('inventory_completed')
  try:
   previous_audit=get(store,'health_last_audit',{})
@@ -387,7 +443,7 @@ def recover(store,boundary,now=None,opener=None):
  # Core feedback, inventory, roundtrip and health acknowledgments run first.
  result['listing_operation_recovery']=recover_listing_operations(store,now,opener)
  from .investment_digest import select as digest_select,render as digest_render
- if review_configuration() and not get(store,'investment_digest:production_preview:v1'):
+ if review_configuration() and not get(store,'investment_digest:production_preview:v2'):
   u,_,_=review_configuration()
   from urllib.parse import urlsplit
   parsed=urlsplit(u);plan=digest_select(store,boundary,dt.datetime.now(UTC))
@@ -398,7 +454,7 @@ def recover(store,boundary,now=None,opener=None):
    from .window_contract import free_source_status
    source={**source,'free_source':free_source_status(saved_intake.get('result',{}))}
   subject,text,markup=digest_render(now.astimezone(ISRAEL).date().isoformat(),plan,source,parsed.scheme+'://'+parsed.netloc)
-  store.save_setting('investment_digest:production_preview:v1',{'subject':subject,'text':text,'html':markup,'updates':len(plan['updates']),'missing_canonical':plan['missing_canonical'],'prepared_at':now.isoformat(),'provider_calls':0,'email_sends':0})
+  store.save_setting('investment_digest:production_preview:v2',{'subject':subject,'text':text,'html':markup,'updates':len(plan['updates']),'missing_canonical':plan['missing_canonical'],'prepared_at':now.isoformat(),'provider_calls':0,'email_sends':0})
  memory_checkpoint('recovery_completed')
  return result
 

@@ -181,7 +181,7 @@ def test_free_listing_recovery_replays_exact_payload_and_never_spends_provider_b
         'last_attempt_at':(clock()-dt.timedelta(hours=1)).isoformat(),'attempts':1})
     class Response:
         status=200
-        def read(self,n):return b'{"state":"success","counts":{"received":0}}'
+        def read(self,n):return b'{"state":"success","counts":{"received":0},"email":{"authorized_accounts":1,"results":[{"state":"success","mailbox_checked":true,"messages_returned":0}]}}'
         def __enter__(self):return self
         def __exit__(self,*a):pass
     class FreeReceiver:

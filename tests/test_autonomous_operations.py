@@ -68,6 +68,14 @@ def test_digest_does_not_repeat_old_pending_properties_or_claim_fresh_query(stor
     assert '100 Fixture St' not in text
 
 
+def test_digest_does_not_call_a_resurfaced_canonical_property_new(store,boundary,clock):
+    p=setup_candidate(store,clock)
+    past=(clock()-dt.timedelta(days=10)).isoformat()
+    store.save_setting('penten_review:earlier-source',{'source_id':'earlier-source','canonical_property_id':'real-canonical','status':'new'})
+    store.save_setting('listing_observation:historical',{'source_id':'earlier-source','property':p,'observed_at':past})
+    assert not select(store,boundary,clock())['updates']
+
+
 def test_digest_frozen_events_advance_only_after_confirmed_acceptance(store,boundary,clock):
     setup_candidate(store,clock);plan=select(store,boundary,clock());assert len(plan['updates'])==1
     store.execute('INSERT INTO outbox VALUES (?,?,?,?,?,?,?,?)',('test','daily:fixture','pending','{}','[]',None,None,clock().isoformat()))
