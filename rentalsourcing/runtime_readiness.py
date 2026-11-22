@@ -3,7 +3,7 @@ import datetime as dt
 import json
 import os
 
-from .monthly_allocation import snapshot as allocation
+from .monthly_allocation import next_listing_windows, snapshot as allocation
 from .partition_discovery import snapshot as coverage
 from .rental_intelligence import job_summary
 from .schedule import ISRAEL
@@ -43,18 +43,9 @@ def snapshot(store, settings, now):
     day=now.astimezone(ISRAEL).date().isoformat()
     ledger=[{'period':period,'used':used} for period,used in
             store.execute('SELECT period,used FROM usage ORDER BY period').fetchall()]
-    dates=[]
-    for delta in range(3):
-        date=now.astimezone(ISRAEL).date()+dt.timedelta(days=delta)
-        for hour in (8,20):
-            future=dt.datetime.combine(date,dt.time(hour),tzinfo=ISRAEL).astimezone(dt.timezone.utc)
-            if future<=now:continue
-            from .monthly_allocation import available
-            cap=min(settings.per_run,settings.per_day-store.count_usage(future.strftime('day:%Y-%m-%d')),
-                    available(store,settings,future,'listing'))
-            dates.append({'at_israel':future.astimezone(ISRAEL).isoformat(),
-                          'listing_limit_upper_bound':max(0,cap),
-                          'note':'Assumes no intervening requests; atomic reservation is checked at execution.'})
+    dates=[{**plan, 'listing_limit_upper_bound':plan['available'],
+            'note':'Assumes no intervening requests; atomic reservation is checked at execution.'}
+           for plan in next_listing_windows(store,settings,now)]
     tax=saved('public_tax_batch:2026')
     estimates=tax.get('estimates',{})
     current=saved('health_last_audit').get('result',{}).get('current_inventory',{})
@@ -71,7 +62,7 @@ def snapshot(store, settings, now):
             'coverage_model':__import__('rentalsourcing.coverage_strategy',fromlist=['model']).model(settings,now),
             'reliability_acceptance':__import__('rentalsourcing.reliability_acceptance',fromlist=['snapshot']).snapshot(store,now),
             'monthly_allocation':allocation(store,settings,now),'ledger':ledger,
-            'next_slots':dates[:4],'coverage':coverage(store,now),'scheduled_slots':slots,
+            'next_slots':dates,'coverage':coverage(store,now),'scheduled_slots':slots,
             'source_records':store.execute('SELECT COUNT(*) FROM properties').fetchone()[0],
             'source_states':dict(store.execute('SELECT state,COUNT(*) FROM properties GROUP BY state').fetchall()),
             'rental_estimates':{'saved':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],

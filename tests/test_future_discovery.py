@@ -8,6 +8,38 @@ class Provider:
     source=LIVE
 
 
+def test_watchdog_finishes_penten_delivery_after_saved_page_without_rescanning(store,boundary,settings,clock,monkeypatch):
+    from conftest import Response
+    from rentalsourcing.reliability import recover_saved_discovery_deliveries
+    from rentalsourcing.sync_runtime import get
+
+    day=clock().date().isoformat()
+    key='multi-discovery:'+day+':morning'
+    job='coverage:pittsburgh-bellevue:interrupted'
+    receipt={'started_at':clock().isoformat(),'job_ids':[job]}
+    store.save_setting(key,receipt)
+    engine=Engine(store,boundary,Provider(),settings,clock)
+    engine.ingest(job,listing('saved-first-discovery'))
+    config=('https://example.test/api/rentalsourcing/sync','s'*32,'fixture')
+    monkeypatch.setattr('rentalsourcing.reliability.configuration',lambda:config)
+    class Receiver:
+        calls=0
+        def open(self,req,timeout):
+            self.calls+=1
+            assert req.full_url==config[0]
+            report=json.loads(req.data)
+            assert [r['source_id'] for r in report['opportunities']]==['saved-first-discovery']
+            return Response({'accepted':True,'report_id':report['report_id'],'counts':{'inserted':1}})
+    clock.advance(minutes=35)
+    receiver=Receiver()
+    delivered=recover_saved_discovery_deliveries(store,boundary,clock(),receiver)
+    assert delivered[0]['receipt_counts']=={'inserted':1}
+    assert delivered[0]['recovered_source_listings']==1 and delivered[0]['synced']==1
+    assert get(store,key)==receipt
+    assert recover_saved_discovery_deliveries(store,boundary,clock(),receiver)==[] and receiver.calls==1
+    assert store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
+    assert store.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+
 def test_verified_tax_cannot_count_unresolved_type_as_new_qualified(store,boundary,settings,clock):
     engine=Engine(store,boundary,Provider(),settings,clock)
     store.save_tax('type-unresolved',taxes('type-unresolved',1500),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())

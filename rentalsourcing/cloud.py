@@ -80,7 +80,8 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     elif feedback_required:
         feedback_ok=False;error={'category':'review_configuration_missing','retryable':False};component(store,'review_feedback','failed',now=clock(),pending=1,error=error);incident(store,'review_feedback',error,now=clock())
 
-    if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True)
+    collection_started=clock().isoformat()
+    if not settings.enabled:stats=dict(discovery_state='skipped_disabled',partial=True,budget_reason='rentcast_disabled')
     elif settings.approval_mode not in {'billing_cycle','one_time','monthly_budget'}:stats=dict(discovery_state='skipped_billing_configuration',partial=True)
     elif slot:
         from .partition_discovery import run as discover_partitions
@@ -164,6 +165,11 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
     event('future_discovery_verification',**stats['future_discovery'])
     if slot:
         # Store post-delivery business outcomes alongside the page receipts.
+        stats.setdefault('run_key','multi-discovery:'+day+':'+slot)
+        stats.setdefault('started_at',collection_started)
+        stats.setdefault('finished_at',clock().isoformat())
+        stats.setdefault('requests_consumed',0)
+        stats.setdefault('pages',[])
         reports=[stats['future_discovery'],*stats.get('supplemental_verification',[])]
         stats['delivery_totals']={k:sum(r.get(k,0) for r in reports) for k in
             ('new_source_listings','recovered_source_listings','new_non_tax_pass','new_qualified','new_pending','new_rejected','synced')}
@@ -172,7 +178,7 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
         store.save_setting('multi-discovery:'+day+':'+slot,stats)
         store.save_setting('multi-discovery:last',stats)
         event('partition_delivery_result',day=day,slot=slot,requests=stats.get('requests_consumed',0),**stats['delivery_totals'])
-    if feedback_config or settings.email_enabled:
+    if feedback_config or settings.email_enabled or slot:
         from .listing_report import sync_before_report
         try:
             source_result=sync_before_report(store,day+(":evening" if slot=="evening" else ""),clock(),opener)
@@ -180,19 +186,27 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             from .window_contract import free_source_status
             stats['free_source']=free_source_status(source_result)
             if source_result.get('state')=='partial':stats['partial']=True
-            event('listing_pre_report',state=source_result.get('state'))
+            event('listing_pre_report',state=source_result.get('state'),source_processing=stats['free_source'])
         except Exception as exc:
-            stats.update(partial=True,listing_intake_state='failed')
+            from .window_contract import free_source_status
+            stats.update(partial=True,listing_intake_state='failed',free_source=free_source_status({'state':'failed'}))
             event('listing_pre_report_failed',error_type=type(exc).__name__)
+    if slot:
+        store.save_setting('multi-discovery:'+day+':'+slot,stats)
+        store.save_setting('multi-discovery:last',stats)
     if slot=='evening':
         # Delivery and authorized Gmail intake operate independently of a digest.
-        if feedback_config:
+        if feedback_config and feedback_ok:
             from .review_inventory import run as deliver
             from .digest import recent_timestamp
             fresh_ids={i for i,observed in store.execute('SELECT id,observed_at FROM properties').fetchall() if recent_timestamp(observed,clock())}
             u,k,t=feedback_config
             try:
-                receipt=deliver(store,boundary,clock(),execute=True,config=(u.rsplit('/',1)[0]+'/review-reports',k,t),job_key='evening-inventory:'+day,source_ids=fresh_ids,include_verified=True)
+                delivery_config=configuration()
+                receipt=deliver(store,boundary,clock(),execute=True,
+                    config=delivery_config or (u.rsplit('/',1)[0]+'/review-reports',k,t),
+                    job_key='stored-review-inventory:evening:'+day,source_ids=fresh_ids,
+                    include_verified=bool(delivery_config),refresh_decisions=False)
                 stats['evening_inventory_receipt']=receipt.get('receipt_counts',{})
             except Exception as exc:
                 stats['evening_inventory_receipt']={'state':'pending_recovery','error_type':type(exc).__name__}

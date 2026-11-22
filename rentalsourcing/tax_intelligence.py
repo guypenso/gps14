@@ -86,6 +86,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  from .listing_report import listing_report
  listing_intake=listing_report(store,boundary,now)
  from .discovery_audit import snapshot as discovery_snapshot
+ from .monthly_allocation import next_listing_windows
  from .sync_runtime import get
  from .investment_policy import SCREENING_POLICY_VERSION
  tax_policy=get(store,'tax_policy_reconciliation:'+SCREENING_POLICY_VERSION,{})
@@ -109,6 +110,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
          'discovery_execution':discovery_snapshot(store,now,boundary,settings.page_size),
          'discovery_coverage':__import__('rentalsourcing.partition_discovery',fromlist=['snapshot']).snapshot(store,now),
+         'next_listing_windows':next_listing_windows(store,settings,now),
          'scheduled_slot_audits':slot_audits,
          'rental_estimates':rental_summary,
          'realscout_intake':{k:listing_intake[k] for k in ('properties','observations','last_attempt_at','state','last_observation')},

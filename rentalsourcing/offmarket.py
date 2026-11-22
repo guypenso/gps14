@@ -126,15 +126,17 @@ def cache_program_contacts(store,result):
    contacts[item['external_id']]={'offering_street_key':street_key(item['property']),'kind':'contact','name':'Pittsburgh Land Bank','role':'Public Agency','email':'staff@pghlandbank.org','phone':'412-255-6566','source_url':PLB,'observed_at':result['attempted_at'],'verification_method':'official_inventory','relationship':'Responsible for inquiries about this property in the published residential rehab sales program','relationship_confirmed':True}
  store.save_setting('offmarket_plb_contacts_v2',{'contacts':contacts,'source_sha256':result.get('source_sha256'),'at':result['attempted_at']})
 
-def next_source_refresh(now,result):
- """Existing worker drains bounded pages, then checks again before the report."""
+def next_source_refresh(now,result,failures=1):
+ """Back off when a source makes no progress and prepare for both daily windows."""
  from .schedule import ISRAEL
- if result.get('state')=='partial':
-  from .window_contract import free_source_status
-  if free_source_status(result)['requires_retry']:return (now+dt.timedelta(minutes=5)).isoformat()
+ from .window_contract import free_source_status
+ source=free_source_status(result)
+ if source['requires_retry']:
+  delay=min(360,5*2**min(max(0,failures-1),7))
+  return (now+dt.timedelta(minutes=delay)).isoformat()
  local=now.astimezone(ISRAEL)
- cutoff=local.replace(hour=7,minute=45,second=0,microsecond=0)
- if cutoff<=local:cutoff+=dt.timedelta(days=1)
+ checkpoints=[local.replace(hour=h,minute=45,second=0,microsecond=0) for h in (7,19)]
+ cutoff=next((at for at in checkpoints if at>local),checkpoints[0]+dt.timedelta(days=1))
  return min(now+dt.timedelta(hours=6),cutoff.astimezone(UTC)).isoformat()
 
 def claim_schedule(store,now):
@@ -144,19 +146,28 @@ def claim_schedule(store,now):
  previous=get(store,'offmarket_scheduler',{})
  from .schedule import ISRAEL
  local=now.astimezone(ISRAEL);day=local.date().isoformat()
- pre_report=local.hour==7 and local.minute>=45 and get(store,'listing_pre_report_day')!=day
+ pre_key='listing_pre_report_evening_day' if local.hour==19 else 'listing_pre_report_day'
+ pre_report=local.hour in (7,19) and local.minute>=45 and get(store,pre_key)!=day
  attempted=previous.get('attempted_at','')
  claim_started=previous.get('claim_started_at') or attempted
  stale_running=(previous.get('state')=='running' and bool(claim_started)
                 and claim_started<=(now-dt.timedelta(minutes=10)).isoformat())
- if previous.get('next_at','')>now.isoformat() and not (pre_report or stale_running):return False
- if pre_report:store.save_setting('listing_pre_report_day',day)
+ if previous.get('state')=='running' and not stale_running:return False
+ # A missed or incomplete slot gets a prompt independent source pass. Do not
+ # interrupt the current worker or bypass a source's retry cooldown.
+ audit=get(store,'scheduled_slot_audit:'+day+':'+('evening' if local.hour>=20 else 'morning'),{})
+ window=audit.get('scheduled_for') or ''
+ recovery_due=bool(window and attempted<window<=now.isoformat() and previous.get('state')=='success'
+                   and (audit.get('source_retry_pending') or audit.get('state')=='missing'))
+ if previous.get('next_at','')>now.isoformat() and not (pre_report or stale_running or recovery_due):return False
+ if pre_report:store.save_setting(pre_key,day)
  # A dashboard restart can strand an in-flight free-source refresh. Reuse its
  # operation ID so the remote backend can return the same idempotent receipt.
  claim_at=attempted if stale_running and not pre_report else now.isoformat()
  store.save_setting('offmarket_scheduler',{'attempted_at':claim_at,'next_at':(now+dt.timedelta(hours=6)).isoformat(),
                                          'state':'running','claim_started_at':now.isoformat(),
                                          'validation_id':previous.get('validation_id'),
+                                         'failure_streak':previous.get('failure_streak',0),
                                          'recovered_stale_claim':bool(stale_running and not pre_report)})
  if stale_running and not pre_report:
   logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_STALE_CLAIM_RECOVERED operation_id_reused=true')
@@ -245,18 +256,23 @@ def start_scheduler(url):
     if claim_schedule(s,now):
      validation=get(s,'realscout_scheduler_validation_v1') if get(s,'offmarket_scheduler',{}).get('validation_id') else None
      s.close();s=Store(url,initialize=False)
-     operation=listing_operation_id(get(s,'offmarket_scheduler')['attempted_at'],validation)
+     claim=get(s,'offmarket_scheduler')
+     operation=listing_operation_id(claim['attempted_at'],validation)
      u,k,t=review_configuration();body=json.dumps({'action':'refresh','operation_id':operation},separators=(',',':')).encode()
      def receipt(value,*args):
       if value.get('state') not in ('success','partial'):raise ValueError('Off-market refresh not completed')
      result=request_json(s,'offmarket_refresh',operation,(u.rsplit('/',1)[0]+'/offmarket-refresh',k,t),body,timeout=90,validate=receipt)
-     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps({**result,'scheduler_validation_id':validation['id'] if validation else None},sort_keys=True))
-     if result.get('state')=='partial':
-      from .sync_runtime import component,incident
-      error={'category':'offmarket_source_incomplete','retryable':True}
-      component(s,'offmarket_refresh','partial',pending=1,error=error);incident(s,'offmarket_refresh',error)
-     next_at=complete_listing_validation(s,validation,result,now) if validation else next_source_refresh(now,result)
-     s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'next_at':next_at,'state':result.get('state','failed'),'result':result})
+     from .window_contract import free_source_status
+     source=free_source_status(result)
+     failures=claim.get('failure_streak',0)+1 if source['requires_retry'] and not source['messages_processed'] else 0
+     finished=dt.datetime.now(UTC)
+     next_at=complete_listing_validation(s,validation,result,finished) if validation else next_source_refresh(finished,result,failures)
+     s.save_setting('offmarket_scheduler',{'attempted_at':now.isoformat(),'completed_at':finished.isoformat(),
+        'next_at':next_at,'state':result.get('state','failed'),'source_processing':source,'failure_streak':failures,'result':result})
+     logging.getLogger('rentalsourcing.reliability').info('OFFMARKET_REFRESH '+json.dumps({
+        'state':result.get('state'),'source_processing':source,'next_at':next_at,
+        'counts':result.get('counts',{}),'penten_dispositions':(result.get('realscout_audit') or {}).get('counts'),
+        'scheduler_validation_id':validation['id'] if validation else None},sort_keys=True))
    except Exception as e:
     logging.getLogger('rentalsourcing.reliability').warning('OFFMARKET_REFRESH_FAILED '+type(e).__name__)
     if s:

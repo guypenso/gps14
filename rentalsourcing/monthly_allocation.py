@@ -101,14 +101,83 @@ def period(settings, now, purpose):
     return 'cycle-purpose:' + cycle_key(settings, now) + ':' + purpose
 
 
+def listing_plan(store, settings, now, states=None, *, run_limit=None):
+    """Plan one scheduled window from the same ledger used to reserve requests."""
+    from .coverage_strategy import VERSION, advance_reason, rank
+    from .partition_discovery import ORDER, PREFIX, _prepare_reason
+    from .sync_runtime import get
+
+    cap = limits(settings)['listing']
+    used = store.count_usage(period(settings, now, 'listing'))
+    base = listing_limit_now(settings, now)
+    plan = {'policy': VERSION, 'base_released': base, 'effective_limit': base,
+            'listing_used': used, 'listing_remaining': max(0, cap - used),
+            'available': 0, 'advance': None, 'planned_partitions': [], 'reason': None}
+    if not active(settings, now):
+        return {**plan, 'reason': block_reason(settings, now)}
+    slot = scheduled_slot(now)
+    if not slot:
+        return {**plan, 'reason': 'outside_scheduled_listing_window'}
+    if used >= cap:
+        return {**plan, 'reason': 'listing_purpose_allocation_exhausted'}
+    account = store.budget_health(settings, now, record_warning=False)['remaining']
+    if account <= 0:
+        return {**plan, 'reason': 'account_wide_allowance_exhausted'}
+    day_left = settings.per_day - store.count_usage(now.strftime('day:%Y-%m-%d'))
+    if day_left <= 0:
+        return {**plan, 'reason': 'daily_request_limit_reached'}
+    scope_used = store.count_usage('request_scope:multi-discovery:' + ':'.join(slot))
+    run_left = (settings.per_run if run_limit is None else run_limit) - scope_used
+    if run_left <= 0:
+        return {**plan, 'reason': 'scheduled_run_request_limit_reached'}
+    if states is None:
+        states = {slug: get(store, PREFIX + slug, {}) for slug in ORDER}
+    eligible = [slug for slug in ORDER if not _prepare_reason(states.get(slug, {}), *slot, now)]
+    eligible.sort(key=lambda slug: rank(slug, states.get(slug, {}), now, ORDER))
+    if not eligible:
+        return {**plan, 'reason': 'no_query_ready'}
+    if used == base and not scope_used:
+        next_slot = next((slot_at for slot_at in _slots(*grant_window(settings)) if slot_at > now), None)
+        if next_slot and listing_limit_now(settings, next_slot) > base:
+            urgent = next((slug for slug in eligible if states.get(slug)
+                           and advance_reason(states[slug], now)), None)
+            if urgent:
+                # An advance counts against the same purpose ledger. The next
+                # slot has one fewer request, and this slot cannot take a second.
+                plan['effective_limit'] = base + 1
+                plan['advance'] = {'partition': urgent, 'reason': advance_reason(states[urgent], now),
+                                   'from_slot': next_slot.astimezone(ISRAEL).isoformat()}
+                eligible = [urgent]
+    remaining = min(plan['effective_limit'] - used, account, day_left, run_left)
+    plan['available'] = max(0, remaining)
+    plan['reason'] = None if remaining > 0 else 'monthly_listing_pacing'
+    if remaining > 0:
+        plan['planned_partitions'] = [
+            {'partition': slug, 'offset': 0 if states.get(slug, {}).get('query_complete')
+             else states.get(slug, {}).get('offset', 0)} for slug in eligible[:remaining]
+        ]
+    return plan
+
+
+def next_listing_windows(store, settings, now):
+    local_day = now.astimezone(ISRAEL).date()
+    slots = [
+        dt.datetime.combine(local_day + dt.timedelta(days=offset), dt.time(hour), tzinfo=ISRAEL)
+        for offset in range(3) for hour in (8, 20)
+    ]
+    return [
+        {'at_israel': at.isoformat(),
+         **listing_plan(store, settings, at.astimezone(dt.timezone.utc))}
+        for at in [slot for slot in slots if slot > now][:2]
+    ]
+
+
 def available(store, settings, now, purpose):
     if not active(settings, now) or purpose not in limits(settings):
         return 0
     cap = limits(settings)[purpose]
     if purpose == 'listing':
-        cap = min(cap, listing_limit_now(settings, now))
-        if not scheduled_slot(now):
-            return 0
+        return listing_plan(store, settings, now)['available']
     elif purpose == 'rent':
         cap = min(cap, rent_limit_now(settings, now))
     used = store.count_usage(period(settings, now, purpose))
@@ -128,7 +197,10 @@ def reservation_periods(store, settings, now, purpose, scope):
         expected = 'multi-discovery:' + slot[0] + ':' + slot[1] if slot else None
         if not scope or scope[0] != expected:
             raise BudgetExceeded('Listing allowance is reserved for the scheduled slot')
-        limit = listing_limit_now(settings, now)
+        plan = listing_plan(store, settings, now, run_limit=scope[1])
+        if not plan['available']:
+            raise BudgetExceeded('Listing allocation unavailable: ' + str(plan['reason']))
+        limit = plan['effective_limit']
     else:
         if scope and str(scope[0]).startswith('multi-discovery:'):
             raise BudgetExceeded('Enrichment cannot spend the listing discovery scope')
@@ -152,8 +224,10 @@ def purpose_readiness(store,settings,now,purpose):
     window=grant_window(settings)
     for slot in _slots(*window):
         if slot<=now:continue
-        released=listing_limit_now(settings,slot) if purpose=='listing' else rent_limit_now(settings,slot) if purpose=='rent' else cap
-        if released>used and store.count_usage(slot.strftime('day:%Y-%m-%d'))<settings.per_day:
+        eligible = (listing_plan(store,settings,slot)['available']>0 if purpose=='listing' else
+                    (rent_limit_now(settings,slot) if purpose=='rent' else cap)>used
+                    and store.count_usage(slot.strftime('day:%Y-%m-%d'))<settings.per_day)
+        if eligible:
             return {'state':'scheduled','reason':'monthly_'+purpose+'_pacing','available_now':0,
                     'purpose_remaining':cap-used,'next_at':slot.isoformat(),
                     'forecast_note':'Revalidated atomically at execution; no future capacity is spent or renewed.'}
@@ -168,6 +242,7 @@ def snapshot(store, settings, now):
             'used': {kind: store.count_usage(period(settings, now, kind)) for kind in caps},
             'available': {kind: available(store, settings, now, kind) for kind in caps},
             'listing_cumulative_pace_limit': listing_limit_now(settings, now),
+            'listing_plan': listing_plan(store, settings, now),
             'rent_cumulative_pace_limit': rent_limit_now(settings, now),
             'readiness':{kind:purpose_readiness(store,settings,now,kind) for kind in ('listing','rent')},
             'provider_calls': 0}

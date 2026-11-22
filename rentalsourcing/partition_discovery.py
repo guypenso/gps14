@@ -16,7 +16,7 @@ from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v5'
+VERSION = 'multi-partition-v6'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -121,10 +121,15 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     now = clock()
     special_limit = allowance(store, settings, now, day, slot)
     special = special_limit is not None
-    remaining = special_limit if special else store.scheduled_allowance(settings, now)
-    if not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests:
-        from .monthly_allocation import available
-        remaining = min(remaining, available(store, settings, now, 'listing'))
+    states = {slug: _state(store, slug, query) for slug, query in scopes(boundary).items()}
+    weighted = not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests
+    plan = None
+    if weighted:
+        from .monthly_allocation import listing_plan
+        plan = listing_plan(store, settings, now, states)
+        remaining = plan['available']
+    else:
+        remaining = special_limit if special else store.scheduled_allowance(settings, now)
     # An expired allocation can still return a zero allowance for a later
     # scheduled slot. That slot has no allocation scope; keep the run alive
     # for cached evidence, RealScout intake and delivery recovery.
@@ -134,8 +139,6 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     effective = replace(settings, per_run=max(1, remaining), per_day=(6 if day=='2026-11-13' else 4) if special else settings.per_day,
                         max_pages=1, retries=0, email_enabled=False)
     client = ListingClient(store, effective, clock, opener, request_scope=scope)
-    states = {slug: _state(store, slug, query) for slug, query in scopes(boundary).items()}
-    weighted = not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests
     if weighted:
         from .billing import cycle_key
         selection_cycle = cycle_key(settings, now)
@@ -146,13 +149,16 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     report = prior or {'version': VERSION, 'run_key': key, 'started_at': now.isoformat(),
                       'pages': [], 'job_ids': [], 'new_source_ids': [], 'partitions': {}}
     health=store.budget_health(settings,now,record_warning=False)
-    if weighted:
-        from .monthly_allocation import limits,period
-        listing_exhausted=store.count_usage(period(settings,now,'listing'))>=limits(settings)['listing']
-    else:listing_exhausted=False
-    paced=not remaining and health['remaining']>0 and weighted and not listing_exhausted and available(store,settings,now,'listing')==0
-    report.update(request_limit=remaining, discovery_state='scheduled_pacing_no_listing_request' if paced else 'skipped_budget_exhausted' if not remaining else 'verification_only',
-                  budget_reason='monthly_listing_pacing' if paced else health.get('block_reason') or ('listing_purpose_allocation_exhausted' if listing_exhausted else 'account_or_daily_allowance_exhausted' if not remaining else None))
+    budget_reason = plan['reason'] if plan else health.get('block_reason')
+    paced = budget_reason == 'monthly_listing_pacing'
+    no_query_ready = budget_reason == 'no_query_ready'
+    state = ('scheduled_pacing_no_listing_request' if paced else
+             'source_unavailable' if no_query_ready else
+             'skipped_budget_exhausted' if not remaining else 'verification_only')
+    report.update(request_limit=remaining, discovery_state=state,
+                  budget_reason=budget_reason or ('account_or_daily_allowance_exhausted' if not remaining else None))
+    if plan:
+        report['listing_plan'] = plan
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
     unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}
@@ -164,7 +170,11 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
         # Checking eligibility must not reset an unselected completed query.
         # Open a new generation only when this partition receives an actual turn.
-        reason = _prepare_reason(states[slug], day, slot, now) if remaining else 'monthly_pacing' if paced else 'budget_blocked'
+        reason = _prepare_reason(states[slug], day, slot, now)
+        if not reason and not remaining:
+            reason = 'monthly_pacing' if paced else 'budget_blocked'
+        if not reason and plan and plan['advance'] and slug != plan['advance']['partition']:
+            reason = 'reserved_for_overdue_partition'
         if manual and store.count_usage('request_scope:'+key+':'+slug)>=MANUAL_LIMITS[slug]:reason='partition_limit_reached'
         report['partitions'][slug] = {'state': reason or ('budget_blocked' if not remaining else 'awaiting_turn'), 'query': states[slug]['query'],
             'offset_before': states[slug]['offset'], 'coverage_claim': 'configured_provider_query_only',
@@ -253,7 +263,8 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
             perf['new_identities']+=len(page_ids-before_page.keys());perf['known_identities']+=len(page_ids&before_page.keys())
             perf['new_reviewable']+=sum(i not in before_page and after_page.get(i,(0,'Rejected'))[1]!='Rejected' for i in page_ids)
             perf['price_updates']+=sum(i in before_page and after_page.get(i,(0,None))[0]!=before_page[i][0] for i in page_ids)
-            state['selection_policy']='freshness-fairness-yield-v1'
+            from .coverage_strategy import VERSION as SELECTION_POLICY
+            state['selection_policy']=SELECTION_POLICY
             if state['query_complete']:
                 state['last_complete_at'] = clock().isoformat()
                 eligible.remove(slug)
@@ -335,7 +346,7 @@ def snapshot(store, now):
     last = {k: v for k, v in last.items() if k in {'version','run_key','started_at','finished_at','request_limit',
         'requests','requests_consumed','received_this_run','remaining_budget','discovery_state',
         'discovery_complete','discovery_partial','pages','partitions','delivery_totals','penten_receipts',
-        'fresh_request_made','latest_listing_observation_at','budget_reason'}}
+        'fresh_request_made','latest_listing_observation_at','budget_reason','listing_plan','free_source'}}
     return {'version': VERSION, 'allocation': allocation_snapshot(store, now),
             'partitions': states, 'last_run': last,
             'provider_calls': 0, 'geographic_completeness': 'not_verified'}
