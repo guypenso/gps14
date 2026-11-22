@@ -25,8 +25,56 @@ def reevaluate(store,boundary,now,*,atomic=True):
                     state,_,reason=tax_verification(cached[0],now.date());reasons=[reason] if reason else []
             if state!=old_state or reasons!=json.loads(old_reasons):
                 store.set_verification(identity,state,reasons);changed+=1
-        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=2,maximum_price_by_bedrooms={2:150000,3:200001,4:200001},bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max=2400,tax_comparison="<=",policy_version="investment-20261111-two-bedroom",single_family_only=True))
+        store.save_setting('criteria',dict(city='Pittsburgh',approved_municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],county='Allegheny',high_rent_exception_monthly_strictly_above=2300,zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,excluded_property_types=['Townhouse','Townhome','Rowhouse','Condominium'],state='PA',bedrooms_min=2,maximum_price_by_bedrooms={2:150000,3:200001,4:200001},bathrooms_min=1,sqft_min=1000,price_max=200001,excluded_zip=sorted(EXCLUDED_ZIPS),tax_add=100,tax_max_by_bedrooms={2:2000,3:3000,4:3000},tax_comparison="<=",policy_version="investment-20261122-bedroom-tax-v1",single_family_only=True))
     return changed
+
+def reconcile_tax_policy(store,boundary,now):
+    """One stored-only policy backfill; retain human decisions and source dates."""
+    from .investment_policy import SCREENING_POLICY_VERSION
+    from .sync_runtime import get
+    from .tax_backlog import review_snapshot,review_deferred
+    key='tax_policy_reconciliation:'+SCREENING_POLICY_VERSION
+    prior=get(store,key)
+    if prior:return prior
+    reviews=review_snapshot(store)
+    rows=store.execute('SELECT id,payload,state,reasons,source,observed_at FROM properties').fetchall()
+    counts={'policy_version':SCREENING_POLICY_VERSION,'at':now.isoformat(),'stored_reevaluated':len(rows),
+            'newly_eligible_3_bedrooms':0,'newly_eligible_4_bedrooms':0,
+            'newly_eligible_2_bedrooms':0,'pending_tax_verification':0,
+            'excluded_other_hard_rules':0,'manual_decisions_preserved':0,
+            'fresh_delivery_candidates':0,'stale_held':0,'provider_calls':0,'email_sends':0,
+            'source_ids':[]}
+    from .digest import recent_timestamp
+    with store.transaction():
+        for identity,raw,old_state,old_reasons,source,observed in rows:
+            p=json.loads(raw);decision=reviews.get(identity,{})
+            protected=review_deferred(identity,store,reviews=reviews) or decision.get('status') not in (None,'new') or bool(decision.get('contract_state')) or bool(decision.get('manual_exception'))
+            if protected:counts['manual_decisions_preserved']+=1
+            base,reasons=verification(p,boundary)
+            if base=='Rejected':
+                counts['excluded_other_hard_rules']+=1
+                if not protected and (old_state!=base or json.loads(old_reasons)!=reasons):store.set_verification(identity,base,reasons)
+                continue
+            tax=store.get_tax(identity,now.isoformat()) if source==LIVE else None
+            valid=tax and tax[1]==LIVE and isinstance(tax[0],dict) and tax[0].get('id')==identity and not demo_marked(tax[0])
+            if source!=LIVE:state,reason='Pending Verification','non_live_source'
+            elif not recent_timestamp(observed,now):state,reason='Pending Verification','stale_listing'
+            elif base=='Candidate' and valid:state,_,reason=tax_verification(tax[0],now.date())
+            else:state,reason='Pending Verification','tax_verification_required' if base=='Candidate' else 'non_tax_evidence_required'
+            if state=='Pending Verification' and reason in ('tax_verification_required','missing_tax_history','missing_tax_year','invalid_latest_tax_amount','tax_not_verified','missing_bedroom_tax_threshold'):counts['pending_tax_verification']+=1
+            old_tax_only=old_state=='Rejected' and bool(json.loads(old_reasons)) and set(json.loads(old_reasons))<= {'annual_tax_too_high','bedrooms'}
+            if old_tax_only and state in ('Qualified','Pending Verification'):
+                counts['newly_eligible_'+str(p.get('bedrooms'))+'_bedrooms']=counts.get('newly_eligible_'+str(p.get('bedrooms'))+'_bedrooms',0)+1
+                if not protected:
+                    if recent_timestamp(observed,now):counts['fresh_delivery_candidates']+=1;counts['source_ids'].append(identity)
+                    else:counts['stale_held']+=1
+            if not protected and (old_state!=state or json.loads(old_reasons)!=([reason] if reason else [])):
+                store.set_verification(identity,state,[reason] if reason else [])
+        store.save_setting(key,counts)
+        from .investment_policy import thresholds
+        store.save_setting('criteria',{**get(store,'criteria',{}),**thresholds(),
+            'county':'Allegheny','approved_municipalities':['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality']})
+    return counts
 
 def reconcile_bedroom_policy(store,boundary,now):
     """Only automated bedroom rejections; preserve history and owner decisions."""

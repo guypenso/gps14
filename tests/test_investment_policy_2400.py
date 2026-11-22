@@ -8,7 +8,7 @@ from rentalsourcing.listing_intake import evaluate
 from rentalsourcing.criteria import reevaluate
 from rentalsourcing.offmarket import claim_schedule, next_source_refresh
 
-@pytest.mark.parametrize('amount,expected',[(1900,'Qualified'),(2299.99,'Qualified'),(2300,'Qualified'),(2300.001,'Rejected'),(2300.01,'Rejected')])
+@pytest.mark.parametrize('amount,expected',[(1900,'Qualified'),(2899.99,'Qualified'),(2900,'Qualified'),(2900.001,'Rejected'),(2900.01,'Rejected')])
 def test_inclusive_tax_ceiling_without_rounding_down(amount,expected):
     assert tax_verification(taxes(amount=amount))[0]==expected
     assert bool(latest_tax(taxes(amount=amount)))==(expected=='Qualified')
@@ -16,7 +16,7 @@ def test_inclusive_tax_ceiling_without_rounding_down(amount,expected):
 def test_tax_change_preserves_identity_decisions_and_unverified_evidence(store,boundary,clock):
     p=listing('known',addressLine1='100 Fixture Ave')
     store.save_property('known',p,'Rejected',['annual_tax_too_high'],LIVE,1,clock().isoformat())
-    store.save_tax('known',taxes('known',2300),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
+    store.save_tax('known',taxes('known',2900),LIVE,clock().isoformat(),(clock()+dt.timedelta(days=7)).isoformat())
     store.save_setting('penten_review:known',{'status':'rejected','reviewed_at':clock().isoformat()})
     reevaluate(store,boundary,clock())
     from test_listing_intake import alert

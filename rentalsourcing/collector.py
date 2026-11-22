@@ -18,8 +18,16 @@ LIVE='rentcast-live'
 class RequestDeferred(BudgetExceeded):pass
 
 def tax_expiry(record,now,settings):
-    from .core import tax_verification
-    hours=settings.tax_cache_hours if tax_verification(record,now.date())[0]!='Pending Verification' else settings.negative_tax_cache_hours
+    # Cache completeness concerns the provider's annual tax history, not the
+    # listing's bedroom-specific investment decision. Property records often
+    # omit bedrooms; using the screening result here would expire valid tax
+    # evidence early and needlessly repeat paid requests.
+    from .core import number
+    taxes=record.get('propertyTaxes') if isinstance(record,dict) else None
+    years=[int(y) for y in taxes if str(y).isdigit() and 1900<=int(y)<=now.year] if isinstance(taxes,dict) else []
+    entry=taxes.get(str(max(years))) if years else None
+    complete=isinstance(entry,dict) and entry.get('year')==max(years) and number(entry.get('total')) and entry['total']>=0
+    hours=settings.tax_cache_hours if complete else settings.negative_tax_cache_hours
     return min(now+dt.timedelta(hours=hours),dt.datetime(now.year+1,1,1,tzinfo=dt.timezone.utc))
 
 class Client:

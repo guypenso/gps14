@@ -6,7 +6,7 @@ from pathlib import Path
 from .provenance import demo_marked
 from .turnkey import evidence as turnkey_evidence
 from .condominium import evidence as condominium_evidence
-from .investment_policy import PRICE_MAX, TAX_BUFFER, TAX_CEILING, annual_tax_passes,bedroom_price_rejection
+from .investment_policy import PRICE_MAX, TAX_BUFFER, annual_tax_limit, annual_tax_passes,bedroom_price_rejection
 
 EXCLUDED_ZIPS=frozenset({'15210','15203','15204','15211'})
 
@@ -74,7 +74,7 @@ def latest_tax(record, today=None):
     if not isinstance(entry, dict) or entry.get('year') != year: return None
     total = entry.get('total')
     if not number(total) or total < 0: return None
-    if not annual_tax_passes(total): return None
+    if not annual_tax_passes(total,record.get('_screening_bedrooms',record.get('bedrooms'))): return None
     return {'year': year, 'annual': total, 'adjusted': round(total + 100, 2)}
 
 
@@ -179,7 +179,9 @@ def tax_verification(record, today=None):
         return 'Pending Verification',None,'invalid_latest_tax_amount'
     amount=Decimal(str(entry['total']));adjusted=amount+TAX_BUFFER
     tax={'year':year,'annual':float(amount),'adjusted':float(adjusted)}
-    if adjusted>TAX_CEILING:
+    ceiling=annual_tax_limit(record.get('_screening_bedrooms',record.get('bedrooms')))
+    if ceiling is None:return 'Pending Verification',tax,'missing_bedroom_tax_threshold'
+    if adjusted>ceiling:
         rent=record.get('_rentcast_rent') or {}
         try:rent_date=dt.datetime.fromisoformat(rent.get('observed_at','').replace('Z','+00:00')).date()
         except (ValueError,TypeError):rent_date=None

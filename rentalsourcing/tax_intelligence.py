@@ -15,13 +15,14 @@ def _time(value):
   return parsed.astimezone(UTC) if parsed.tzinfo else None
  except (TypeError,ValueError):return None
 
-def provider_evidence(identity,row,now):
+def provider_evidence(identity,row,now,bedrooms=None):
  """Expired provider evidence is historical, never a current verification."""
  if not row:return None
  raw,source,fetched,expires=row
  try:record=json.loads(raw)
  except (TypeError,ValueError):return None
  if source!=LIVE or not isinstance(record,dict) or record.get('id')!=identity or demo_marked(record):return None
+ if bedrooms is not None:record={**record,'_screening_bedrooms':bedrooms}
  status,tax,reason=tax_verification(record,now.date())
  if not tax:return {'state':'unknown','source':'RentCast Property Records','fetched_at':fetched,'reason':reason}
  current=bool(_time(fetched) and _time(expires) and _time(fetched)<=now<_time(expires))
@@ -30,8 +31,8 @@ def provider_evidence(identity,row,now):
          'source':'RentCast Property Records','qualification_gate':status if current else 'Pending Verification',
          'warning':None if current else 'Historical provider tax; current annual liability requires verification'}
 
-def evidence(identity,history,estimate,now):
- provider=provider_evidence(identity,history,now)
+def evidence(identity,history,estimate,now,bedrooms=None):
+ provider=provider_evidence(identity,history,now,bedrooms)
  official=estimate if isinstance(estimate,dict) and estimate.get('state')=='estimated' and number(estimate.get('annual')) else None
  return {'state':provider['state'] if provider and provider['state']=='provider_verified' else 'official_data_estimate' if official else 'historical' if provider and provider['state']=='historical' else 'unknown',
          'provider':provider,'official_estimate':official,'parcel_id':estimate.get('parcel_id') if isinstance(estimate,dict) else None,
@@ -50,7 +51,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  histories={id:(raw,source,fetched,expires) for id,raw,source,fetched,expires in store.execute('SELECT property_id,payload,source,fetched_at,expires_at FROM tax_history').fetchall()}
  queue=[];summary={'estimated':0,'historical':0,'unknown':0,'unique_parcel':0,'ambiguous_parcel':0}
  for item in ranked:
-  result=evidence(item['source_id'],histories.get(item['source_id']),estimates.get(item['source_id']),now)
+  result=evidence(item['source_id'],histories.get(item['source_id']),estimates.get(item['source_id']),now,item.get('bedrooms'))
   summary['estimated' if result['official_estimate'] else 'unknown']+=1
   if result['provider'] and result['provider']['state']=='historical':summary['historical']+=1
   if result['parcel_match']=='unique_parcel':summary['unique_parcel']+=1
@@ -85,7 +86,13 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
  from .listing_report import listing_report
  listing_intake=listing_report(store,boundary,now)
  from .discovery_audit import snapshot as discovery_snapshot
+ from .sync_runtime import get
+ from .investment_policy import SCREENING_POLICY_VERSION
+ tax_policy=get(store,'tax_policy_reconciliation:'+SCREENING_POLICY_VERSION,{})
+ tax_policy_delivery=get(store,'stored-review-inventory:'+SCREENING_POLICY_VERSION,{})
  return {'as_of':now.isoformat(),'source_records':coverage['counts'].get('stored_unique',0),
+         'tax_policy_reconciliation':{k:v for k,v in tax_policy.items() if k!='source_ids'},
+         'tax_policy_delivery':{'synced_at':tax_policy_delivery.get('synced_at'),'receipt_counts':tax_policy_delivery.get('receipt_counts'),'counts':tax_policy_delivery.get('counts'),'pending_batches':sum(not b.get('synced_at') for b in tax_policy_delivery.get('batches',[]))},
          'resource_envelope':__import__('rentalsourcing.runtime_readiness',fromlist=['resource_envelope']).resource_envelope(store),
          'service_quality':__import__('rentalsourcing.service_quality',fromlist=['snapshot']).snapshot(store,now),
          'non_tax_pass':coverage['counts'].get('non_tax_pass',0),

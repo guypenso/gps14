@@ -72,11 +72,11 @@ def calculate(row,rates,now,source_sha):
             inputs.append(dict(levy=levy,taxable_assessment=float(value),mills=str(rate),amount=float(value*rate/1000)))
         annual=sum((Decimal(str(x['taxable_assessment']))*Decimal(x['mills'])/1000 for x in inputs),Decimal(0)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
     except (InvalidOperation,ValueError,TypeError,KeyError):return fail('Incomplete assessment/rate inputs')
-    return dict(state='estimated',annual=float(annual),year=rates['year'],school_period=rates['school_period'],retrieved_at=now.isoformat(),match_status='unique_parcel',confidence='official_data_estimate_unverified_bill',assessment_flags={k:row[k] for k in ['HOMESTEADFLAG','FARMSTEADFLAG','ABATEMENTFLAG','CLEANGREEN']},sources=sources,inputs=inputs,formula='sum(taxable assessed value × applicable mills / 1000)',threshold_with_buffer=float(annual+100),below_threshold=annual+100<=2400,warnings=['Estimate only; annual bill verification remains mandatory.','Published flag fields show no recorded relief; unrecorded owner-specific credits are not assumed or applied.','Current county/municipal year and current academic school-year rates are annualized together.','Future reassessment, sale, exemption or abatement changes may alter actual taxes.'],**base)
+    return dict(state='estimated',annual=float(annual),year=rates['year'],school_period=rates['school_period'],retrieved_at=now.isoformat(),match_status='unique_parcel',confidence='official_data_estimate_unverified_bill',assessment_flags={k:row[k] for k in ['HOMESTEADFLAG','FARMSTEADFLAG','ABATEMENTFLAG','CLEANGREEN']},sources=sources,inputs=inputs,formula='sum(taxable assessed value × applicable mills / 1000)',threshold_with_buffer=float(annual+100),warnings=['Estimate only; annual bill verification remains mandatory.','Published flag fields show no recorded relief; unrecorded owner-specific credits are not assumed or applied.','Current county/municipal year and current academic school-year rates are annualized together.','Future reassessment, sale, exemption or abatement changes may alter actual taxes.'],**base)
 
 
 def match_csv(stream,candidates,boundary,rates,now,source_sha):
-    keys={};matches={}
+    keys={};matches={};bedrooms={p['id']:p.get('bedrooms') for p in candidates}
     for p in candidates:keys.setdefault(listing_key(p,boundary),[]).append(p['id'])
     csv.field_size_limit(1024*1024)
     reader=csv.DictReader(stream)
@@ -95,7 +95,10 @@ def match_csv(stream,candidates,boundary,rates,now,source_sha):
     for key,ids in keys.items():
         rows=list(matches.get(key,{}).values())
         evidence=calculate(rows[0],rates,now,source_sha) if len(rows)==1 else unknown(now,'No unique official parcel/address match','ambiguous' if rows else 'unmatched',source_sha256=source_sha)
-        for identity in ids:result[identity]=evidence
+        for identity in ids:
+            from .investment_policy import annual_tax_limit,TAX_BUFFER
+            limit=annual_tax_limit(bedrooms[identity])
+            result[identity]={**evidence,'below_threshold':evidence['annual']+float(TAX_BUFFER)<=float(limit) if evidence.get('state')=='estimated' and limit is not None else None}
     return result
 
 

@@ -17,7 +17,7 @@ def listing_report(store,boundary,now):
         if review and review.get('status') not in (None,'new'):continue
         state,reasons=verification(p,boundary)
         if state=='Rejected' or geographic_verification(p,boundary)[0]!='Candidate':continue
-        tax=r.get('tax_evidence');verified=r.get('tax_status')=='provider_verified' and tax and annual_tax_passes(tax['annual'])
+        tax=r.get('tax_evidence');verified=r.get('tax_status')=='provider_verified' and tax and annual_tax_passes(tax['annual'],p.get('bedrooms'))
         cards.append({'source_id':identity,'address':p['formattedAddress'],'price':p.get('price'),
             'qualification':'Qualified' if state=='Candidate' and verified else 'Pending Verification',
             'listing_url':r.get('listing_url'),'observed_at':r['observed_at'],'reasons':reasons})

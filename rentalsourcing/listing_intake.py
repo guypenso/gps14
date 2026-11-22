@@ -113,7 +113,7 @@ def evaluate(store,boundary,records,now,opener=None):
         tax=None;fetched=None
         saved=store.get_tax(identity,now.isoformat()) if matched else None
         if saved and saved[1]==LIVE and isinstance(saved[0],dict) and saved[0].get('id')==identity and not demo_marked(saved[0]):
-            tax_state,value,reason=tax_verification(saved[0],now.date())
+            tax_state,value,reason=tax_verification({**saved[0],'_screening_bedrooms':p.get('bedrooms')},now.date())
             if tax_state=='Rejected':state='Rejected';reasons.append(reason)
             elif tax_state=='Qualified':tax=value;fetched=saved[2]
         deferred=review_deferred(identity,store)
@@ -228,9 +228,12 @@ def audit(store,boundary,now):
     for identity,raw,observed,tax_raw,source in store.execute('SELECT p.id,p.payload,p.observed_at,t.payload,t.source FROM properties p JOIN tax_history t ON p.id=t.property_id WHERE t.expires_at>?',(now.isoformat(),)).fetchall():
         record=json.loads(tax_raw)
         if source!=LIVE or record.get('id')!=identity or demo_marked(record):continue
-        tax_state,tax,_=tax_verification(record,now.date())
-        if tax_state=='Rejected' or not tax or not 1900<=tax['annual']<=2300:continue
-        p=json.loads(raw);review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()
+        p=json.loads(raw)
+        tax_state,tax,_=tax_verification({**record,'_screening_bedrooms':p.get('bedrooms')},now.date())
+        if tax_state=='Rejected' or not tax or tax['annual']<=2300:continue
+        from .investment_policy import annual_tax_passes
+        if not annual_tax_passes(tax['annual'],p.get('bedrooms')):continue
+        review=store.execute('SELECT payload FROM settings WHERE name=?',('penten_review:'+identity,)).fetchone()
         protected=review_deferred(identity,store) or bool(review and json.loads(review[0]).get('status') not in (None,'new'))
         from .digest import recent_timestamp
         non_tax=verification(p,boundary)[0]=='Candidate';fresh=recent_timestamp(observed,now)

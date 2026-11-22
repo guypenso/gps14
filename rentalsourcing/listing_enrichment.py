@@ -43,7 +43,7 @@ def stored_evidence(store,p,observed,now=None):
     if saved[1]!=LIVE or not isinstance(record,dict) or record.get('id')!=p.get('id') or demo_marked(record):return out
     from .tax_intelligence import provider_evidence
     history=store.execute('SELECT payload,source,fetched_at,expires_at FROM tax_history WHERE property_id=?',(p.get('id'),)).fetchone()
-    tax=provider_evidence(p.get('id'),history,now or dt.datetime.now(dt.timezone.utc))
+    tax=provider_evidence(p.get('id'),history,now or dt.datetime.now(dt.timezone.utc),p.get('bedrooms'))
     if tax and tax['state']=='provider_verified':out['provider_tax']=dict(tax,source_id=p.get('id'))
     cached=evidence(record,saved[2])
     if not out['agents'] and cached['agents']:out['agents']=cached['agents']

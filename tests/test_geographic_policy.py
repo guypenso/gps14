@@ -59,7 +59,7 @@ def test_hard_limits_and_excluded_zips_unchanged(policy):
  for zip in EXCLUDED_ZIPS:assert verification(dict(row,zipCode=zip),policy)[0]=='Rejected'
  for field,value in [('price',200001.01),('bedrooms',2),('bathrooms',0),('squareFootage',999)]:assert verification(dict(row,**{field:value}),policy)[0]=='Rejected'
  assert tax_verification(taxes(amount=1899.99),dt.date(2026,11,1))[0]=='Qualified'
- assert tax_verification(taxes(amount=2300.01),dt.date(2026,11,1))[0]=='Rejected'
+ assert tax_verification(taxes(amount=2900.01),dt.date(2026,11,1))[0]=='Rejected'
 
 def test_discovery_circle_covers_both_entire_municipalities_without_extra_request(policy):
  q=listing_parameters(policy);assert 'city' not in q and 'zipCode' not in q
@@ -122,7 +122,7 @@ def test_property_record_type_evidence_cannot_approve_a_townhouse():
  assert tax_verification(dict(record,propertyType='Townhouse'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Single Family',propertySubType='Town House'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Unknown'))[0]=='Pending Verification'
- assert tax_verification(dict(taxes(amount=2300.01),propertyType='Unknown'))[0]=='Rejected'
+ assert tax_verification(dict(taxes(amount=2900.01),propertyType='Unknown'))[0]=='Rejected'
  assert tax_verification(dict(record,propertyType='Single Family',architecturalStyle='Townhouse'))[0]=='Pending Verification'
 
 def test_unverified_geography_cannot_crowd_verified_bellevue_out_of_pending_report(store,settings,clock,policy):

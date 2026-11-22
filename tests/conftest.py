@@ -73,8 +73,8 @@ def listing(identity='fixture-property',**changes):
       listedDate='2026-10-01T00:00:00.000Z'),**changes)
 
 
-def taxes(identity='fixture-property',amount=1500):
-    return dict(id=identity,propertyTaxes={'2025':{'year':2025,'total':amount}})
+def taxes(identity='fixture-property',amount=1500,bedrooms=3):
+    return dict(id=identity,bedrooms=bedrooms,propertyTaxes={'2025':{'year':2025,'total':amount}})
 
 class Response(io.StringIO):
     def __init__(self,data,total=None,status=200):

@@ -302,6 +302,23 @@ def recover(store,boundary,now=None,opener=None):
  except Exception as e:
   from .sync_runtime import classify
   error=classify(e,operation='review-feedback');component(store,'review_feedback','failed' if not error.retryable else 'partial',now=now,pending=1,error=error.safe());incident(store,'review_feedback',error.safe(),now=now);result['feedback']={'state':'failed',**error.safe()}
+ # Re-evaluate stored evidence once per policy version after current owner
+ # decisions are available. Delivery uses the existing idempotent inventory job.
+ if result['feedback'].get('state')=='fresh':
+  from .criteria import reconcile_tax_policy
+  from .investment_policy import SCREENING_POLICY_VERSION
+  policy_result=reconcile_tax_policy(store,boundary,now)
+  result['tax_policy_reconciliation']={k:v for k,v in policy_result.items() if k!='source_ids'}
+  candidates=set(policy_result.get('source_ids',[]))
+  if candidates and configuration():
+   from .review_inventory import run as deliver_policy
+   job='stored-review-inventory:'+SCREENING_POLICY_VERSION
+   try:
+    receipt=deliver_policy(store,boundary,now,execute=True,download=False,config=configuration(),opener=opener,job_key=job,refresh_decisions=False,source_ids=candidates,include_verified=True)
+    result['tax_policy_reconciliation']['delivery_acknowledgments']=receipt.get('receipt_counts',{})
+   except Exception as exc:
+    result['tax_policy_reconciliation']['delivery_state']='pending_recovery'
+    result['tax_policy_reconciliation']['delivery_error_type']=type(exc).__name__
  alias_repair='source_alias_reconciliation:confirmed-rejected-stored-v1'
  if not get(store,alias_repair) and result.get('feedback',{}).get('state')=='fresh':
   from .listing_intake import reconcile_rejected_stored_aliases
