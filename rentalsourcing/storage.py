@@ -326,6 +326,9 @@ class Store:
         if not r:return None
         record=json.loads(r[0]);property_row=self.get_property(identity)
         if property_row and isinstance(record,dict):
+            # Screen a matching tax record against the canonical listing's bedroom
+            # count; provider property records may omit or disagree on this field.
+            if record.get('id')==identity:record={**record,'_screening_bedrooms':property_row['payload'].get('bedrooms')}
             from .rental_intelligence import cached_estimate
             rent=cached_estimate(self,property_row['payload'],dt.datetime.fromisoformat(now.replace('Z','+00:00')))
             if rent:record={**record,'_rentcast_rent':rent}

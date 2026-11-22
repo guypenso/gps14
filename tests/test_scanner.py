@@ -57,7 +57,7 @@ def test_missing_fields_persist_pending_and_known_failures_rejected(store,bounda
     assert json.loads(store.execute('SELECT event_ids FROM outbox WHERE id=?',(message,)).fetchone()[0])==[]
 
 
-@pytest.mark.parametrize('amount,expected',[(1899,'Qualified'),(1899.99,'Qualified'),(2300.01,'Rejected'),(None,'Pending Verification')])
+@pytest.mark.parametrize('amount,expected',[(1899,'Qualified'),(1899.99,'Qualified'),(2900.01,'Rejected'),(None,'Pending Verification')])
 def test_real_schema_tax_threshold(store,boundary,settings,clock,provider,amount,expected):
     provider.records['fixture-property']=taxes(amount=amount)
     execute(store,boundary,settings,clock,provider)

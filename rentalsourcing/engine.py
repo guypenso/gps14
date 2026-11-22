@@ -225,7 +225,7 @@ class Engine:
                     continue
                 rent_saved=store.get_tax(identity,self.clock().isoformat())
                 if rent_saved:record=rent_saved[0]
-                state,tax,reason=tax_verification(record,self.clock().date())
+                state,tax,reason=tax_verification({**record,'_screening_bedrooms':p['payload'].get('bedrooms')},self.clock().date())
                 if source!=LIVE:state,tax,reason='Pending Verification',None,'non_live_tax_source'
                 with store.transaction():
                     store.set_verification(identity,state,[reason] if reason else [])

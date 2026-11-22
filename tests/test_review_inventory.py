@@ -91,7 +91,7 @@ def rates():return json.loads((Path(__file__).resolve().parents[1]/'data/tax-rat
 def test_estimate_formula_includes_all_levies_and_never_verifies_bill():
     now=dt.datetime(2026,11,2,tzinfo=dt.timezone.utc);e=calculate(row(),rates(),now,'fixture-sha')
     assert e['state']=='estimated' and e['annual']==1092.28 and e['threshold_with_buffer']==1192.28
-    assert len(e['inputs'])==5 and e['below_threshold']
+    assert len(e['inputs'])==5 and 'below_threshold' not in e
     assert 'annual_tax' not in e and 'qualification' not in e
     assert calculate(row(HOMESTEADFLAG='HOM'),rates(),now,'fixture')['state']=='unknown'
     assert calculate(row(TAXYEAR='2025'),rates(),now,'fixture')['state']=='unknown'

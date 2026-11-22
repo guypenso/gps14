@@ -66,7 +66,8 @@ def reconcile(store,settings,now):
             if old and dt.datetime.fromisoformat(old[0].replace('Z','+00:00'))>fetched:continue
         except (ValueError,TypeError,KeyError,AttributeError):invalid+=1;continue
         store.save_tax(identity,record,LIVE,fetched.isoformat(),expires.isoformat());copied+=1
-        if tax_verification(record,now.date())[0]!='Pending Verification':resolved+=1
+        recovered=store.get_tax(identity,now.isoformat())
+        if recovered and tax_verification(recovered[0],now.date())[0]!='Pending Verification':resolved+=1
     return dict(recovered_cache_records=copied,resolved_tax_decisions=resolved,invalid_cache_records=invalid)
 
 
