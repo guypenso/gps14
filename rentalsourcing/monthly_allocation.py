@@ -105,14 +105,19 @@ def listing_plan(store, settings, now, states=None, *, run_limit=None):
     """Plan one scheduled window from the same ledger used to reserve requests."""
     from .coverage_strategy import VERSION, advance_reason, rank
     from .partition_discovery import ORDER, PREFIX, _prepare_reason
+    from .municipal_coverage import AREAS, PACING_POLICY, UNIFIED, overlap_size, traversal_expired
     from .sync_runtime import get
 
+    order = (UNIFIED,) if states is None or UNIFIED in states else ORDER
+    unified = order == (UNIFIED,)
     cap = limits(settings)['listing']
     used = store.count_usage(period(settings, now, 'listing'))
     base = listing_limit_now(settings, now)
     plan = {'policy': VERSION, 'base_released': base, 'effective_limit': base,
             'listing_used': used, 'listing_remaining': max(0, cap - used),
             'available': 0, 'advance': None, 'planned_partitions': [], 'reason': None}
+    if unified:
+        plan.update(policy=PACING_POLICY,query_strategy='unified_radius',target_areas=list(AREAS))
     if not active(settings, now):
         return {**plan, 'reason': block_reason(settings, now)}
     slot = scheduled_slot(now)
@@ -131,9 +136,10 @@ def listing_plan(store, settings, now, states=None, *, run_limit=None):
     if run_left <= 0:
         return {**plan, 'reason': 'scheduled_run_request_limit_reached'}
     if states is None:
-        states = {slug: get(store, PREFIX + slug, {}) for slug in ORDER}
-    eligible = [slug for slug in ORDER if not _prepare_reason(states.get(slug, {}), *slot, now)]
-    eligible.sort(key=lambda slug: rank(slug, states.get(slug, {}), now, ORDER))
+        states = {slug: get(store, PREFIX + slug, {}) for slug in order}
+    eligible = [slug for slug in order if not _prepare_reason(states.get(slug, {}), *slot, now)]
+    if not unified:
+        eligible.sort(key=lambda slug: rank(slug, states.get(slug, {}), now, order))
     if not eligible:
         return {**plan, 'reason': 'no_query_ready'}
     if used == base and not scope_used:
@@ -152,10 +158,13 @@ def listing_plan(store, settings, now, states=None, *, run_limit=None):
     plan['available'] = max(0, remaining)
     plan['reason'] = None if remaining > 0 else 'monthly_listing_pacing'
     if remaining > 0:
-        plan['planned_partitions'] = [
-            {'partition': slug, 'offset': 0 if states.get(slug, {}).get('query_complete')
-             else states.get(slug, {}).get('offset', 0)} for slug in eligible[:remaining]
-        ]
+        for slug in eligible[:remaining]:
+            state = states.get(slug, {})
+            offset = 0 if state.get('query_complete') or (unified and traversal_expired(state,now)) else state.get('offset',0)
+            next_page = {'partition': slug, 'offset': max(0, offset - overlap_size(settings.page_size)) if unified else offset}
+            if unified:
+                next_page['checkpoint_offset'] = offset
+            plan['planned_partitions'].append(next_page)
     return plan
 
 

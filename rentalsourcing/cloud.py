@@ -192,8 +192,21 @@ def _daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=N
             stats.update(partial=True,listing_intake_state='failed',free_source=free_source_status({'state':'failed'}))
             event('listing_pre_report_failed',error_type=type(exc).__name__)
     if slot:
+        from .municipal_coverage import AREAS, window_evidence
+        stats.setdefault('target_areas',list(AREAS))
+        try:
+            stats['municipalities']=window_evidence(store,boundary,stats,clock())
+        except Exception as exc:
+            # Failure in evidence attribution cannot suppress the existing
+            # delivery or email workflow. Record the gap on each area.
+            stats['municipal_coverage_error']=type(exc).__name__
+            stats['partial']=True
+            stats['municipalities']={slug:{'name':name,'state':'stored_inventory_check_failed',
+                'market_completeness':'not_verified'} for slug,name in AREAS.items()}
         store.save_setting('multi-discovery:'+day+':'+slot,stats)
         store.save_setting('multi-discovery:last',stats)
+        event('municipal_discovery_coverage',day=day,slot=slot,municipalities=stats['municipalities'],
+              provider_query_exhausted=stats.get('discovery_complete',False))
     if slot=='evening':
         # Delivery and authorized Gmail intake operate independently of a digest.
         if feedback_config and feedback_ok:
@@ -361,8 +374,13 @@ def main(argv=None):
         exists=Path(settings.boundary_file).is_file()
         if exists:
             boundary=load_boundary(settings.boundary_file)
-            from .request import listing_parameters
-            event('geographic_policy',policy=POLICY,municipalities=['Pittsburgh','Bellevue Borough','Pleasant Hills Borough','Bethel Park Municipality'],zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=listing_parameters(boundary))
+            from .municipal_coverage import AREAS, unified_query
+            query, distances=unified_query(boundary)
+            event('geographic_policy',policy=POLICY,municipalities=list(AREAS.values()),
+                  zip_15212_neighborhoods=['Brighton Heights','Spring Hill-City View'],
+                  excluded_neighborhoods=EXCLUDED_NEIGHBORHOODS,query=query,
+                  boundary_max_miles={area:round(value,4) for area,value in distances.items()},
+                  provider_calls=0)
         from .sync_probe import inspect
         event('sync_authentication_probe',**inspect())
         if os.getenv('DATABASE_URL'):
@@ -389,7 +407,7 @@ def main(argv=None):
                     observer.save_setting('monthly_allocation:last',value)
                     event('monthly_allocation_preflight',**value)
                 from .runtime_readiness import snapshot as runtime_snapshot
-                event('runtime_readiness',**runtime_snapshot(observer,settings,dt.datetime.now(dt.timezone.utc)))
+                event('runtime_readiness',**runtime_snapshot(observer,settings,dt.datetime.now(dt.timezone.utc),boundary if exists else None))
             except Exception as exc:
                 event('budget_telemetry_unavailable',error_type=type(exc).__name__)
                 if os.getenv('DISCOVERY_ALLOCATION_ID'):raise

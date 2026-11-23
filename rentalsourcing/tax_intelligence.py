@@ -109,7 +109,7 @@ def snapshot(store,boundary,now=None,offset=0,limit=25):
          'source_access':{'wprdc':'Saved official assessment batch; current remote availability is not inferred from cached data.'},
          'queue':queue[offset:offset+limit],'offset':offset,'limit':limit,'next_offset':offset+limit if offset+limit<len(queue) else None,
          'discovery_execution':discovery_snapshot(store,now,boundary,settings.page_size),
-         'discovery_coverage':__import__('rentalsourcing.partition_discovery',fromlist=['snapshot']).snapshot(store,now),
+         'discovery_coverage':__import__('rentalsourcing.partition_discovery',fromlist=['snapshot']).snapshot(store,now,boundary),
          'next_listing_windows':next_listing_windows(store,settings,now),
          'scheduled_slot_audits':slot_audits,
          'rental_estimates':rental_summary,

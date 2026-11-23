@@ -122,11 +122,18 @@ def render(day,plan,stats,origin):
     date=dt.date.fromisoformat(day).strftime('%d %b %Y')
     subject=f'RentalSourcing | {date} | '+(str(len(new))+' New Opportunities' if new else 'Investment Updates' if updates else 'No New Opportunities')
     fresh=bool(stats.get('fresh_request_made') and stats.get('pages') and stats.get('requests_consumed',0)>0)
-    names={'pittsburgh-bellevue':'Pittsburgh / Bellevue query','bethel-park':'Bethel Park query','pleasant-hills':'Pleasant Hills query'}
+    from .municipal_coverage import AREAS, UNIFIED
+    names={'pittsburgh-bellevue':'Pittsburgh / Bellevue query','bethel-park':'Bethel Park query',
+           'pleasant-hills':'Pleasant Hills query', UNIFIED:', '.join(AREAS.values())}
     areas=list(dict.fromkeys(names.get(p['partition'],p['partition']) for p in stats.get('pages',[])))
-    if fresh:coverage='Fresh RentCast retrieval: '+', '.join(areas)+f". {stats.get('received_this_run',0)} listing records returned. Query coverage is partial; full municipal coverage is unverified."
+    if fresh:
+        progress='Provider query exhausted.' if stats.get('discovery_complete') else 'More provider pages may remain.'
+        coverage=f"Fresh RentCast retrieval targeting {', '.join(areas)}. {stats.get('received_this_run',0)} listing records returned. {progress} Complete municipal inventory is unverified."
     elif stats.get('discovery_state')=='scheduled_pacing_no_listing_request':coverage='No fresh RentCast query this window. Monthly pacing reserved requests for later windows.'
     else:coverage='No fresh RentCast results were verified in this window.'
+    municipalities=stats.get('municipalities',{})
+    if set(municipalities)==set(AREAS) and all(a.get('stored_inventory_checked_at') for a in municipalities.values()):
+        coverage+=' Stored listing evidence was checked for all four municipalities.'
     free=stats.get('free_source',{})
     if free.get('mailbox_checked',free.get('checked')):
         coverage+=' RealScout alerts were checked.'

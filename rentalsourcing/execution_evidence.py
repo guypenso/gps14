@@ -35,7 +35,7 @@ def snapshot(store,now,boundary=None):
             'outcome':{k:v for k,v in execution.get('result',{}).items() if k in
                 ('status','scan','processing_outcome','exit_failure','requests','rent_requests','workflow_status','unresolved_critical','price_queue','email_status')},
             'metrics':{k:evidence[k] for k in ('started_at','finished_at','discovery_state','requests_consumed',
-                'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state','free_source','listing_plan') if k in evidence}}
+                'received_this_run','delivery_totals','penten_receipts','evening_inventory_receipt','listing_intake_state','free_source','listing_plan','municipalities') if k in evidence}}
     row=store.execute('SELECT id,state,payload,provider_id,first_attempt_at,updated_at FROM outbox WHERE job_id=?',('daily:'+day,)).fetchone()
     if row:
         payload=json.loads(row[2]);body=payload.get('text','')

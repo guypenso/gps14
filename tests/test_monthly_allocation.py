@@ -7,6 +7,7 @@ import pytest
 
 from rentalsourcing.monthly_allocation import active, available, limits, listing_limit_now, listing_plan, period, rent_limit_now, snapshot
 from rentalsourcing.partition_discovery import PREFIX, run
+from rentalsourcing.municipal_coverage import UNIFIED
 from rentalsourcing.storage import BudgetExceeded, Store
 from test_partition_discovery import AreaProvider, MAIN
 from conftest import Response, listing
@@ -79,27 +80,23 @@ def test_cycle_expiry_does_not_reuse_the_same_approval(store,settings,clock):
     assert store.count_usage('cycle:2026-12-15T00:00:00+00:00')==0
 
 
-def test_one_paced_page_and_fair_rotation_without_provider_overrun(store,boundary,settings,clock):
-    s=grant(settings);clock.value=dt.datetime(2026,11,15,6,tzinfo=dt.timezone.utc)
+def test_paced_pages_advance_the_same_all_area_query(store,official_boundary,settings,clock):
+    s=replace(grant(settings),per_run=1)
+    clock.value=dt.datetime(2026,11,15,6,tzinfo=dt.timezone.utc)
     provider=AreaProvider(main=8,bethel=8,pleasant=8)
-    first,_=run(store,boundary,s,'2026-11-15','morning',clock=clock,opener=provider)
-    assert first['requests_consumed']==1 and provider.calls==[(MAIN,0)]
-    clock.value=dt.datetime(2026,11,15,18,tzinfo=dt.timezone.utc)
-    second,_=run(store,boundary,s,'2026-11-15','evening',clock=clock,opener=provider)
-    assert second['requests_consumed']==1 and provider.calls[-1]==('Bethel Park',0)
-    clock.value=dt.datetime(2026,11,16,6,tzinfo=dt.timezone.utc)
-    third,_=run(store,boundary,s,'2026-11-16','morning',clock=clock,opener=provider)
-    assert third['requests_consumed']==1 and provider.calls[-1]==('Pleasant Hills',0)
-    clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
-    fourth,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
-    assert fourth['requests_consumed']==1 and provider.calls[-1]==(MAIN,2)
-    assert fourth['listing_plan']['advance']=={'partition':MAIN,'reason':'unfinished_pagination_overdue','from_slot':'2026-11-17T08:00:00+02:00'}
-    clock.value=dt.datetime(2026,11,17,6,tzinfo=dt.timezone.utc)
-    fifth,_=run(store,boundary,s,'2026-11-17','morning',clock=clock,opener=provider)
-    assert fifth['requests_consumed']==0 and fifth['discovery_state']=='scheduled_pacing_no_listing_request'
-    clock.value=dt.datetime(2026,11,18,6,tzinfo=dt.timezone.utc)
-    sixth,_=run(store,boundary,s,'2026-11-18','morning',clock=clock,opener=provider)
-    assert sixth['requests_consumed']==1 and provider.calls[-1]==(MAIN,4)
+    for day,hour,offset in [(15,6,0),(15,18,2),(16,6,4),(16,18,None),(17,6,6),(18,6,0)]:
+        clock.value=dt.datetime(2026,11,day,hour,tzinfo=dt.timezone.utc)
+        slot='morning' if hour==6 else 'evening'
+        before=len(provider.calls)
+        receipt,_=run(store,official_boundary,s,f'2026-11-{day:02}',slot,clock=clock,opener=provider)
+        if offset is None:
+            assert len(provider.calls)==before and receipt['requests_consumed']==0
+            assert receipt['discovery_state']=='scheduled_pacing_no_listing_request'
+        else:
+            assert provider.calls[before:]==[(MAIN,offset)]
+            assert receipt['requests_consumed']==1
+            assert receipt['pages'][0]['partition']==UNIFIED
+    assert store.budget_health(s,clock())['used']==5
 
 
 def test_nov22_advance_preserves_separate_budgets_and_only_one_request(store,settings,clock):
@@ -108,12 +105,11 @@ def test_nov22_advance_preserves_separate_budgets_and_only_one_request(store,set
     store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'listing'),10))
     store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'rent'),3))
     store.execute('INSERT INTO usage VALUES (?,?)',('cycle:2026-11-15T00:00:00+00:00',13))
-    store.save_setting(PREFIX+MAIN,{'last_success_at':'2026-11-21T06:01:31+00:00','query_complete':False,'offset':500})
-    store.save_setting(PREFIX+'bethel-park',{'last_success_at':'2026-11-22T06:01:19+00:00','query_complete':True})
+    store.save_setting(PREFIX+UNIFIED,{'last_success_at':'2026-11-21T06:01:31+00:00','query_complete':False,'offset':500})
     store.save_setting(PREFIX+'pleasant-hills',{'last_success_at':'2026-11-19T18:01:26+00:00','query_complete':True})
     plan=listing_plan(store,s,clock())
     assert plan['base_released']==10 and plan['available']==1
-    assert plan['advance']['partition']=='pleasant-hills'
+    assert plan['advance']['partition']==UNIFIED
     scope=('multi-discovery:2026-11-22:evening',4)
     if store.pg:
         def reserve(_):
@@ -144,13 +140,13 @@ def test_concurrent_reservations_are_bounded_by_atomic_rent_allocation(store,set
     assert store.budget_health(s,clock())['used']==8
 
 
-def test_scheduled_listing_and_rent_use_separate_clients_and_ledgers(store,boundary,settings,clock,monkeypatch):
+def test_scheduled_listing_and_rent_use_separate_clients_and_ledgers(store,official_boundary,settings,clock,monkeypatch):
     from rentalsourcing.cloud import daily_discovery
     from rentalsourcing.collector import LIVE
     from rentalsourcing.rental_intelligence import cached_estimate
     s=replace(grant(settings),email_enabled=False)
     clock.value=dt.datetime(2026,11,15,6,tzinfo=dt.timezone.utc)
-    p=listing('rent-candidate',addressLine1='100 Fixture Ave')
+    p=listing('rent-candidate',addressLine1='100 Fixture Ave',zipCode='15222',latitude=40.4406,longitude=-79.9959)
     store.save_property(p['id'],p,'Pending Verification',[],LIVE,1,clock().isoformat())
     class DualProvider(AreaProvider):
         def __init__(self):super().__init__(main=0,bethel=0,pleasant=0);self.rent_calls=0
@@ -163,7 +159,7 @@ def test_scheduled_listing_and_rent_use_separate_clients_and_ledgers(store,bound
     monkeypatch.setenv('ENABLE_RENT_ESTIMATES','true')
     monkeypatch.delenv('ENABLE_REVIEW_INVENTORY_SYNC',raising=False)
     monkeypatch.delenv('ENABLE_COMMAND_CENTER_REVIEW_FEEDBACK',raising=False)
-    result=daily_discovery(store,boundary,s,'2026-11-15',slot='morning',clock=clock,opener=provider)
+    result=daily_discovery(store,official_boundary,s,'2026-11-15',slot='morning',clock=clock,opener=provider)
     assert result['requests']==1 and result['rent_requests']==1
     assert len(provider.calls)==1 and provider.rent_calls==1
     assert cached_estimate(store,p,clock())['monthly']==2400

@@ -42,9 +42,13 @@ def model(settings,now):
         day=slot.astimezone(ISRAEL).date().isoformat()
         days.setdefault(day,[]).append({'at_israel':slot.astimezone(ISRAEL).isoformat(),'newly_released_listing_requests':delta})
     caps=limits(settings)
+    from .municipal_coverage import AREAS, overlap_size
     return {'version':VERSION,'state':'forecast','approval_expires_at':window[1].isoformat(),
             'purpose_caps':caps,'days':days,'automatic_renewal':False,'provider_calls':0,
             'capacity_model':{'processing_windows':sum(len(v) for v in days.values()),'listing_pages':caps['listing'],
-             'assumed_pages_per_traversal':4,'provider_query_traversals_at_that_size':caps['listing']/4,
-             'assumptions':'Pittsburgh/Bellevue two pages; Bethel Park and Pleasant Hills one each at limit 500. Inventory can change; official municipal completeness is unverified.',
-             'main_page_share':0.5,'other_partition_page_share_each':0.25}}
+             'target_areas':list(AREAS),'page_size':settings.page_size,
+             'continuation_overlap':overlap_size(settings.page_size),
+             'maximum_one_page_windows':caps['listing'],
+             'example_complete_traversals_at_two_pages':caps['listing']//2,
+             'legacy_traversals_at_four_pages':caps['listing']//4,
+             'market_completeness':'not_verified'}}
