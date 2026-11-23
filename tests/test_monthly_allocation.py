@@ -165,3 +165,27 @@ def test_scheduled_listing_and_rent_use_separate_clients_and_ledgers(store,offic
     assert cached_estimate(store,p,clock())['monthly']==2400
     assert store.budget_health(s,clock())['used']==2
     assert snapshot(store,s,clock())['used']=={'listing':1,'rent':1,'targeted':0,'recovery':0}
+
+
+def test_first_unified_forecast_agrees_with_atomic_reservation(store,official_boundary,settings,clock):
+    from rentalsourcing.municipal_coverage import unified_query
+    from rentalsourcing.partition_discovery import _state
+
+    cfg=replace(grant(settings),page_size=500,approval_expires_at='2026-12-14T10:00:00Z')
+    clock.value=dt.datetime(2026,11,23,18,2,tzinfo=dt.timezone.utc)
+    for key,used in [(period(cfg,clock(),'listing'),11),(period(cfg,clock(),'rent'),3),
+                     ('cycle:2026-11-15T00:00:00+00:00',14)]:
+        store.execute('INSERT INTO usage VALUES (?,?)',(key,used))
+    forecast=listing_plan(store,cfg,clock())
+    assert forecast['available']==1 and forecast['advance']=={
+        'partition':UNIFIED,'reason':'first_unified_query','from_slot':'2026-11-24T08:00:00+02:00'}
+    state=_state(store,UNIFIED,unified_query(official_boundary)[0])
+    assert listing_plan(store,cfg,clock(),{UNIFIED:state})==forecast
+    store.reserve_api(cfg,clock(),purpose='listing',scope=('multi-discovery:2026-11-23:evening',4))
+    assert listing_plan(store,cfg,clock())['available']==0
+    clock.value=dt.datetime(2026,11,24,6,tzinfo=dt.timezone.utc)
+    # An observed first page stayed recent. The next release was already used.
+    state.update(last_success_at='2026-11-23T18:02:00+00:00',query_complete=False,offset=500)
+    store.save_setting(PREFIX+UNIFIED,state)
+    assert listing_plan(store,cfg,clock())['available']==0
+    assert snapshot(store,cfg,clock())['used']=={'listing':12,'rent':3,'targeted':0,'recovery':0}
