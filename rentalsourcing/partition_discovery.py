@@ -1,4 +1,4 @@
-"""Bounded, fair listing discovery using independent durable query cursors.
+"""Bounded all-area discovery with durable provider query cursors.
 
 The existing Engine remains the only ingestion/eligibility implementation.
 Completion means exhaustion of a configured provider query, never proof of
@@ -12,11 +12,12 @@ from dataclasses import replace
 from .collector import Client, RequestDeferred
 from .engine import Engine
 from .investment_policy import POLICY_VERSION
+from .municipal_coverage import AREAS, UNIFIED, overlap_size, page_evidence, pages_for_total, traversal_expired, unified_query
 from .request import listing_parameters, municipal_queries
 from .storage import BudgetExceeded
 from .telemetry import event
 
-VERSION = 'multi-partition-v6'
+VERSION = 'all-area-hybrid-v1'
 PREFIX = 'coverage_partition:' + POLICY_VERSION + ':'
 MAIN = 'pittsburgh-bellevue'
 ORDER = (MAIN, 'bethel-park', 'pleasant-hills')
@@ -41,6 +42,37 @@ class ListingClient(Client):
         return rows, total
 
 
+def _fingerprints(rows):
+    return [(row['id'], hashlib.sha256(json.dumps(row,sort_keys=True).encode()).hexdigest())
+            for row in rows if isinstance(row,dict) and isinstance(row.get('id'),str) and row['id']]
+
+
+def _record_page(state,page,fingerprints,total):
+    seen = state.setdefault('seen_ids', {})
+    duplicates = changed = 0
+    for identity,fingerprint in fingerprints:
+        if identity in seen:
+            duplicates += 1
+            changed += seen[identity] != fingerprint
+        seen[identity] = fingerprint
+    page.update(duplicates=duplicates,changed=changed)
+    state.update(offset=page['offset_after'], query_complete=page['query_complete'],
+                 last_success_at=page['fetched_at'], total=total, failures=0, retry_after=None)
+    state['pages'] = state.get('pages',0) + 1
+    state['observations'] = state.get('observations',0) + page['records']
+    state['duplicate_observations'] = state.get('duplicate_observations',0) + duplicates
+    state['changed_observations'] = state.get('changed_observations',0) + changed
+    if page['query_complete']:
+        state['last_complete_at'] = page['fetched_at']
+    if 'area_observations' in page:
+        overlap = page['offset_before'] - page['offset_requested']
+        warning = state.get('continuity_warning',False) or duplicates < min(overlap,page['records'])
+        page.update(expected_overlap=overlap,continuity_warning=warning)
+        state.update(continuity_warning=warning,last_page=page,
+                     pages_for_reported_total=pages_for_total(total,state['query']['limit']))
+        state['selection_pages'] = state.get('selection_pages',0) + page['requests']
+
+
 def _state(store, slug, query):
     digest = hashlib.sha256(json.dumps(query, sort_keys=True).encode()).hexdigest()
     state = get(store, PREFIX + slug)
@@ -50,13 +82,20 @@ def _state(store, slug, query):
         if row:
             if row[0] > state['offset'] or bool(row[1]) != state['query_complete']:
                 stats = json.loads(row[2])
+                evidence = stats.get('last_listing_page') or {}
                 state['_checkpoint_recovery'] = {'partition': slug, 'job_id': state['job_id'],
-                    'offset_before': state['offset'], 'offset_after': row[0], 'records': row[0]-state['offset'],
-                    'requests': int(stats.get('discovery_state') == 'fresh'),
+                    'offset_before': state['offset'], 'offset_after': row[0],
+                    'records': evidence.get('records', max(0, row[0]-state['offset'])),
+                    'requests': evidence.get('requests', int(stats.get('discovery_state') == 'fresh')),
                     'fetched_at': stats.get('listing_observed_at'), 'checkpoint_recovered': True,
                     'query_complete': bool(row[1]), 'duplicates': None, 'changed': None}
-                state['last_success_at'] = stats.get('listing_observed_at') or row[3]
-                if row[1]: state['last_complete_at'] = row[3]
+                page = state['_checkpoint_recovery']
+                if 'area_observations' in evidence:
+                    page.update({k:evidence[k] for k in ('offset_requested','area_observations')})
+                    _record_page(state,page,evidence['fingerprints'],stats.get('total'))
+                else:
+                    state['last_success_at'] = stats.get('listing_observed_at') or row[3]
+                    if row[1]: state['last_complete_at'] = row[3]
             state.update(offset=row[0], query_complete=bool(row[1]))
         return state
     previous_query={}
@@ -92,21 +131,23 @@ def _prepare_reason(state, day, slot, now):
     return None
 
 
-def _prepare(store, state, day, slot, now, special):
+def _prepare(store, state, day, slot, now):
     reason = _prepare_reason(state, day, slot, now)
     if reason:return reason
-    if state.get('query_complete'):
-        # Completion belongs to one collection generation, not every future
-        # scheduled slot. A later slot must check for new/changed inventory.
-        # The previous scan job and its terminal offset remain untouched.
+    expired = state['partition']==UNIFIED and traversal_expired(state,now)
+    if state.get('query_complete') or expired:
+        # Keep the old job and offset. A completed or week-old traversal
+        # yields to a fresh head on the next run with a released listing call.
         state['previous_generation'] = {k: state.get(k) for k in
             ('job_id','offset','generation_run_key','last_complete_at','pages','observations','total')}
+        state['previous_generation']['end_reason']='stale_traversal' if expired else 'query_exhausted'
         state['job_id'] = None
     if not state.get('job_id'):
         state.update(job_id='coverage:' + POLICY_VERSION + ':' + state['partition'] + ':' + day + ':' + slot + ':' + state['query_hash'][:8],
                      offset=0, query_complete=False, generation_started_at=now.isoformat(),
                      generation_run_key=day + ':' + slot,
-                     seen_ids={}, pages=0, observations=0, duplicate_observations=0, changed_observations=0)
+                     seen_ids={}, pages=0, observations=0, duplicate_observations=0, changed_observations=0,
+                     continuity_warning=False)
     store.save_setting(PREFIX + state['partition'], state)
     return None
 
@@ -121,8 +162,12 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     now = clock()
     special_limit = allowance(store, settings, now, day, slot)
     special = special_limit is not None
-    states = {slug: _state(store, slug, query) for slug, query in scopes(boundary).items()}
+    # Preserve separately authorized historical allocations and their exact
+    # per-partition quotas. New ordinary scheduled windows share one query.
     weighted = not special and settings.approval_mode == 'monthly_budget' and not settings.supplemental_requests
+    queries = {UNIFIED: dict(unified_query(boundary)[0],limit=settings.page_size)} if weighted else scopes(boundary)
+    order = tuple(queries) if weighted else ORDER
+    states = {slug: _state(store, slug, query) for slug, query in queries.items()}
     plan = None
     if weighted:
         from .monthly_allocation import listing_plan
@@ -159,14 +204,15 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                   budget_reason=budget_reason or ('account_or_daily_allowance_exhausted' if not remaining else None))
     if plan:
         report['listing_plan'] = plan
+        report['target_areas'] = list(AREAS)
     before = {r[0] for r in store.execute('SELECT id FROM properties').fetchall()}
     eligible = []
     unfinished = {slug for slug,state in states.items() if state.get('job_id') and not state['query_complete']}
-    for slug in ORDER:
-        recovered = states[slug].pop('_checkpoint_recovery', None)
+    for slug in order:
+        recovered = states[slug].pop('_checkpoint_recovery', None) or states[slug].get('last_page')
         if recovered and recovered.get('fetched_at') and recovered['fetched_at'] >= report['started_at']:
             if not any(p['job_id'] == recovered['job_id'] and p['offset_after'] == recovered['offset_after'] for p in report['pages']):
-                report['pages'].append(recovered)
+                report['pages'].append({**recovered, 'checkpoint_recovered':True})
             if recovered['job_id'] not in report['job_ids']: report['job_ids'].append(recovered['job_id'])
         # Checking eligibility must not reset an unselected completed query.
         # Open a new generation only when this partition receives an actual turn.
@@ -182,16 +228,12 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
         if not reason:
             eligible.append(slug)
     store.save_setting(key, report)
-    # Under small budgets, least recently served areas go first. With enough
-    # capacity every area gets a first turn, then Pittsburgh gets extra pages.
-    if not special:
-        if weighted:
-            from .coverage_strategy import rank
-            eligible.sort(key=lambda slug: rank(slug,states[slug],now,ORDER))
-        else:
-            eligible.sort(key=lambda slug: (states[slug].get('last_success_at') or '', ORDER.index(slug)))
+    if not special and not weighted:
+        eligible.sort(key=lambda slug: (states[slug].get('last_success_at') or '', order.index(slug)))
     first_turns = list(eligible)
-    extra = [MAIN, MAIN, 'bethel-park', 'pleasant-hills']
+    extra = [UNIFIED] if weighted else [MAIN, MAIN, 'bethel-park', 'pleasant-hills']
+    def describe_page(rows):
+        return {'area_observations':page_evidence(boundary,rows),'fingerprints':_fingerprints(rows)}
     attempts = 0
     while remaining > client.count and eligible and attempts < max(20, settings.max_pages):
         if manual:
@@ -214,7 +256,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 if slug in eligible:
                     break
         state = states[slug]
-        reason = _prepare(store, state, day, slot, clock(), special)
+        reason = _prepare(store, state, day, slot, clock())
         if reason:
             report['partitions'][slug]['state'] = reason
             eligible.remove(slug)
@@ -232,48 +274,35 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
         attempts += 1
         try:
             stats = Engine(store, boundary, client, effective, clock, allow_paid_tax=False,
-                           query_parameters=state['query']).run(job_id, day)
+                           query_parameters=state['query'], offset_overlap=overlap_size(effective.page_size) if weighted else 0,
+                           describe_page=describe_page if weighted else None).run(job_id, day)
             row = store.execute('SELECT offset_value,collection_done FROM scan_jobs WHERE id=?', (job_id,)).fetchone()
             received = stats.get('received_this_run', 0)
             if stats.get('discovery_state') not in {'fresh', 'cached'}:
                 if 'deferred' in stats.get('stop_reason','').lower():
                     raise RequestDeferred('Page deferred by the existing request safety guard')
                 raise BudgetExceeded('Page blocked by the existing budget guard')
-            seen = state.setdefault('seen_ids', {})
-            duplicates = changed = 0
-            for listing in getattr(client, 'last_rows', []):
-                identity = listing.get('id') if isinstance(listing, dict) else None
-                if not identity:
-                    continue
-                fingerprint = hashlib.sha256(json.dumps(listing, sort_keys=True).encode()).hexdigest()
-                if identity in seen:
-                    duplicates += 1
-                    changed += seen[identity] != fingerprint
-                seen[identity] = fingerprint
-            state.update(offset=row[0], query_complete=bool(row[1]), last_success_at=clock().isoformat(),
-                         total=stats.get('total'), failures=0, retry_after=None)
-            state['pages'] = state.get('pages', 0) + 1
-            state['observations'] = state.get('observations', 0) + received
-            state['duplicate_observations'] = state.get('duplicate_observations', 0) + duplicates
-            state['changed_observations'] = state.get('changed_observations', 0) + changed
+            page = {'partition': slug, 'job_id': job_id, 'offset_before': offset_before,
+                    'offset_after': row[0], 'records': received, 'requests': client.count - request_before,
+                    'fetched_at': client.last_fetched_at, 'query_complete': bool(row[1])}
+            if weighted:
+                checkpoint = stats['last_listing_page']
+                page.update({k:checkpoint[k] for k in ('offset_requested','area_observations')})
+                fingerprints = checkpoint['fingerprints']
+            else:
+                fingerprints = _fingerprints(client.last_rows)
+            _record_page(state,page,fingerprints,stats.get('total'))
             after_page={r[0]:(r[1],r[2]) for r in store.execute('SELECT id,revision,state FROM properties').fetchall()}
-            page_ids={r.get('id') for r in getattr(client,'last_rows',[]) if isinstance(r,dict) and r.get('id')}
+            page_ids={identity for identity,_ in fingerprints}
             perf=state.setdefault('performance',{'requests':0,'records':0,'new_identities':0,'new_reviewable':0,'known_identities':0,'price_updates':0})
             perf['requests']+=client.count-request_before;perf['records']+=received
             perf['new_identities']+=len(page_ids-before_page.keys());perf['known_identities']+=len(page_ids&before_page.keys())
             perf['new_reviewable']+=sum(i not in before_page and after_page.get(i,(0,'Rejected'))[1]!='Rejected' for i in page_ids)
             perf['price_updates']+=sum(i in before_page and after_page.get(i,(0,None))[0]!=before_page[i][0] for i in page_ids)
             from .coverage_strategy import VERSION as SELECTION_POLICY
-            state['selection_policy']=SELECTION_POLICY
+            state['selection_policy']=plan['policy'] if weighted else SELECTION_POLICY
             if state['query_complete']:
-                state['last_complete_at'] = clock().isoformat()
                 eligible.remove(slug)
-            page = {'partition': slug, 'job_id': job_id, 'offset_before': offset_before,
-                    'offset_after': row[0], 'records': received, 'requests': client.count - request_before,
-                    'fetched_at': client.last_fetched_at, 'duplicates': duplicates, 'changed': changed,
-                    'query_complete': bool(row[1])}
-            if weighted:
-                state['selection_pages'] += page['requests']
             report['pages'].append(page)
             report['discovery_state'] = 'fresh' if any(p['requests'] for p in report['pages']) else 'cached'
             report['partitions'][slug].update(state='query_complete' if row[1] else 'pagination_pending',
@@ -301,6 +330,7 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                 report['partitions'][slug].update(state='partition_limit_reached')
             report['new_source_ids'] = sorted(set(report['new_source_ids']) | ({r[0] for r in store.execute('SELECT id FROM properties').fetchall()} - before))
             store.save_setting(key, report)
+    report['requests'] = store.count_usage('request_scope:' + scope[0])
     report.update(finished_at=clock().isoformat(), requests_this_invocation=client.count,
                   received_this_run=sum(p['records'] for p in report['pages']),
                   requests_consumed=report.get('requests', 0),
@@ -309,6 +339,8 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
                   remaining_budget=store.budget_health(settings, clock(), record_warning=False)['remaining'])
     report['discovery_partial'] = report['partial'] = not report['discovery_complete']
     report['fresh_request_made'] = any(p['requests'] for p in report['pages'])
+    if report['pages']:
+        report['discovery_state'] = 'fresh' if report['fresh_request_made'] else 'cached'
     report['latest_listing_observation_at'] = max((p['fetched_at'] for p in report['pages'] if p.get('fetched_at')), default=None)
     if not report['pages'] and any(p['state'] in {'source_blocked','retry_scheduled'} for p in report['partitions'].values()):
         report['discovery_state'] = 'failed'
@@ -327,12 +359,14 @@ def run(store, boundary, settings, day, slot, *, clock, opener=None):
     return report, client
 
 
-def snapshot(store, now):
+def snapshot(store, now, boundary=None):
     """Read-only operational evidence for authenticated production verification."""
     from .discovery_allocation import snapshot as allocation_snapshot
     states = []
-    for slug in ORDER:
+    for slug in (UNIFIED, *ORDER):
         state = get(store, PREFIX + slug, {})
+        if not state:
+            continue
         entry={k: v for k, v in state.items() if k not in {'seen_ids'}}
         try:
             observed=state.get('last_success_at')
@@ -346,10 +380,18 @@ def snapshot(store, now):
     last = {k: v for k, v in last.items() if k in {'version','run_key','started_at','finished_at','request_limit',
         'requests','requests_consumed','received_this_run','remaining_budget','discovery_state',
         'discovery_complete','discovery_partial','pages','partitions','delivery_totals','penten_receipts',
-        'fresh_request_made','latest_listing_observation_at','budget_reason','listing_plan','free_source'}}
-    return {'version': VERSION, 'allocation': allocation_snapshot(store, now),
-            'partitions': states, 'last_run': last,
-            'provider_calls': 0, 'geographic_completeness': 'not_verified'}
+        'fresh_request_made','latest_listing_observation_at','budget_reason','listing_plan','free_source','target_areas','municipalities'}}
+    result = {'version': VERSION, 'allocation': allocation_snapshot(store, now),
+              'partitions': states, 'last_run': last,
+              'provider_calls': 0, 'geographic_completeness': 'not_verified'}
+    if boundary is not None:
+        from .municipal_coverage import comparison, geometries
+        if geometries(boundary).keys()==AREAS.keys():
+            result['unified_query_evidence']=comparison(store,boundary,now,scopes(boundary))
+            active=next((state for state in states if state.get('partition')==UNIFIED),{})
+            result['unified_query_evidence'].update(provider_total=active.get('total'),
+                pages_for_reported_total=active.get('pages_for_reported_total'),total_observed_at=active.get('last_success_at'))
+    return result
 
 
 def preflight(store, boundary, settings, now):

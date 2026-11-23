@@ -53,6 +53,13 @@ def boundary(tmp_path):
     excluded.write_text(json.dumps(dict(type='Polygon',coordinates=[[[-80.3,40.3],[-80.25,40.3],[-80.25,40.35],[-80.3,40.35],[-80.3,40.3]]])))
     return EligibilityBoundary(city,city,Boundary(other),Boundary(excluded),city,Boundary(excluded),Boundary(excluded))
 
+@pytest.fixture
+def official_boundary():
+    from pathlib import Path
+    from rentalsourcing.geography import load_boundary
+    return load_boundary(Path(__file__).resolve().parents[1]/'data/pittsburgh.geojson')
+
+
 class Clock:
     def __init__(self):self.value=dt.datetime(2026,10,16,12,tzinfo=dt.timezone.utc)
     def __call__(self):return self.value

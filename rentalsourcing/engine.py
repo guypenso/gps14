@@ -14,10 +14,11 @@ from .storage import BudgetExceeded
 from .telemetry import event
 
 class Engine:
-    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None,allow_paid_tax=True,query_parameters=None):
+    def __init__(self,store,boundary,client,settings,clock=None,*,on_discovery_complete=None,allow_paid_tax=True,query_parameters=None,offset_overlap=0,describe_page=None):
         self.store=store;self.boundary=boundary;self.client=client;self.settings=settings
         self.allow_paid_tax=allow_paid_tax;self.query_parameters=query_parameters
         self.on_discovery_complete=on_discovery_complete
+        self.offset_overlap=offset_overlap;self.describe_page=describe_page
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
 
     def ingest(self,job_id,row):
@@ -112,15 +113,29 @@ class Engine:
             pages=0
             while not collection_done and pages<self.settings.max_pages:
                 before_requests=getattr(self.client,'count',0)
-                rows,total=self.client.get('/listings/sale',dict(self.query_parameters or listing_parameters(self.boundary),limit=self.settings.page_size,offset=offset))
+                requested_offset=max(0, offset-self.offset_overlap)
+                rows,total=self.client.get('/listings/sale',dict(self.query_parameters or listing_parameters(self.boundary),limit=self.settings.page_size,offset=requested_offset))
                 stats['discovery_state']='fresh' if getattr(self.client,'count',0)>before_requests else 'cached'
                 stats['listing_observed_at']=getattr(self.client,'last_fetched_at',None)
                 if not isinstance(rows,list):raise ValueError('Listings response must be a list')
                 total_count=int(total) if total is not None else None
                 if len(rows)>self.settings.page_size:raise ValueError('Oversized listings response')
                 if total_count is not None:stats['total']=total_count
-                new_offset=offset+len(rows)
+                new_offset=requested_offset+len(rows)
                 collection_done=len(rows)<self.settings.page_size or (total_count is not None and new_offset>=total_count)
+                if self.describe_page:
+                    if total_count is None:
+                        stats.pop('total',None)
+                    else:
+                        if total_count<0:raise ValueError('Negative provider listing total')
+                        collection_done=new_offset>=total_count
+                    if not collection_done and new_offset<=offset:
+                        raise ValueError('Provider listing page did not advance its reported offset')
+                    stats['last_listing_page']={
+                        'offset_requested':requested_offset,'records':len(rows),
+                        'requests':getattr(self.client,'count',0)-before_requests,
+                        **self.describe_page(rows),
+                    }
                 if first_page_only:
                     stats['sample_only']=True
                     stats['sample_truncated']=not collection_done
@@ -249,7 +264,7 @@ class Engine:
             stats['partial']=True;stats['stop_reason']=str(exc)
             store.operation('budget-stop:'+job_id,'Scan paused by API budget; pending properties have not been approved. '+str(exc))
             store.checkpoint(job_id,offset,collection_done,stats,'partial')
-            store.run(attempt,dict(job_id=job_id,status='partial',started_at=started_at,finished_at=self.clock().isoformat(),**stats));event('scan_paused',**stats)
+            store.run(attempt,dict(job_id=job_id,status='partial',started_at=started_at,finished_at=self.clock().isoformat(),**stats));event('scan_paused',**{k:v for k,v in stats.items() if k!='last_listing_page'})
             return stats
         except Exception as exc:
             stats['partial']=True

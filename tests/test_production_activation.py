@@ -79,7 +79,7 @@ def test_verified_current_cycle_activation_reconciles_once_and_preserves_history
     assert store.count_usage(cycle_key(s,clock()))==0
 
 
-def test_retired_listing_allocation_does_not_block_a_new_verified_cycle(store,settings,boundary,clock):
+def test_retired_listing_allocation_does_not_block_a_new_verified_cycle(store,settings,official_boundary,clock):
     from rentalsourcing.discovery_allocation import KEY
     from rentalsourcing.partition_discovery import run,MAIN
     from test_partition_discovery import AreaProvider
@@ -88,7 +88,7 @@ def test_retired_listing_allocation_does_not_block_a_new_verified_cycle(store,se
     store.execute('INSERT INTO usage VALUES (?,?)',('approval:rentalsourcing-remainder-20261026',27))
     clock.value=dt.datetime(2026,11,16,18,tzinfo=dt.timezone.utc)
     s=grant(settings);provider=AreaProvider(main=0,bethel=0,pleasant=0)
-    receipt,_=run(store,boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
+    receipt,_=run(store,official_boundary,s,'2026-11-16','evening',clock=clock,opener=provider)
     assert receipt['requests_consumed']>0 and receipt['fresh_request_made']
     assert provider.calls[0][0]==MAIN
     assert store.count_usage('approval:rentalsourcing-remainder-20261026')==27
@@ -127,7 +127,7 @@ def test_dashboard_research_context_resumes_a_verified_grant_without_enabling_pr
     assert not s.enabled and store.execute('SELECT COUNT(*) FROM usage').fetchone()[0]==0
 
 
-def test_exhausted_listing_purpose_is_distinguished_from_pacing(store,settings,boundary,clock):
+def test_exhausted_listing_purpose_is_distinguished_from_pacing(store,settings,official_boundary,clock):
     from rentalsourcing.monthly_allocation import period
     from rentalsourcing.partition_discovery import run
     s=grant(settings)
@@ -136,7 +136,7 @@ def test_exhausted_listing_purpose_is_distinguished_from_pacing(store,settings,b
     store.execute('INSERT INTO usage VALUES (?,?)',(period(s,clock(),'listing'),36))
     class NoWire:
         def open(self,*a,**k):raise AssertionError('No listing allowance remains')
-    receipt,_=run(store,boundary,s,'2026-12-14','morning',clock=clock,opener=NoWire())
+    receipt,_=run(store,official_boundary,s,'2026-12-14','morning',clock=clock,opener=NoWire())
     assert receipt['requests_consumed']==0
     assert receipt['budget_reason']=='listing_purpose_allocation_exhausted'
     assert receipt['remaining_budget']==14

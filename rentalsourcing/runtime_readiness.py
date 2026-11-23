@@ -36,7 +36,7 @@ def memory_checkpoint(stage):
         'peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}))
 
 
-def snapshot(store, settings, now):
+def snapshot(store, settings, now, boundary=None):
     def saved(name):
         row=store.execute('SELECT payload FROM settings WHERE name=?',(name,)).fetchone()
         return json.loads(row[0]) if row else {}
@@ -62,7 +62,7 @@ def snapshot(store, settings, now):
             'coverage_model':__import__('rentalsourcing.coverage_strategy',fromlist=['model']).model(settings,now),
             'reliability_acceptance':__import__('rentalsourcing.reliability_acceptance',fromlist=['snapshot']).snapshot(store,now),
             'monthly_allocation':allocation(store,settings,now),'ledger':ledger,
-            'next_slots':dates,'coverage':coverage(store,now),'scheduled_slots':slots,
+            'next_slots':dates,'coverage':coverage(store,now,boundary),'scheduled_slots':slots,
             'source_records':store.execute('SELECT COUNT(*) FROM properties').fetchone()[0],
             'source_states':dict(store.execute('SELECT state,COUNT(*) FROM properties GROUP BY state').fetchall()),
             'rental_estimates':{'saved':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('rentcast-long-term:%',)).fetchone()[0],
