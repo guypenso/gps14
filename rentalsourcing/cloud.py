@@ -398,6 +398,10 @@ def main(argv=None):
                 if allocation['state'] in {'active','already_active'}:
                     from .partition_discovery import preflight
                     event('discovery_scheduler_preflight',**preflight(observer,boundary,settings,dt.datetime.now(dt.timezone.utc)))
+                if settings.approval_mode=='monthly_budget' and not settings.supplemental_requests:
+                    from .monthly_allocation import next_listing_windows
+                    event('scheduled_listing_forecast',provider_calls=0,rentcast_enabled=settings.enabled,
+                          windows=next_listing_windows(observer,settings,dt.datetime.now(dt.timezone.utc)))
                 from .execution_evidence import snapshot as execution_snapshot
                 event('scheduled_execution_evidence',**execution_snapshot(observer,dt.datetime.now(dt.timezone.utc),boundary))
                 observer.save_setting('health_budget',observer.budget_health(settings,record_warning=False))

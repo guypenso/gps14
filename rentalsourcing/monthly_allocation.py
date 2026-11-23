@@ -145,15 +145,20 @@ def listing_plan(store, settings, now, states=None, *, run_limit=None):
     if used == base and not scope_used:
         next_slot = next((slot_at for slot_at in _slots(*grant_window(settings)) if slot_at > now), None)
         if next_slot and listing_limit_now(settings, next_slot) > base:
-            urgent = next((slug for slug in eligible if states.get(slug)
-                           and advance_reason(states[slug], now)), None)
-            if urgent:
-                # An advance counts against the same purpose ledger. The next
-                # slot has one fewer request, and this slot cannot take a second.
+            for slug in eligible:
+                state = states.get(slug, {})
+                # Forecast and reservation see the same first-query need even
+                # when the scheduler has not initialized a cursor yet.
+                reason = ('first_unified_query' if unified and not state.get('last_success_at')
+                          else advance_reason(state, now) if state else None)
+                if not reason:
+                    continue
+                # Count the advance against the next release in the same ledger.
                 plan['effective_limit'] = base + 1
-                plan['advance'] = {'partition': urgent, 'reason': advance_reason(states[urgent], now),
+                plan['advance'] = {'partition': slug, 'reason': reason,
                                    'from_slot': next_slot.astimezone(ISRAEL).isoformat()}
-                eligible = [urgent]
+                eligible = [slug]
+                break
     remaining = min(plan['effective_limit'] - used, account, day_left, run_left)
     plan['available'] = max(0, remaining)
     plan['reason'] = None if remaining > 0 else 'monthly_listing_pacing'
