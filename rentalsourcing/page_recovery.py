@@ -27,6 +27,28 @@ def recovery_key(page):
     return 'listing_page_recovery:' + hashlib.sha256(identity.encode()).hexdigest()
 
 
+def page_price_receipts(store, run, page, closed_at):
+    from .price_sync import field, observation_key
+    query = run.get('partitions',{}).get(page.get('partition'),{}).get('query')
+    if not query:
+        return {}
+    saved = cached_page(store, query, page['offset_requested'])
+    if saved.get('fetched_at') != page['fetched_at'] or not isinstance(saved.get('data'),list):
+        return {}
+    stamp = dt.datetime.fromisoformat(page['fetched_at'].replace('Z','+00:00')).isoformat()
+    keys = sorted({observation_key(row,stamp) for row in saved['data'] if isinstance(row,dict)})
+    rows = []
+    if keys:
+        synced, status = field(store,'synced_at'), field(store,'receiver_disposition')
+        placeholders = ','.join('?' for _ in keys)
+        rows = store.execute(f'SELECT {status},COUNT(*),MIN({synced}),MAX({synced}),'
+            f'SUM(CASE WHEN {synced}>? THEN 1 ELSE 0 END) FROM settings '
+            f'WHERE name IN ({placeholders}) GROUP BY {status}',(closed_at,*keys)).fetchall()
+    return {'price_observation_count':sum(r[1] for r in rows),
+            'price_observations_with_recorded_ack_after_slot_close':sum(r[4] for r in rows) if closed_at else None,
+            'price_receipts':[{'disposition':r[0], 'count':r[1], 'first_ack':r[2], 'last_ack':r[3]} for r in rows]}
+
+
 def reconcile_page(store, boundary, now, run, page, config, opener=None):
     from .reliability import destination_inventory
     offset = page['offset_requested']

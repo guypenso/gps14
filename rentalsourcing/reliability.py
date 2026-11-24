@@ -100,8 +100,7 @@ def scheduled_window_outcome(store,slot,started_at,now):
  stalled=any(i.get('component') in ('sync_backlog','price_sync','price_backpressure') and i.get('state')=='open'
              for i in view['incidents'])
  recent_ack=ack.get('observations',0)>0 and max(started_at,(now-dt.timedelta(minutes=10)).isoformat())<=ack.get('at','')<=now.isoformat()
- from .price_sync import queue_counts
- held=queue_counts(store)['held'] if pending else 0
+ held=counts.get('held_price_observations',0)
  draining=bool(pending and recent_ack and not held and not price_errors and not stalled and not counts['dead_letters'])
  price_state='draining' if draining else 'awaiting_recovery' if pending else 'complete'
  optional_ops=sum(i.get('state')!='dead_letter' and (i.get('component') in {'offmarket_refresh','listing_pre_report'}
@@ -144,8 +143,9 @@ def snapshot(store,now=None):
  ops=[json.loads(raw) for name,raw in operation_rows(store,limit=20)]
  pending_details=[{'state':op.get('state'),'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
  pending_reports=store.execute("SELECT COUNT(*) FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND r.synced_at IS NULL").fetchone()[0]
- synced_sql="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
- price_pending=store.execute(f"SELECT COUNT(*) FROM settings WHERE name LIKE ? AND COALESCE({synced_sql},'')=''",('price-observation:%',)).fetchone()[0]
+ from .price_sync import queue_counts
+ prices=queue_counts(store)
+ price_pending=prices['pending']
  feedback=get(store,'penten_review_feed',{})
  identities=store.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
  last_job=store.execute('SELECT day,state,stats,updated_at FROM scan_jobs ORDER BY updated_at DESC LIMIT 1').fetchone();stats=json.loads(last_job[2]) if last_job else {}
@@ -179,7 +179,7 @@ def snapshot(store,now=None):
  effective='failed' if daily.get('state')=='failed' or any(i.get('component') in ('daily_schedule','email_delivery') for i in opens) else 'partial' if pending_reports or pending or blocked or opens or price_pending or inventory_pending or daily.get('state') in ('partial','not_observed','running') else 'success'
  budget=get(store,'health_budget',{})
  acceptance=get(store,'reliability_acceptance:last',{})
- return {'reliability_acceptance':{k:acceptance.get(k) for k in ('state','activated_at','expected_windows','elapsed_windows','passed_windows','missing_receipts')},'digest_policy':{'empty_report':os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary'),'scope':'morning_only','version':'change-journal-v1'},'runtime':{'research_context':__import__('rentalsourcing.listing_enrichment',fromlist=['research_context']).research_context(store),'bedroom_policy':{k:v for k,v in get(store,'bedroom_policy_reconciliation:investment-20261111-two-bedroom',{}).items() if k not in ('history','source_ids')},'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
+ return {'reliability_acceptance':{k:acceptance.get(k) for k in ('state','activated_at','expected_windows','elapsed_windows','passed_windows','missing_receipts')},'digest_policy':{'empty_report':os.getenv('DAILY_DIGEST_EMPTY_POLICY','summary'),'scope':'morning_only','version':'change-journal-v1'},'runtime':{'research_context':__import__('rentalsourcing.listing_enrichment',fromlist=['research_context']).research_context(store),'bedroom_policy':{k:v for k,v in get(store,'bedroom_policy_reconciliation:investment-20261111-two-bedroom',{}).items() if k not in ('history','source_ids')},'geography_reconciliation':get(store,'geography_reconciliation:'+POLICY),'build_sha':os.getenv('RENDER_GIT_COMMIT'),'rent_enrichment':job_summary(store),'future_verification':{'enabled':True,'paid_tax_enabled':os.getenv('ENABLE_PAID_TAX_VERIFICATION','false').lower()=='true','first_discovery_records':store.execute('SELECT COUNT(*) FROM settings WHERE name LIKE ?',('first_discovery:%',)).fetchone()[0]},'review_worker_enabled':os.getenv('ENABLE_REVIEW_INVENTORY_SYNC','false').lower()=='true','watchdog_lease_at':get(store,'watchdog_lease',{}).get('at'),'insights_job':{k:v for k,v in get(store,'listing-contact-enrichment:2026-11-05:hebrew-insights-status-v1',{}).items() if k in ('offset','cursor','done','batches')},'discovery_lock_sessions':store.execute("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=73541209 AND granted").fetchone()[0] if store.pg else 0},'schema_version':1,'revision':sequence(store),'generated_at':now.isoformat(),'state':effective,'daily':daily,'components':comps,'counts':{'stored_properties':identities,'tax_pending':pending_tax,'tax_actionable_backlog':get(store,'health_funnel',{}).get('prioritized_tax_backlog',{}).get('total'),'eligible_non_tax':get(store,'health_funnel',{}).get('counts',{}).get('non_tax_pass'),'sent_reports':sent,'unsent_reports':unsent,'pending_reports':pending_reports,'pending_price_observations':price_pending,'held_price_observations':prices['held'],'pending_inventory_jobs':inventory_pending,'pending_operations':pending,'dead_letters':blocked},'pending_operation_details':pending_details,'last_scan':{'day':last_job[0],'state':last_job[1],'at':last_job[3],'received':stats.get('received',stats.get('received_this_run')),'discovery_state':stats.get('discovery_state'),'partial':stats.get('partial')} if last_job else None,'feedback':{k:feedback.get(k) for k in ('fetched_at','decisions','snapshot_version','decision_digest','applied','unchanged','stale_ignored','status_updates_after_previous_fetch','older_status_mismatches','new_source_identities')},'budget':budget,'incidents':[{k:v for k,v in i.items() if k not in ('private',)} for i in incidents[-20:]],'last_recovery_at':max((i.get('resolved_at') for i in incidents if i.get('resolved_at')),default=None)}
 
 def publish(store,now=None,config=None,opener=None):
  config=config or review_configuration()
@@ -525,12 +525,18 @@ def start_watchdog(url,boundary):
      value=recover(store,boundary)
      evidence=get(store,'reliability_audit:2026-11-03:v1',{})
      view=snapshot(store)
+     if value.get('audit',{}).get('state') != 'blocked_before_recovery':
+      component(store,'watchdog','success')
+      incident(store,'watchdog',None,resolved=True)
      logger.info('RELIABILITY_WATCHDOG '+json.dumps({'feedback':value.get('feedback',{}),'reports':value.get('reports'),'prices':value.get('prices',{}).get('state'),'health':value.get('health',{}).get('accepted'),'roundtrip':value.get('roundtrip',{}),'audit':value.get('audit',evidence),'listing_operation_recovery':value.get('listing_operation_recovery'),'completed_source_reconciliation':value.get('completed_source_reconciliation'),'pending_operations':view['pending_operation_details'],'state':view['state'],'counts':view['counts'],'budget':view['budget'],'bedroom_policy':view['runtime'].get('bedroom_policy')},sort_keys=True))
    except Exception as e:
     logging.getLogger(__name__).error('RELIABILITY_WATCHDOG_FAILED '+type(e).__name__)
     if store:
      try:
-      error={'category':'watchdog_runtime_error','retryable':True};component(store,'watchdog','failed',error=error);incident(store,'watchdog',error)
+      from .sync_runtime import classify
+      failure=classify(e,operation='watchdog')
+      error=failure.safe() if getattr(e,'sqlstate',None) else {'category':'watchdog_runtime_error','retryable':True}
+      component(store,'watchdog','failed',error=error);incident(store,'watchdog',error)
      except Exception:pass
    finally:
     if store:store.close()

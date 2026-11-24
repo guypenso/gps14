@@ -47,7 +47,23 @@ def _fingerprints(rows):
             for row in rows if isinstance(row,dict) and isinstance(row.get('id'),str) and row['id']]
 
 
+def traversal_coverage(state):
+    # Point-in-time totals can drift while an offset traversal is in progress.
+    seen = len(state.get('seen_ids', {}))
+    total = state.get('total')
+    last = state.get('last_page') or {}
+    reasons = list(state.get('continuity_reasons', []))
+    if last.get('duplicates') is not None and last.get('expected_overlap') is not None:
+        if last['duplicates'] != min(last['expected_overlap'],last['records']):
+            reasons.append('unexpected_page_overlap')
+    if state.get('query_complete') and isinstance(total,int) and seen != total:
+        reasons.append('distinct_identities_differ_from_latest_total')
+    return {'distinct_identities_observed':seen,'continuity_reasons':list(dict.fromkeys(reasons)),
+            'continuity_warning':bool(reasons or state.get('continuity_warning'))}
+
+
 def _record_page(state,page,fingerprints,total):
+    previous_total = state.get('total') if page['offset_before'] else None
     seen = state.setdefault('seen_ids', {})
     duplicates = changed = 0
     for identity,fingerprint in fingerprints:
@@ -66,10 +82,13 @@ def _record_page(state,page,fingerprints,total):
         state['last_complete_at'] = page['fetched_at']
     if 'area_observations' in page:
         overlap = page['offset_before'] - page['offset_requested']
-        warning = state.get('continuity_warning',False) or duplicates < min(overlap,page['records'])
-        page.update(expected_overlap=overlap,continuity_warning=warning)
-        state.update(continuity_warning=warning,last_page=page,
-                     pages_for_reported_total=pages_for_total(total,state['query']['limit']))
+        page.update(expected_overlap=overlap)
+        state.update(last_page=page,pages_for_reported_total=pages_for_total(total,state['query']['limit']))
+        if previous_total is not None and total is not None and total != previous_total:
+            state.setdefault('continuity_reasons',[]).append('provider_total_changed')
+        evidence = traversal_coverage(state)
+        state.update(evidence)
+        page.update(evidence)
         state['selection_pages'] = state.get('selection_pages',0) + page['requests']
 
 
@@ -147,7 +166,7 @@ def _prepare(store, state, day, slot, now):
                      offset=0, query_complete=False, generation_started_at=now.isoformat(),
                      generation_run_key=day + ':' + slot,
                      seen_ids={}, pages=0, observations=0, duplicate_observations=0, changed_observations=0,
-                     continuity_warning=False)
+                     continuity_warning=False,continuity_reasons=[],distinct_identities_observed=0)
     store.save_setting(PREFIX + state['partition'], state)
     return None
 
@@ -368,6 +387,8 @@ def snapshot(store, now, boundary=None):
         if not state:
             continue
         entry={k: v for k, v in state.items() if k not in {'seen_ids'}}
+        if slug == UNIFIED and 'seen_ids' in state:
+            entry.update(traversal_coverage(state))
         try:
             observed=state.get('last_success_at')
             if not isinstance(observed,str):raise ValueError('Partition has no successful retrieval yet')

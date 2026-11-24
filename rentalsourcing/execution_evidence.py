@@ -57,8 +57,8 @@ def snapshot(store,now,boundary=None):
         if item.get('state')!='open':continue
         incidents.append({k:item.get(k) for k in ('component','state','opened_at','last_seen_at','manual_action')}|{'error':safe_error(item.get('error'))})
     totals=operation_counts(store)
-    synced="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
-    pending_prices=store.execute(f"SELECT COUNT(*) FROM settings WHERE name LIKE ? AND COALESCE({synced},'')='' ",('price-observation:%',)).fetchone()[0]
+    from .price_sync import queue_counts
+    pending_prices=queue_counts(store)['pending']
     result['operations']={'pending_count':totals.get('pending',0),
         'dead_letter_count':totals.get('dead_letter',0),'items':operations[:20],
         'open_incident_count':len(incidents),'open_incidents':incidents[:20],
@@ -104,8 +104,7 @@ def snapshot(store,now,boundary=None):
     result['previous_evening']={k:prior[k] for k in ('run_key','started_at','finished_at','requests_consumed',
         'received_this_run','delivery_totals','penten_receipts') if k in prior}
     result['previous_evening_new_sources']=cohort
-    from .page_recovery import recovery_key
-    from .price_sync import field
+    from .page_recovery import recovery_key, page_price_receipts
     closed=setting(store,'discovery_run:'+previous+':evening')
     closed_at=closed.get('finished_at')
     result['previous_evening_window']={k:v for k,v in closed.get('result',{}).items() if k in
@@ -115,19 +114,10 @@ def snapshot(store,now,boundary=None):
     for page in prior.get('pages',[]):
         if not all(k in page for k in ('job_id','offset_requested','fetched_at')):continue
         item=setting(store,recovery_key(page))
-        observed=field(store,'observation','observed_at')
-        disposition=field(store,'receiver_disposition')
-        synced_at=field(store,'synced_at')
-        prices=store.execute('SELECT '+disposition+',COUNT(*),MIN('+synced_at+'),MAX('+synced_at+') FROM settings '+
-            'WHERE name LIKE ? AND '+observed+'=? GROUP BY '+disposition,
-            ('price-observation:%',page['fetched_at'])).fetchall()
         result['previous_evening_pages'].append({'offset':page['offset_requested'],'fetched_at':page['fetched_at'],
             'reconciliation':{k:v for k,v in item.items() if k not in ('new_sources','represented')},
             'new_sources':item.get('new_sources',[])[:50],
-            'price_observations_with_recorded_ack_after_slot_close':store.execute(
-                'SELECT COUNT(*) FROM settings WHERE name LIKE ? AND '+observed+'=? AND '+synced_at+'>?',
-                ('price-observation:%',page['fetched_at'],closed_at)).fetchone()[0] if closed_at else None,
-            'price_receipts':[{'disposition':r[0],'count':r[1],'first_ack':r[2],'last_ack':r[3]} for r in prices]})
+            **page_price_receipts(store,prior,page,closed_at)})
     latest=setting(store,'listing_page_recovery:last')
     result['cached_page_reconciliation']={k:v for k,v in latest.items() if k not in ('new_sources','represented')}
     result['early_page_continuation']=setting(store,'approved_page_continuation:2026-11-24')
