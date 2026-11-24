@@ -201,6 +201,8 @@ def create_app(database_url=None,*,testing=False,clock=None,boundary=None):
             elif d.get('action')=='municipal_boundaries':
                 from .municipal_evidence import retrieve
                 result=retrieve(current,clock())
+            elif d.get('action')=='table_evidence':
+                result=cached_table_evidence(current,d.get('records'),clock())
             elif d.get('action')=='listing_audit':
                 from .listing_intake import audit as listing_audit
                 result=listing_audit(current,boundary,clock())
@@ -327,3 +329,25 @@ def start_background(app):
     from .offmarket import start_scheduler
     start_watchdog(runtime['url'],runtime['boundary'])
     start_scheduler(runtime['url'])
+
+def cached_table_evidence(store, identities, now):
+    """Return display evidence only from persisted provider records. Never call an external source."""
+    from .collector import LIVE
+    from .rental_intelligence import cached_estimate
+    if not isinstance(identities,list) or len(identities)>25 or any(not isinstance(i,str) or not 0<len(i)<=300 for i in identities):
+        raise ValueError('Expected at most 25 source identities')
+    batch=store.execute('SELECT payload FROM settings WHERE name=?',(f'public_tax_batch:{now.year}',)).fetchone()
+    estimates=json.loads(batch[0]).get('estimates',{}) if batch else {}
+    records=[]
+    for identity in dict.fromkeys(identities):
+        row=store.execute('SELECT payload,observed_at FROM properties WHERE id=? AND source=?',(identity,LIVE)).fetchone()
+        if not row:
+            continue
+        p=json.loads(row[0])
+        if p.get('id')!=identity:
+            continue
+        records.append(dict(source_id=identity,subject={k:p.get(k) for k in ('formattedAddress','addressLine1','addressLine2','zipCode','state')},
+            listing_record=dict(id=p.get('mlsNumber') or identity,published=p.get('listedDate'),updated=p.get('lastUpdatedDate'),url=p.get('listingUrl')),
+            observed_at=row[1],assessment_estimate=estimates.get(identity),rent_estimate=cached_estimate(store,p,now),
+            photo_evidence=(p.get('photo_evidence') or [])[:3],zillow_url=p.get('zillowUrl')))
+    return dict(records=records,provider_calls=0)
