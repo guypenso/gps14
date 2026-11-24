@@ -110,6 +110,9 @@ def _flush(store,config,now,opener,max_batches,max_seconds):
                         row.update(held_at=now.isoformat(),error_type='receiver_invalid_observation')
                         store.save_setting('sync_hold:'+name,{'reason':'receiver_invalid_observation','at':now.isoformat()})
                     store.save_setting(name,row)
+                if ack:
+                    store.save_setting('price-sync:last-ack',{'at':dt.datetime.now(dt.timezone.utc).isoformat(),
+                                       'batch_id':payload['batch_id'],'observations':len(ack)})
                 store.execute('DELETE FROM settings WHERE name=?',('price-sync-active-batch',))
             coverage=result.get('coverage',{})
             if len(ack)+len(bad)<len(payload['observations']):break

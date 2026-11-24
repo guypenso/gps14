@@ -320,7 +320,7 @@ def daily_discovery(store,boundary,settings,day,*,clock=None,opener=None,slot=No
             result.update(scheduled_window_outcome(store,slot,run_started,clock()))
             from .window_contract import outcome
             window_stats=get(store,'window_stages:'+day+':'+slot,stats)
-            result['processing_outcome']=outcome(window_stats,critical=result['current_window_critical'])
+            result['processing_outcome']=outcome(window_stats,critical=result['current_window_critical'],price_delivery=result['price_delivery'])
             result['exit_failure']=result['processing_outcome']['exit_failure']
             result['legacy_workflow_status']=result['workflow_status']
             result['workflow_status']='success' if result['processing_outcome']['state'] in {'fresh','free_source','paced'} else result['processing_outcome']['state']
@@ -424,14 +424,17 @@ def main(argv=None):
               rentcast_secret_configured=bool(os.getenv('RENTCAST_API_KEY')),resend_secret_configured=bool(os.getenv('RESEND_API_KEY')))
         if not exists:raise ValueError('Official city boundary missing; run scripts/fetch_boundary.py in the deployment environment')
         return
-    day=dt.datetime.now(dt.timezone.utc).astimezone(ISRAEL).date().isoformat()
+    from . import early_continuation
+    now = dt.datetime.now(dt.timezone.utc)
+    early = args.scheduled and early_continuation.in_window(now)
+    day=now.astimezone(ISRAEL).date().isoformat()
     catchup_day=args.catch_up_discovery or (os.getenv('CATCH_UP_DISCOVERY_DAY') if args.scheduled else None)
     catchup_requested=catchup_day==day
     if args.catch_up_discovery and not catchup_requested:raise ValueError('Catch-up must target today in Asia/Jerusalem')
     if args.scheduled or args.scheduled_email:
         day=scheduled_day()
-        if day is None and not (args.scheduled and catchup_requested):event('outside_israel_schedule');return
-        if day is None:day=catchup_day
+        if day is None and not (early or args.scheduled and catchup_requested):event('outside_israel_schedule');return
+        if day is None:day=early_continuation.DAY if early else catchup_day
     administrative=args.scheduled or args.status or args.migrate or args.retry_email or args.reconcile_email or args.prepare_email or args.scheduled_email or args.email_status or args.prepare_test_email or args.inspect_email or args.replace_rejected_test
     if not administrative and not settings.enabled:event('collector_disabled');return
     url=os.getenv('DATABASE_URL','')
@@ -445,6 +448,20 @@ def main(argv=None):
             else:
                 event('scan_already_running');return
         store.migrate()
+        if early:
+            from .command_center import review_configuration
+            from .sync_runtime import get
+            # A delayed genuine morning trigger must still execute the normal morning pipeline.
+            if get(store, 'discovery_run:'+day+':morning', {}).get('finished_at'):
+                receipt = early_continuation.run(store, load_boundary(settings.boundary_file), settings,
+                    lambda: dt.datetime.now(dt.timezone.utc), review_configuration())
+                event('approved_listing_continuation', **receipt)
+                if receipt.get('state') != 'complete':
+                    raise SystemExit(2)
+                return
+            if not scheduled_slot():
+                event('approved_listing_continuation_blocked', reason='missing_morning_receipt')
+                return
         if args.scheduled and scheduled_slot():
             from .reliability import begin
             begin(store,day,dt.datetime.now(dt.timezone.utc))
