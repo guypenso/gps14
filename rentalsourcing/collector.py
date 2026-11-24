@@ -15,6 +15,13 @@ from .telemetry import event
 
 LIVE='rentcast-live'
 
+def request_url(path, params):
+    query = urllib.parse.urlencode(sorted((params or {}).items()))
+    return 'https://api.rentcast.io/v1' + path + ('?' + query if query else '')
+
+def response_key(url):
+    return hashlib.sha256(url.encode()).hexdigest()
+
 class RequestDeferred(BudgetExceeded):pass
 
 def tax_expiry(record,now,settings):
@@ -52,9 +59,8 @@ class Client:
     def _get(self,path,params=None,cache=True):
         if path not in ('/listings/sale','/avm/rent/long-term') and not path.startswith('/properties/'):
             raise ValueError('Unsupported RentCast endpoint')
-        query=urllib.parse.urlencode(sorted((params or {}).items()))
-        url='https://api.rentcast.io/v1'+path+('?' + query if query else '')
-        key=hashlib.sha256(url.encode()).hexdigest();now=self.clock()
+        url=request_url(path, params)
+        key=response_key(url);now=self.clock()
         if cache:
             saved=self.store.cache_get(key,now.isoformat())
             if saved and saved[1]==LIVE:

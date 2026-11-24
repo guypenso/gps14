@@ -48,11 +48,12 @@ def free_source_status(result):
     }
 
 
-def outcome(stats,*,critical=0,source=None):
+def outcome(stats,*,critical=0,source=None,price_delivery=None):
     source=source or stats.get('free_source') or {}
     fresh=bool(stats.get('discovery_state')=='fresh' and stats.get('fresh_request_made') and
                stats.get('requests_consumed',0)>0 and stats.get('pages'))
     issues=[]
+    if price_delivery and price_delivery['state']!='complete':issues.append('price_sync')
     for field in ('future_discovery','rental_intelligence','property_quality','evening_inventory_receipt'):
         if stats.get(field,{}).get('state') in ('pending_recovery','failed'):issues.append(field)
     if stats.get('listing_intake_state') in ('failed','not_configured') or source.get('requires_retry') or source.get('blocked'):issues.append('free_source')

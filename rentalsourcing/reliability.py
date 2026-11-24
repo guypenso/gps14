@@ -93,12 +93,29 @@ def scheduled_window_outcome(store,slot,started_at,now):
  view=snapshot(store,now)
  current_incidents=[i for i in view['incidents'] if i.get('state')=='open' and i.get('component') in CRITICAL_COMPONENTS and i.get('last_seen_at','')>=started_at]
  counts=view['counts']
- optional_ops=sum(i.get('component') in {'offmarket_refresh','listing_pre_report'} for i in view.get('pending_operation_details',[]))
- critical=max(0,sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))-optional_ops)+len(current_incidents)
+ pending=counts['pending_price_observations']
+ ack=get(store,'price-sync:last-ack',{}) or {}
+ details=view.get('pending_operation_details',[])
+ price_errors=any(i.get('component')=='price_sync' and i.get('error') for i in details)
+ stalled=any(i.get('component') in ('sync_backlog','price_sync','price_backpressure') and i.get('state')=='open'
+             for i in view['incidents'])
+ recent_ack=ack.get('observations',0)>0 and max(started_at,(now-dt.timedelta(minutes=10)).isoformat())<=ack.get('at','')<=now.isoformat()
+ from .price_sync import queue_counts
+ held=queue_counts(store)['held'] if pending else 0
+ draining=bool(pending and recent_ack and not held and not price_errors and not stalled and not counts['dead_letters'])
+ price_state='draining' if draining else 'awaiting_recovery' if pending else 'complete'
+ optional_ops=sum(i.get('state')!='dead_letter' and (i.get('component') in {'offmarket_refresh','listing_pre_report'}
+                  or i.get('component')=='price_sync' and draining and not i.get('error')) for i in details)
+ breakdown={'pending_reports':counts['pending_reports'],'pending_operations':max(0,counts['pending_operations']-optional_ops),
+            'dead_letters':counts['dead_letters'],'pending_inventory_jobs':counts['pending_inventory_jobs'],
+            'price_delivery_needs_recovery':int(bool(pending and not draining)), 'current_incidents':len(current_incidents)}
+ critical=sum(breakdown.values())
  if receipt['state'] in {'missing','stale','failed','delivery_unacknowledged'}:critical=max(1,critical)
  return {'current_window_state':receipt['state'],'current_window_critical':critical,
-         'unresolved_critical':sum(counts[k] for k in ('pending_reports','pending_operations','dead_letters','pending_inventory_jobs','pending_price_observations'))+sum(i.get('state')=='open' for i in view['incidents']),
+         'critical_breakdown':breakdown,'price_delivery':{'state':price_state,'pending_observations':pending,'held_observations':held,'last_ack':ack},
+         'unresolved_critical':critical+sum(i.get('state')=='open' for i in view['incidents'])-len(current_incidents),
          'historical_open_incidents':sum(i.get('state')=='open' for i in view['incidents'])-len(current_incidents)}
+
 def begin(store,day,now):
  key='daily_health:'+day;old=get(store,key,{})
  if old.get('state')=='running' and old.get('started_at','')>(now-dt.timedelta(minutes=45)).isoformat():return old
@@ -125,7 +142,7 @@ def snapshot(store,now=None):
  # twenty actionable records, not every successful request body/receipt.
  op_counts=operation_counts(store)
  ops=[json.loads(raw) for name,raw in operation_rows(store,limit=20)]
- pending_details=[{'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
+ pending_details=[{'state':op.get('state'),'component':op.get('component'),'endpoint':op.get('endpoint'),'operation_hash':hashlib.sha256(str(op.get('id','')).encode()).hexdigest()[:16],'attempts':op.get('attempts',0),'last_attempt_at':op.get('last_attempt_at'),'next_attempt_at':op.get('next_attempt_at'),'error':op.get('error')} for op in ops if op.get('state') in ('pending','dead_letter')][:20]
  pending_reports=store.execute("SELECT COUNT(*) FROM command_center_reports r JOIN outbox o ON o.id=r.outbox_id WHERE o.state='sent' AND r.synced_at IS NULL").fetchone()[0]
  synced_sql="payload::jsonb->>'synced_at'" if store.pg else "json_extract(payload,'$.synced_at')"
  price_pending=store.execute(f"SELECT COUNT(*) FROM settings WHERE name LIKE ? AND COALESCE({synced_sql},'')=''",('price-observation:%',)).fetchone()[0]
@@ -358,6 +375,13 @@ def recover(store,boundary,now=None,opener=None):
  # Re-evaluate stored evidence once per policy version after current owner
  # decisions are available. Delivery uses the existing idempotent inventory job.
  if result['feedback'].get('state')=='fresh':
+  from .page_recovery import reconcile_recent
+  try:
+   reconcile_recent(store,boundary,now,review_configuration(),opener)
+  except Exception as exc:
+   from .sync_runtime import classify
+   error=classify(exc,operation='cached_page_reconciliation')
+   component(store,'cached_page_reconciliation','partial',now=now,error=error.safe(),recovery='scheduled')
   from .criteria import reconcile_tax_policy
   from .investment_policy import SCREENING_POLICY_VERSION
   policy_result=reconcile_tax_policy(store,boundary,now)
@@ -557,15 +581,36 @@ def remote_audit(store,config=None,opener=None):
  feed=get(store,'penten_review_feed',{})
  return {**counts,'authority':authority,'feedback_matches':bool(authority and feed.get('decision_digest')==authority['snapshot_version']),'current_inventory':current_inventory_audit(store,config,opener)}
 
+def destination_inventory(config, identities, opener=None):
+ """Read the authenticated destination alias map. Verify each bounded page independently."""
+ from .command_center import signed_request
+ from .request import NoRedirect
+ url,secret,token=config
+ endpoint=(url.rsplit('/',1)[0]+'/review-inventory-audit',secret,token)
+ opener=opener or urllib.request.build_opener(NoRedirect)
+ matches={}
+ for start in range(0,len(identities),25):
+  part=identities[start:start+25]
+  nonce=uuid.uuid4().hex
+  body=json.dumps({'nonce':nonce,'source_ids':part},separators=(',',':')).encode()
+  with opener.open(signed_request(endpoint,body,dt.datetime.now(UTC)),timeout=budget_timeout(20)) as response:
+   raw=response.read(65537)
+   if len(raw)>65536 or response.status!=200:raise ValueError('Inventory audit response invalid')
+   expected='v1='+hmac.new(secret.encode(),raw,hashlib.sha256).hexdigest()
+   if not hmac.compare_digest(response.headers.get('X-RentalSourcing-Response-Signature',''),expected):raise ValueError('Inventory audit signature mismatch')
+   result=json.loads(raw)
+  rows=result.get('results')
+  if result.get('nonce')!=nonce or result.get('accepted') is not True or not isinstance(rows,list) or len(rows)!=len(part):
+   raise ValueError('Inventory audit receipt mismatch')
+  for identity,row in zip(part,rows):
+   if row.get('source_id')!=identity or not isinstance(row.get('matched'),bool):raise ValueError('Inventory audit identity or match mismatch')
+   matches[identity]=row
+ return matches
+
 def current_inventory_audit(store,config=None,opener=None):
  """Compare every presently reviewable stored identity with the live PENTEN alias map."""
- from .core import verification,tax_verification
  from .geography import load_boundary
  from .config import Settings
- from .tax_backlog import review_deferred
- from .provenance import demo_marked
- from .request import NoRedirect
- from .command_center import signed_request
  boundary=load_boundary(Settings.from_env().boundary_file)
  config=config or review_configuration()
  if not config:return {'state':'disabled'}
@@ -577,21 +622,11 @@ def current_inventory_audit(store,config=None,opener=None):
  for card,p in pairs:
   kind='verified' if card['tax_status']=='provider_verified' else 'pending'
   counts[kind]+=1;candidates.append((card['source_id'],kind))
- url,key,token=config;config=(url.rsplit('/',1)[0]+'/review-inventory-audit',key,token)
- opener=opener or urllib.request.build_opener(NoRedirect)
+ matches=destination_inventory(config,[identity for identity,_ in candidates],opener)
  missing=[]
- for start in range(0,len(candidates),25):
-  part=candidates[start:start+25];nonce=uuid.uuid4().hex
-  body=json.dumps({'nonce':nonce,'source_ids':[id for id,_ in part]},separators=(',',':')).encode()
-  with opener.open(signed_request(config,body,dt.datetime.now(UTC)),timeout=budget_timeout(20)) as response:
-   raw=response.read(65537)
-   if len(raw)>65536 or response.status!=200:raise ValueError('Inventory audit response invalid')
-   if not hmac.compare_digest(response.headers.get('X-RentalSourcing-Response-Signature',''),'v1='+hmac.new(key.encode(),raw,hashlib.sha256).hexdigest()):raise ValueError('Inventory audit signature mismatch')
-   result=json.loads(raw)
-  if result.get('nonce')!=nonce or result.get('accepted') is not True or len(result.get('results',[]))!=len(part):raise ValueError('Inventory audit receipt mismatch')
-  for (identity,kind),row in zip(part,result['results']):
-   if row.get('source_id')!=identity:raise ValueError('Inventory audit order mismatch')
-   if not row.get('matched'):counts['missing']+=1;missing.append((identity,kind));continue
+ for identity,kind in candidates:
+   row=matches[identity]
+   if not row['matched']:counts['missing']+=1;missing.append((identity,kind));continue
    counts['mapped']+=1
    for key,value in [('destination_review_statuses',row.get('review_status')),('destination_tax_statuses',row.get('tax_status'))]:
     label=value if isinstance(value,str) and value in ('new','pursue','monitor','missed_under_contract','rejected','provider_verified','pending_verification') else 'other'

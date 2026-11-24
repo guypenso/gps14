@@ -104,6 +104,33 @@ def snapshot(store,now,boundary=None):
     result['previous_evening']={k:prior[k] for k in ('run_key','started_at','finished_at','requests_consumed',
         'received_this_run','delivery_totals','penten_receipts') if k in prior}
     result['previous_evening_new_sources']=cohort
+    from .page_recovery import recovery_key
+    from .price_sync import field
+    closed=setting(store,'discovery_run:'+previous+':evening')
+    closed_at=closed.get('finished_at')
+    result['previous_evening_window']={k:v for k,v in closed.get('result',{}).items() if k in
+        ('current_window_state','current_window_critical','price_queue','unresolved_critical','historical_open_incidents','processing_outcome')}
+    result['previous_evening_window']['closed_at']=closed_at
+    result['previous_evening_pages']=[]
+    for page in prior.get('pages',[]):
+        if not all(k in page for k in ('job_id','offset_requested','fetched_at')):continue
+        item=setting(store,recovery_key(page))
+        observed=field(store,'observation','observed_at')
+        disposition=field(store,'receiver_disposition')
+        synced_at=field(store,'synced_at')
+        prices=store.execute('SELECT '+disposition+',COUNT(*),MIN('+synced_at+'),MAX('+synced_at+') FROM settings '+
+            'WHERE name LIKE ? AND '+observed+'=? GROUP BY '+disposition,
+            ('price-observation:%',page['fetched_at'])).fetchall()
+        result['previous_evening_pages'].append({'offset':page['offset_requested'],'fetched_at':page['fetched_at'],
+            'reconciliation':{k:v for k,v in item.items() if k not in ('new_sources','represented')},
+            'new_sources':item.get('new_sources',[])[:50],
+            'price_observations_with_recorded_ack_after_slot_close':store.execute(
+                'SELECT COUNT(*) FROM settings WHERE name LIKE ? AND '+observed+'=? AND '+synced_at+'>?',
+                ('price-observation:%',page['fetched_at'],closed_at)).fetchone()[0] if closed_at else None,
+            'price_receipts':[{'disposition':r[0],'count':r[1],'first_ack':r[2],'last_ack':r[3]} for r in prices]})
+    latest=setting(store,'listing_page_recovery:last')
+    result['cached_page_reconciliation']={k:v for k,v in latest.items() if k not in ('new_sources','represented')}
+    result['early_page_continuation']=setting(store,'approved_page_continuation:2026-11-24')
     intake=setting(store,'listing_pre_report_receipt');source_result=intake.get('result') or {}
     source_email=source_result.get('email') or {}
     runs=[]

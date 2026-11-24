@@ -142,7 +142,9 @@ def listing_plan(store, settings, now, states=None, *, run_limit=None):
         eligible.sort(key=lambda slug: rank(slug, states.get(slug, {}), now, order))
     if not eligible:
         return {**plan, 'reason': 'no_query_ready'}
-    if used == base and not scope_used:
+    from .early_continuation import DAY as advance_day, SCOPE as advance_scope
+    borrowed = slot == (advance_day, 'evening') and store.count_usage('request_scope:' + advance_scope)
+    if used == base and not scope_used and not borrowed:
         next_slot = next((slot_at for slot_at in _slots(*grant_window(settings)) if slot_at > now), None)
         if next_slot and listing_limit_now(settings, next_slot) > base:
             for slug in eligible:
@@ -206,6 +208,9 @@ def reservation_periods(store, settings, now, purpose, scope):
         raise BudgetExceeded('Current billing cycle is not independently approved or has expired')
     if purpose not in limits(settings):
         raise BudgetExceeded('Provider request purpose is not approved in this cycle')
+    from .early_continuation import SCOPE, reservation_limit
+    if scope and scope[0] == SCOPE:
+        return [(period(settings, now, purpose), reservation_limit(store, settings, now, purpose, scope))]
     if purpose == 'listing':
         slot = scheduled_slot(now)
         expected = 'multi-discovery:' + slot[0] + ':' + slot[1] if slot else None
