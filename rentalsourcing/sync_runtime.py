@@ -30,8 +30,9 @@ def attempt_count(store,name,identity):return get(store,'sync_operation:'+name+'
 
 
 def operation_counts(store):
+ """Live work only. Use the existing operation-state index without reading archived receipts."""
  state="payload::jsonb->>'state'" if store.pg else "json_extract(payload,'$.state')"
- return dict(store.execute(f"SELECT {state},COUNT(*) FROM settings WHERE {OPERATION_PREDICATE} GROUP BY {state}").fetchall())
+ return dict(store.execute(f"SELECT {state},COUNT(*) FROM settings WHERE {OPERATION_PREDICATE} AND {state} IN ('pending','dead_letter') GROUP BY {state}").fetchall())
 
 
 def operation_rows(store,states=('pending','dead_letter'),prefix='sync_operation:',limit=None):

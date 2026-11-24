@@ -168,3 +168,46 @@ def test_early_approval_cannot_fund_another_endpoint_or_renew(store,official_bou
     for purpose,when in [('rent',clock()),('listing',clock()+dt.timedelta(days=1)),('listing',clock().replace(hour=18))]:
         with pytest.raises(BudgetExceeded):store.reserve_api(cfg,when,purpose=purpose,scope=(early.SCOPE,1))
     assert store.count_usage(cycle_key(cfg,clock()))==15
+
+
+def test_active_operation_counts_use_state_index_and_leave_historical_receipts(store):
+    from rentalsourcing.sync_runtime import operation_counts
+    for index, state in enumerate(['success']*30+['reconciled','dead_letter','pending','pending']):
+        store.save_setting('sync_operation:test:'+str(index),{'state':state,'receipt':{'retained':True}})
+    assert operation_counts(store)=={'dead_letter':1,'pending':2}
+    assert get(store,'sync_operation:test:0')['receipt']['retained']
+
+
+def test_price_evidence_counts_original_observations_once_and_excludes_later_baselines(store,clock):
+    from rentalsourcing.price_sync import enqueue, observation_key
+    from rentalsourcing.page_recovery import page_price_receipts
+    rows=[listing('observed'),listing('not-tracked')]
+    query={'limit':500}
+    stamp=clock().isoformat()
+    put_cache(store,query,0,rows,2,stamp)
+    for row in rows:
+        enqueue(store,row,stamp,stamp,observation_id='source:'+row['id'])
+    enqueue(store,rows[0],stamp,stamp,observation_id='tracked-baseline:observed',historical=True)
+    first=observation_key(rows[0],stamp)
+    store.save_setting(first,{**get(store,first),'synced_at':stamp,'receiver_disposition':'acknowledged'})
+    clock.advance(minutes=10)
+    second=observation_key(rows[1],stamp)
+    store.save_setting(second,{**get(store,second),'synced_at':clock().isoformat(),'receiver_disposition':'untracked'})
+    report=page_price_receipts(store,{'partitions':{UNIFIED:{'query':query}}},
+        {'partition':UNIFIED,'offset_requested':0,'fetched_at':stamp},stamp)
+    assert report['price_observation_count']==2
+    assert report['price_observations_with_recorded_ack_after_slot_close']==1
+    assert {r['disposition']:r['count'] for r in report['price_receipts']}=={'acknowledged':1,'untracked':1}
+
+
+def test_changed_inventory_reports_unexpected_overlap_after_final_offset():
+    from rentalsourcing.partition_discovery import _record_page, traversal_coverage
+    state={'seen_ids':{str(i):'fingerprint' for i in range(500)},'query':{'limit':500},'total':741}
+    page={'offset_before':500,'offset_requested':475,'offset_after':750,'requests':1,'query_complete':True,
+          'fetched_at':HEAD_AT,'records':275,'area_observations':{}}
+    _record_page(state,page,[(str(i),'fingerprint') for i in range(454,729)],750)
+    assert page['query_complete'] and page['continuity_warning'] and page['duplicates']==46
+    assert set(page['continuity_reasons'])=={'provider_total_changed','unexpected_page_overlap','distinct_identities_differ_from_latest_total'}
+    assert page['distinct_identities_observed']==729
+    old_state={**state,'last_page':{**page,'continuity_warning':False},'continuity_warning':False,'continuity_reasons':[]}
+    assert traversal_coverage(old_state)['continuity_warning']
